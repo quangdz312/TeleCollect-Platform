@@ -20,8 +20,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # Database — metadata episode, nhãn demo, tài khoản/vai trò
-    database_url: str = "sqlite:///./data/app.db"
+    # Database — metadata episode, nhãn demo, tài khoản/vai trò.
+    # Driver bất đồng bộ (aiosqlite): backend chạy trên event loop của FastAPI,
+    # driver đồng bộ sẽ chặn loop và làm vòng điều khiển 30 Hz trượt nhịp.
+    database_url: str = "sqlite+aiosqlite:///./data/app.db"
 
     # Storage — artifact nặng của episode (video quan sát, parquet action/state)
     storage_dir: str = "./data/episodes"
