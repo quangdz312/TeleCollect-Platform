@@ -1,0 +1,13 @@
+# Huấn luyện behavior cloning (src/training/) — chỉ cài trên máy/GPU runner.
+# Tách khỏi requirements.txt vì torch nặng vài GB; CI chỉ lint + test API nên
+# không cần, và image runtime cũng không cần để phục vụ teleop.
+#
+#   pip install -r requirements-train.txt
+#
+# Bao gồm cả dependency runtime vì src/training đọc dataset bằng pyarrow/numpy
+# và đánh giá policy bằng chính môi trường mujoco đã dùng lúc thu demo.
+
+-r requirements.txt
+
+torch>=2.5.0
+torchvision>=0.20.0

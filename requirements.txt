@@ -1,3 +1,6 @@
+# Runtime backend — đủ để chạy API, teleop và xử lý dataset.
+# Torch nằm ở requirements-train.txt: nặng, CI chỉ chạy test API nên không cần.
+
 # Core
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
@@ -5,26 +8,28 @@ pydantic>=2.10.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 
-# Simulation (uncomment as needed)
-# mujoco>=3.2.0
+# Simulation
+mujoco>=3.2.0
+numpy>=1.26.0
+scipy>=1.14.0
 
-# Training (uncomment as needed)
-# torch>=2.5.0
-# torchvision>=0.20.0
+# Vision / Video I/O
+opencv-python-headless>=4.10.0
+av>=13.0.0
 
-# Dataset I/O (uncomment as needed)
-# pyarrow>=18.0.0
-# opencv-python-headless>=4.10.0
-# dvc>=3.56.0
+# Database
+sqlalchemy[asyncio]>=2.0.36
+alembic>=1.14.0
+aiosqlite>=0.20.0
 
-# Auth (uncomment as needed)
-# pyjwt>=2.10.0
-# passlib[bcrypt]>=1.7.4
+# Auth
+pyjwt>=2.10.0
+bcrypt>=4.2.0
+python-multipart>=0.0.20
 
-# Database (uncomment as needed)
-# sqlalchemy>=2.0.0
-# alembic>=1.14.0
-# psycopg2-binary>=2.9.0
+# Dataset I/O
+pyarrow>=18.0.0
+pandas>=2.2.0
 
 # Dev tools
 ruff>=0.8.0
