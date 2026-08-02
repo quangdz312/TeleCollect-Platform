@@ -1,8 +1,10 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -41,6 +43,26 @@ class Settings(BaseSettings):
 
     # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
     enable_face_anonymization: bool = True
+
+    def data_dirs(self) -> list[Path]:
+        """Những thư mục ứng dụng cần có sẵn để ghi được dữ liệu.
+
+        Gồm `storage_dir` và — nếu CSDL là SQLite trên đĩa — thư mục chứa file
+        .db. SQLite không tự tạo thư mục cha, còn CSDL qua mạng (PostgreSQL)
+        thì không cần thư mục nào.
+        """
+        dirs = [Path(self.storage_dir)]
+        db_path = make_url(self.database_url).database
+        if self.database_url.startswith("sqlite") and db_path and db_path != ":memory:":
+            dirs.append(Path(db_path).parent)
+        return dirs
+
+    def ensure_data_dirs(self) -> list[Path]:
+        """Tạo sẵn các thư mục ở `data_dirs()`. Idempotent, gọi lúc khởi động."""
+        dirs = self.data_dirs()
+        for path in dirs:
+            path.mkdir(parents=True, exist_ok=True)
+        return dirs
 
 
 @lru_cache

@@ -10,6 +10,7 @@ from src.config import get_settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    settings.ensure_data_dirs()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     yield
     print("Shutting down...")
