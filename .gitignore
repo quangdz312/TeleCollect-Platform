@@ -28,8 +28,11 @@ env/
 .DS_Store
 Thumbs.db
 
-# Data (never commit large data)
-data/
+# Data — chặn payload, GIỮ con trỏ DVC (*.dvc, dvc.lock, .gitignore do DVC sinh)
+/data/episodes/
+/data/runs/
+/data/*.db
+/data/datasets/*/*/
 *.db
 *.sqlite3
 
