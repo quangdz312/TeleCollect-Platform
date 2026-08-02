@@ -29,4 +29,3 @@ jobs:
         run: pytest tests/ -v --tb=short
         env:
           APP_ENV: test
-          OPENAI_API_KEY: test-key
