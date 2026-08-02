@@ -23,7 +23,8 @@ Chi tiết đầy đủ nằm trong các file `.md` được dẫn ở mỗi m�
 - [X] **Tech Stack** — §2.7
 - [X] **Tiêu chí thành công** — §2.8
 
-### 3. Wireframe & UI Flow —
+### 3. Wireframe & UI Flow — [`docs/gate1/ui-flow.md`](docs/gate1/ui-flow.md)
+
 
 - [X] **Luồng người dùng** — sơ đồ màn hình và luồng nghiệp vụ chính, §3.1–3.2
 - [X] **Wireframe** — 8 màn hình, §3.3–3.10
