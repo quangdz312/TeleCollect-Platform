@@ -13,23 +13,32 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_name: str = "AI20K Agent"
+    app_name: str = "TeleCollect"
     app_env: Literal["development", "production", "test"] = "development"
     app_port: int = Field(default=8000, ge=1, le=65535)
     app_host: str = "0.0.0.0"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     cors_origins: str = "http://localhost:3000"
 
-    # LLM
-    openai_api_key: str = ""
-    model_name: str = "gpt-4o-mini"
-    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-
-    # Database
+    # Database — metadata episode, nhãn demo, tài khoản/vai trò
     database_url: str = "sqlite:///./data/app.db"
 
-    # Vector Store
-    chroma_persist_dir: str = "./data/chroma"
+    # Storage — artifact nặng của episode (video quan sát, parquet action/state)
+    storage_dir: str = "./data/episodes"
+
+    # Teleop
+    control_hz: int = Field(default=30, ge=1, le=1000)
+    """Tần số vòng điều khiển (Hz) — chu kỳ gửi action và lấy mẫu observation."""
+
+    max_concurrent_sessions: int = Field(default=4, ge=1, le=64)
+    """Số phiên teleop chạy đồng thời tối đa; mỗi phiên chiếm một instance sim."""
+
+    # Security
+    jwt_secret: str = ""
+    """Khoá ký JWT cho hai vai trò operator / reviewer. Bắt buộc đặt ở production."""
+
+    # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
+    enable_face_anonymization: bool = True
 
 
 @lru_cache

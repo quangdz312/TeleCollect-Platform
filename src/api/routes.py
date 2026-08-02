@@ -1,25 +1,18 @@
-from fastapi import APIRouter, HTTPException
+"""Router gốc — gom các router tài nguyên lại thành một.
 
-from src.agents.graph import agent
-from src.models.schemas import ChatRequest, ChatResponse
+`src/main.py` include router này dưới prefix `/api/v1`. Bản thân file không
+định nghĩa endpoint nào; mọi endpoint sống trong module tài nguyên tương ứng.
+"""
+
+from fastapi import APIRouter
+
+from src.api import auth, datasets, demos, tasks, teleop, training
 
 router = APIRouter()
 
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Chat với AI agent."""
-    try:
-        result = await agent.ainvoke({"query": request.message})
-        return ChatResponse(
-            response=result.get("response", ""),
-            analysis=result.get("analysis", ""),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/status")
-async def agent_status():
-    """Kiểm tra trạng thái agent."""
-    return {"status": "ready", "agent": "LangGraph Agent v1.0"}
+router.include_router(auth.router)
+router.include_router(tasks.router)
+router.include_router(teleop.router)
+router.include_router(demos.router)
+router.include_router(datasets.router)
+router.include_router(training.router)

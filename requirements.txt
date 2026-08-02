@@ -5,18 +5,26 @@ pydantic>=2.10.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 
-# AI / LangChain
-langchain>=0.3.0
-langchain-openai>=0.3.0
-langgraph>=0.2.0
+# Simulation (uncomment as needed)
+# mujoco>=3.2.0
+
+# Training (uncomment as needed)
+# torch>=2.5.0
+# torchvision>=0.20.0
+
+# Dataset I/O (uncomment as needed)
+# pyarrow>=18.0.0
+# opencv-python-headless>=4.10.0
+# dvc>=3.56.0
+
+# Auth (uncomment as needed)
+# pyjwt>=2.10.0
+# passlib[bcrypt]>=1.7.4
 
 # Database (uncomment as needed)
 # sqlalchemy>=2.0.0
 # alembic>=1.14.0
 # psycopg2-binary>=2.9.0
-
-# Vector Store (uncomment as needed)
-# chromadb>=0.5.0
 
 # Dev tools
 ruff>=0.8.0
