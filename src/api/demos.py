@@ -406,7 +406,8 @@ def _iter_file_range(path: Path, start: int, length: int) -> Iterator[bytes]:
         f.close()
 
 
-@router.api_route("/{demo_id}/playback", methods=["GET", "HEAD"])
+@router.get("/{demo_id}/playback", operation_id="playback_demo")
+@router.head("/{demo_id}/playback", operation_id="playback_demo_head")
 async def playback_demo(
     demo_id: str,
     request: Request,

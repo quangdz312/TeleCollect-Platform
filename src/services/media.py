@@ -7,6 +7,7 @@ Trách nhiệm: nơi duy nhất gọi subprocess ffprobe/ffmpeg. Mọi lệnh c�
 import asyncio
 import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,24 +76,20 @@ async def probe_video(path: Path) -> VideoProbe:
         "-show_streams",
         str(path),
     ]
-    proc: asyncio.subprocess.Process | None = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, timeout=FFPROBE_TIMEOUT_S
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=FFPROBE_TIMEOUT_S)
-    except TimeoutError as exc:
-        if proc is not None:
-            proc.kill()
+    except subprocess.TimeoutExpired as exc:
         raise MediaProbeError("ffprobe timeout") from exc
     except OSError as exc:
         raise MediaProbeError(f"ffprobe không chạy được: {exc}") from exc
 
-    if proc.returncode != 0:
-        raise MediaProbeError(f"ffprobe lỗi: {stderr.decode(errors='ignore')[:500]}")
+    if result.returncode != 0:
+        raise MediaProbeError(f"ffprobe lỗi: {result.stderr.decode(errors='ignore')[:500]}")
 
     try:
-        data = json.loads(stdout)
+        data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise MediaProbeError("ffprobe trả output không phải JSON hợp lệ") from exc
 
@@ -141,24 +138,22 @@ async def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
         "1",
         str(output_path),
     ]
-    proc: asyncio.subprocess.Process | None = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, timeout=FFMPEG_TIMEOUT_S
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=FFMPEG_TIMEOUT_S)
-    except TimeoutError:
-        if proc is not None:
-            proc.kill()
+    except subprocess.TimeoutExpired:
         logger.warning("Sinh thumbnail timeout: %s", video_path)
         return False
     except OSError as exc:
         logger.warning("Sinh thumbnail thất bại (%s): %s", video_path, exc)
         return False
 
-    if proc.returncode != 0 or not output_path.exists():
+    if result.returncode != 0 or not output_path.exists():
         logger.warning(
-            "Sinh thumbnail thất bại (%s): %s", video_path, stderr.decode(errors="ignore")[:500]
+            "Sinh thumbnail thất bại (%s): %s",
+            video_path,
+            result.stderr.decode(errors="ignore")[:500],
         )
         return False
     return True
