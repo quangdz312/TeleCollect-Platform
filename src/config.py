@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     # driver đồng bộ sẽ chặn loop và làm vòng điều khiển 30 Hz trượt nhịp.
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
 
-    # Storage — artifact nặng của episode (video quan sát, parquet action/state)
-    storage_dir: str = "./data/episodes"
+    # Storage — artifact nặng của episode (video quan sát, parquet action/state).
+    # Cấu trúc con cố định: <storage_dir>/episodes/<id>/... và <storage_dir>/tmp/<id>/
+    # (thư mục tạm lúc validate upload, xem src/services/storage.py).
+    storage_dir: str = "./data"
+
+    max_upload_mb: int = Field(default=200, ge=1)
+    """Giới hạn dung lượng mỗi file upload (front/wrist/trajectory), tính bằng MB."""
 
     # Teleop
     control_hz: int = Field(default=30, ge=1, le=1000)
@@ -39,7 +44,13 @@ class Settings(BaseSettings):
 
     # Security
     jwt_secret: str = ""
-    """Khoá ký JWT cho hai vai trò operator / reviewer. Bắt buộc đặt ở production."""
+    """Khoá ký JWT cho ba vai trò operator / reviewer / admin. Bắt buộc đặt ở production."""
+
+    access_token_expire_minutes: int = Field(default=30, ge=1)
+    refresh_token_expire_days: int = Field(default=7, ge=1)
+
+    allow_self_register: bool = True
+    """Bật/tắt POST /auth/register. Register luôn tạo role operator, không bao giờ tạo admin."""
 
     # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
     enable_face_anonymization: bool = True

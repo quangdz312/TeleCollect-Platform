@@ -6,11 +6,12 @@
 
 from fastapi import APIRouter
 
-from src.api import auth, datasets, demos, tasks, teleop, training
+from src.api import auth, datasets, demos, tasks, teleop, training, users
 
 router = APIRouter()
 
 router.include_router(auth.router)
+router.include_router(users.router)
 router.include_router(tasks.router)
 router.include_router(teleop.router)
 router.include_router(demos.router)

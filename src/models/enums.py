@@ -4,13 +4,24 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
-    """Hai vai trò tối thiểu theo tiêu chí đánh giá."""
+    """Ba vai trò, có kế thừa quyền: admin ⊇ reviewer ⊇ operator."""
 
     OPERATOR = "operator"
-    """Thu demo: mở phiên teleop, ghi, gắn nhãn bản ghi của mình."""
+    """Thu demo: upload, ghi, gắn nhãn bản ghi của mình."""
 
     REVIEWER = "reviewer"
-    """Duyệt demo, gom dataset, chạy huấn luyện."""
+    """Mọi quyền operator + duyệt/mở lại demo của bất kỳ ai, tạo/xoá dataset."""
+
+    ADMIN = "admin"
+    """Mọi quyền reviewer + CRUD user + CRUD task."""
+
+
+class DatasetStatus(StrEnum):
+    """Trạng thái đóng gói zip của một dataset (chạy nền qua BackgroundTasks)."""
+
+    BUILDING = "building"
+    READY = "ready"
+    FAILED = "failed"
 
 
 class DemoStatus(StrEnum):
