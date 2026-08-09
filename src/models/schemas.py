@@ -12,7 +12,7 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, Field
 
 from src.models.enums import (
-    DatasetFormat,
+    DatasetStatus,
     DemoOutcome,
     DemoStatus,
     JobStatus,
@@ -276,15 +276,50 @@ class DemoSummaryResponse(BaseModel):
     total_size_bytes: int
 
 
+DATASET_NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{2,63}$"
+"""`name` vừa là thư mục gốc trong file zip vừa nằm trong tên file zip trên
+đĩa (`<name>.zip`) — bắt buộc chữ thường, số, gạch dưới/gạch ngang, không bắt
+đầu bằng ký tự đặc biệt (tránh mọi khả năng path traversal qua tên)."""
+
+
+class DatasetCreateRequest(BaseModel):
+    """Yêu cầu đóng gói một dataset mới từ các demo `approved`."""
+
+    name: str = Field(..., pattern=DATASET_NAME_PATTERN)
+    task_names: list[str] = Field(
+        default_factory=list, description="Rỗng = mọi task"
+    )
+    include_failures: bool = Field(
+        default=False, description="True: gom cả demo outcome=failure, không chỉ success"
+    )
+    overwrite: bool = Field(
+        default=False, description="True: xoá dataset cùng tên (record + zip cũ) rồi tạo lại"
+    )
+
+
 class DatasetResponse(BaseModel):
-    """Một dataset đã đóng băng từ các demo đã duyệt."""
+    """Một dataset đã đóng băng từ các demo đã duyệt — snapshot tại thời
+    điểm tạo, KHÔNG cập nhật khi demo nguồn đổi trạng thái sau đó."""
 
     id: str
     name: str
     task_names: list[str]
+    include_failures: bool
+    status: DatasetStatus
     num_episodes: int
-    format: DatasetFormat
-    dvc_tag: str | None = None
+    num_frames: int
+    size_bytes: int | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DatasetDetailResponse(DatasetResponse):
+    """Chi tiết một dataset — thêm lỗi build (nếu `status=failed`) và danh
+    sách demo đã đóng băng vào dataset."""
+
+    error_message: str | None = None
+    episodes: list[DemoResponse] = Field(default_factory=list)
 
 
 class TrainingJobResponse(BaseModel):

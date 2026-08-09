@@ -18,6 +18,11 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
+
+# Cho phép chạy cả `python scripts/create_admin.py` lẫn `python -m scripts.create_admin`
+# — cách đầu không tự thêm thư mục gốc repo vào sys.path nên `import src.*` sẽ vỡ.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 from sqlalchemy import select

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import create_async_engine
+
 from src.config import Settings
 
 
@@ -28,6 +30,22 @@ def test_ensure_data_dirs_is_idempotent(tmp_path: Path):
     settings.ensure_data_dirs()
 
     assert (tmp_path / "episodes").is_dir()
+
+
+def test_real_settings_load_and_database_driver_is_installed():
+    """Smoke test: `Settings()` không truyền `_env_file=None` đọc `.env` THẬT
+    (giống hệt cách `src.config.get_settings()` chạy lúc server khởi động).
+
+    Toàn bộ 160+ test khác dùng fixture `test_engine` với DB URL hardcode
+    trong `conftest.py`, không bao giờ đụng tới `database_url` từ `.env` —
+    đó là lý do cả bộ test pass trong khi server thật chết vì driver DB
+    (vd asyncpg cho Postgres) chưa được cài. Test này bắt lỗi kiểu đó: tạo
+    engine thật từ `settings.database_url` — sẽ raise ModuleNotFoundError
+    ngay lập tức (trước khi connect) nếu thiếu driver.
+    """
+    settings = Settings()
+    engine = create_async_engine(settings.database_url)
+    engine.sync_engine.dispose()
 
 
 def test_data_dirs_skips_non_sqlite_database(tmp_path: Path):

@@ -140,19 +140,21 @@ async def current_user_allow_query_token(
     header_token: str | None = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """Biến thể của `current_user` CHỈ dùng cho 2 endpoint media
-    (`GET /demos/{id}/playback`, `GET /demos/{id}/thumbnail`).
+    """Biến thể của `current_user` CHỈ dùng cho các endpoint tải file trực
+    tiếp qua URL (`GET /demos/{id}/playback`, `GET /demos/{id}/thumbnail`,
+    `GET /datasets/{id}/download`).
 
-    Thẻ `<video src="...">`/`<img src="...">` của trình duyệt KHÔNG gửi được
-    header `Authorization`, nên nếu chỉ nhận Bearer token thì frontend buộc
-    phải fetch nguyên file thành blob rồi mới phát — mất luôn khả năng tua vì
-    phải tải hết mới xem được. Endpoint media vì vậy chấp nhận thêm token qua
-    query param `?token=`.
+    Thẻ `<video src="...">`/`<img src="...">` của trình duyệt, hoặc một link
+    tải file trực tiếp, KHÔNG gửi được header `Authorization`, nên nếu chỉ
+    nhận Bearer token thì frontend buộc phải fetch nguyên file thành blob rồi
+    mới dùng — với video mất luôn khả năng tua, với dataset zip mất luôn khả
+    năng tải qua trình duyệt/thanh địa chỉ. Các endpoint này vì vậy chấp nhận
+    thêm token qua query param `?token=`.
 
     ĐÁNH ĐỔI CÓ CHỦ Ý: token nằm trong URL sẽ lọt vào access log và lịch sử
     trình duyệt. Đây là quyết định chấp nhận được ở bản Core; giai đoạn sau
     nên đổi sang signed URL ngắn hạn. KHÔNG dùng dependency này cho bất kỳ
-    endpoint nào khác ngoài 2 endpoint media kể trên.
+    endpoint nào khác ngoài các endpoint tải file kể trên.
     """
     resolved_token = header_token or token
     if not resolved_token:

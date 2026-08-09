@@ -16,6 +16,12 @@ import asyncio
 import random
 import shutil
 import subprocess
+import sys
+from pathlib import Path
+
+# Cho phép chạy cả `python scripts/seed_demos.py` lẫn `python -m scripts.seed_demos`
+# — cách đầu không tự thêm thư mục gốc repo vào sys.path nên `import src.*` sẽ vỡ.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 

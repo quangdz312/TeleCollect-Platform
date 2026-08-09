@@ -12,6 +12,12 @@ nhân bản. Chạy lại nhiều lần an toàn.
 """
 
 import asyncio
+import sys
+from pathlib import Path
+
+# Cho phép chạy cả `python scripts/seed_tasks.py` lẫn `python -m scripts.seed_tasks`
+# — cách đầu không tự thêm thư mục gốc repo vào sys.path nên `import src.*` sẽ vỡ.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 

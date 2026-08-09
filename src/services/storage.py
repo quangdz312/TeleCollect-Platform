@@ -10,6 +10,7 @@ Bố cục cố định (đừng đổi — cấu trúc zip ở dataset phụ th
     <storage_dir>/episodes/<episode_id>/trajectory.json  (optional)
     <storage_dir>/episodes/<episode_id>/thumb.jpg         (optional)
     <storage_dir>/tmp/<tmp_id>/...                        (thư mục tạm lúc validate upload)
+    <storage_dir>/datasets/<dataset_id>.zip                (Bước 4 — dataset đã đóng gói)
 
 `<episode_id>` là UUID — yêu cầu "tên file dùng UUID" trong plan được thoả
 bằng việc THƯ MỤC là UUID, tên file bên trong cố định (`front.mp4`...) để
@@ -34,6 +35,18 @@ def episodes_root() -> Path:
 
 def tmp_root() -> Path:
     return Path(get_settings().storage_dir) / "tmp"
+
+
+def datasets_root() -> Path:
+    return Path(get_settings().storage_dir) / "datasets"
+
+
+def dataset_zip_path(dataset_id: str) -> Path:
+    """`<storage_dir>/datasets/<dataset_id>.zip` — `dataset_id` là UUID sinh
+    nội bộ (không phải input người dùng), không cần resolve chống traversal
+    như `episode_dir`."""
+    datasets_root().mkdir(parents=True, exist_ok=True)
+    return datasets_root() / f"{dataset_id}.zip"
 
 
 def _resolve_within(base: Path, name: str) -> Path:

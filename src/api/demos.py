@@ -62,12 +62,10 @@ import json
 import logging
 import math
 import shutil
-from email.utils import formatdate
 from pathlib import Path
-from typing import Iterator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,14 +84,12 @@ from src.models.schemas import (
 )
 from src.services import demo_rules, storage
 from src.services.media import MediaProbeError, generate_thumbnail, has_mp4_magic_bytes, probe_video
-from src.services.ranges import RangeNotSatisfiableError, parse_range_header
 from src.services.security import current_user, current_user_allow_query_token, require_min_role
+from src.services.streaming import stream_file_range
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/demos", tags=["demos"])
-
-STREAM_CHUNK_SIZE = 1024 * 1024  # 1MB — đọc đúng số byte trong range, không đọc cả file.
 
 CAMERA_FILENAMES = {"front": storage.FRONT_FILENAME, "wrist": storage.WRIST_FILENAME}
 """Ánh xạ tường minh camera -> tên file cố định — tránh mọi khả năng ghép
@@ -381,31 +377,6 @@ async def get_demo(
     )
 
 
-def _iter_file_range(path: Path, start: int, length: int) -> Iterator[bytes]:
-    """Generator đọc chunk 1MB, chỉ đọc đúng `length` byte bắt đầu từ `start`.
-
-    Mở file BÊN TRONG generator (không mở trước rồi truyền handle vào) và
-    dùng try/finally để handle LUÔN được đóng — kể cả khi client ngắt kết nối
-    giữa chừng (Starlette gọi `.close()` trên generator, ném `GeneratorExit`
-    vào đúng điểm `yield` đang treo, `finally` vẫn chạy). Trên Windows, rò rỉ
-    handle sẽ khiến `shutil.rmtree`/`DELETE /demos/{id}` (Bước 3c) ném
-    `PermissionError` — lỗi này KHÔNG xảy ra trên Linux nên rất dễ lọt qua CI
-    chạy Linux rồi vỡ khi vận hành thật trên Windows.
-    """
-    f = open(path, "rb")
-    try:
-        f.seek(start)
-        remaining = length
-        while remaining > 0:
-            chunk = f.read(min(STREAM_CHUNK_SIZE, remaining))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            yield chunk
-    finally:
-        f.close()
-
-
 @router.get("/{demo_id}/playback", operation_id="playback_demo")
 @router.head("/{demo_id}/playback", operation_id="playback_demo_head")
 async def playback_demo(
@@ -425,54 +396,7 @@ async def playback_demo(
     if not video_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy file video")
 
-    file_stat = video_path.stat()
-    file_size = file_stat.st_size
-    base_headers = {
-        "Accept-Ranges": "bytes",
-        "Last-Modified": formatdate(file_stat.st_mtime, usegmt=True),
-        "Cache-Control": "private, max-age=3600",
-    }
-
-    try:
-        resolved = parse_range_header(request.headers.get("range"), file_size)
-    except RangeNotSatisfiableError:
-        return Response(
-            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
-            headers={**base_headers, "Content-Range": f"bytes */{file_size}"},
-        )
-
-    if request.method == "HEAD":
-        if resolved is not None:
-            head_headers = {
-                **base_headers,
-                "Content-Range": resolved.content_range_header,
-                "Content-Length": str(resolved.length),
-            }
-            return Response(status_code=status.HTTP_206_PARTIAL_CONTENT, headers=head_headers)
-        return Response(
-            status_code=status.HTTP_200_OK,
-            headers={**base_headers, "Content-Length": str(file_size)},
-            media_type="video/mp4",
-        )
-
-    if resolved is None:
-        return StreamingResponse(
-            _iter_file_range(video_path, 0, file_size),
-            status_code=status.HTTP_200_OK,
-            media_type="video/mp4",
-            headers={**base_headers, "Content-Length": str(file_size)},
-        )
-
-    return StreamingResponse(
-        _iter_file_range(video_path, resolved.start, resolved.length),
-        status_code=status.HTTP_206_PARTIAL_CONTENT,
-        media_type="video/mp4",
-        headers={
-            **base_headers,
-            "Content-Range": resolved.content_range_header,
-            "Content-Length": str(resolved.length),
-        },
-    )
+    return stream_file_range(video_path, request, media_type="video/mp4")
 
 
 @router.get("/{demo_id}/thumbnail")

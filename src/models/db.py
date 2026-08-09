@@ -112,6 +112,9 @@ class Dataset(Base):
     status: Mapped[DatasetStatus] = mapped_column(String(20), nullable=False, default=DatasetStatus.BUILDING)
     zip_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    num_episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    num_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     episode_links: Mapped[list["DatasetEpisode"]] = relationship(
