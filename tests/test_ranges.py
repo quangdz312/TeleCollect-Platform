@@ -101,3 +101,33 @@ def test_single_byte_range():
     assert r.start == 0
     assert r.end == 0
     assert r.length == 1
+
+
+# --- total <= 0 -> luôn 416, bất kể header --------------------------------------
+
+
+def test_total_zero_no_header_raises_416():
+    with pytest.raises(RangeNotSatisfiableError) as exc_info:
+        parse_range_header(None, 0)
+    assert exc_info.value.total == 0
+
+
+def test_total_zero_simple_range_raises_416():
+    with pytest.raises(RangeNotSatisfiableError):
+        parse_range_header("bytes=0-1023", 0)
+
+
+def test_total_zero_open_ended_range_raises_416():
+    with pytest.raises(RangeNotSatisfiableError):
+        parse_range_header("bytes=500-", 0)
+
+
+def test_total_zero_suffix_range_raises_416():
+    """Bug đã sửa: trước đây 'bytes=-500' với total=0 trả 206 kèm end=-1."""
+    with pytest.raises(RangeNotSatisfiableError):
+        parse_range_header("bytes=-500", 0)
+
+
+def test_total_negative_raises_416():
+    with pytest.raises(RangeNotSatisfiableError):
+        parse_range_header(None, -1)

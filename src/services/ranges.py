@@ -45,8 +45,12 @@ def parse_range_header(header: str | None, total: int) -> ResolvedRange | None:
     hoặc multi-range không hỗ trợ). Raise `RangeNotSatisfiableError` nếu
     range hợp lệ về cú pháp nhưng nằm ngoài file.
 
-    `total` là kích thước file tính bằng byte, phải > 0.
+    `total` là kích thước file tính bằng byte, phải > 0 — `total <= 0` luôn
+    raise `RangeNotSatisfiableError` (416), kể cả khi không có header `Range`,
+    vì không có byte nào để phục vụ.
     """
+    if total <= 0:
+        raise RangeNotSatisfiableError(total)
     if not header:
         return None
     if not header.startswith("bytes="):

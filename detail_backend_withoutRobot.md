@@ -1,6 +1,6 @@
 # Backend TeleCollect — Tài liệu chi tiết (bản Core, không có robot)
 
-> Cập nhật: 2026-08-09 · Test hiện tại: **185 pass** (`python -m pytest -q`)
+> Cập nhật: 2026-08-10 · Test hiện tại: **198 pass** (`python -m pytest -q`)
 > Phạm vi: bản Core theo `plan_backend_core.md` — Auth/Users, Tasks, Demos (upload/xem/tua/trim/nhãn/duyệt), Datasets (đóng gói zip/tải về). Không có Teleoperation, Training/Eval, Export LeRobot/RLDS thật.
 
 ---
@@ -14,7 +14,7 @@ TeleCollect là nền tảng thu thập dữ liệu demonstration (video thao t�
 3. **Demos** — upload video (mp4 + optional wrist/trajectory), xem lại có tua (HTTP Range), trim, gắn nhãn success/failure, quy trình duyệt human-in-the-loop.
 4. **Datasets** — gom demo đã `approved` thành một file zip bất biến (snapshot), đóng gói nền, tải về có resume.
 
-Trạng thái: **chạy được thật**, không phải khung rỗng — 185 test pass, đã tự kiểm chứng bằng chạy server + upload/tải thật (xem mục 8 về các bug từng gặp khi chạy thật mà test không bắt được). Phần robot thật (Teleop/Training/Export) là khung rỗng có chủ đích, xem mục 11.
+Trạng thái: **chạy được thật**, không phải khung rỗng — 198 test pass, đã tự kiểm chứng bằng chạy server + upload/tải thật (xem mục 8 về các bug từng gặp khi chạy thật mà test không bắt được). Phần robot thật (Teleop/Training/Export) là khung rỗng có chủ đích, xem mục 11.
 
 ---
 
@@ -413,15 +413,15 @@ Zip ghi ra file `.zip.tmp` trước, `Path.replace()` sang tên thật **sau khi
 
 ## 9. Kiểm thử
 
-**Tổng: 185 test** (số chính xác lấy từ `python -m pytest --collect-only -q`, tính cả biến thể `@pytest.mark.parametrize`), phân bố theo file:
+**Tổng: 198 test** (số chính xác lấy từ `python -m pytest --collect-only -q`, tính cả biến thể `@pytest.mark.parametrize`), phân bố theo file:
 
 | File | Số test | Trọng tâm |
 | --- | --- | --- |
-| `tests/test_demo_rules.py` | 28 | Unit thuần Python — transition rules, không cần DB/HTTP. Số cao hơn số hàm `def test_*` vì 6 hàm dùng `@pytest.mark.parametrize` nhân đôi theo `start_status`. |
-| `tests/test_demos_review.py` | 22 | HTTP — review/reopen/label/trim qua API |
+| `tests/test_demo_rules.py` | 31 | Unit thuần Python — transition rules + `ensure_not_self_review`, không cần DB/HTTP. Số cao hơn số hàm `def test_*` vì nhiều hàm dùng `@pytest.mark.parametrize` nhân đôi theo `start_status`. |
+| `tests/test_demos_review.py` | 27 | HTTP — review/reopen/label/trim qua API, kể cả chặn tự duyệt + `allow_self_review` |
+| `tests/test_ranges.py` | 21 | Unit thuần Python — parse Range header, mọi case RFC 7233 kể cả `total<=0` |
 | `tests/test_auth.py` | 18 | HTTP — register/login/refresh/me/đổi mật khẩu |
 | `tests/test_datasets.py` | 18 | HTTP — toàn bộ luồng dataset, kể cả mở zip thật |
-| `tests/test_ranges.py` | 16 | Unit thuần Python — parse Range header, mọi case RFC 7233 |
 | `tests/test_tasks.py` | 16 | HTTP — CRUD task + stats |
 | `tests/test_demos_playback.py` | 13 | HTTP — Range trên video thật, HEAD, xoá file sau stream |
 | `tests/test_users.py` | 13 | HTTP — CRUD user, self-lockout guard |
@@ -431,7 +431,7 @@ Zip ghi ra file `.zip.tmp` trước, `Path.replace()` sang tên thật **sau khi
 | `tests/test_media.py` | 5 | Unit — ffprobe/ffmpeg, kể cả chạy trong `SelectorEventLoop` |
 | `tests/test_config.py` | 4 | Unit — `Settings`, smoke test driver DB thật |
 | `tests/test_api/test_routes.py` | 2 | `/health`, quét trùng `operationId` toàn spec |
-| **Tổng** | **185** | |
+| **Tổng** | **198** | |
 
 ### Chiến lược
 
@@ -547,5 +547,6 @@ Cả hai đều là khoá ngoại được nhiều bảng khác tham chiếu (`e
 | Chưa có audit log cho thao tác nhạy cảm (xoá demo/dataset, đổi role, vô hiệu hoá user) | Không truy vết được ai đã xoá gì/đổi quyền gì và khi nào — khó điều tra khi có sự cố hoặc lạm quyền. | Thêm bảng `audit_log` (actor, action, target, timestamp) hoặc tối thiểu structured logging cho các endpoint DELETE/PATCH role-sensitive. | Trung bình |
 | Review đồng thời: last-write-wins, không phát hiện xung đột (xem mục 12) | Hai reviewer duyệt cùng lúc, người sau ghi đè quyết định của người trước mà không có cảnh báo. | Thêm optimistic locking (cột `version`) hoặc kiểm tra `reviewed_at` chưa đổi trước khi ghi, trả `409` nếu phát hiện đã bị người khác duyệt trước. | Thấp — rủi ro thấp ở quy mô nhóm nhỏ hiện tại |
 | `Task` chưa có soft delete (`is_active`) | Không thể "ẩn" một task khỏi danh mục mà vẫn giữ dữ liệu demo cũ tham chiếu tới nó — chỉ có thể sửa mô tả, không xoá được. | Thêm cột `Task.is_active`, lọc mặc định trong `GET /tasks`, cho phép admin bật/tắt thay vì xoá. | Thấp |
-| `scripts/seed_demos.py` sinh demo `status=approved`/`rejected` nhưng không gán `reviewer_id`/`reviewed_at` | Dữ liệu mẫu mâu thuẫn với bất biến thật của hệ thống — mọi demo `approved`/`rejected` tạo qua `POST /demos/{id}/review` luôn có `reviewer_id`+`reviewed_at`, nhưng demo seed thì không. Ai viết code/test dựa vào giả định "approved luôn có reviewer_id" mà test bằng dữ liệu seed sẽ bị sai lệch. | Sửa `seed_demos.py`: khi random ra `status` là `approved`/`rejected`, gán thêm `reviewer_id` (chọn một user reviewer/admin có sẵn) và `reviewed_at`. | Trung bình — ảnh hưởng tới độ tin cậy của dữ liệu demo dùng để test tay |
 | Hook `.git/hooks/pre-push` (nộp AI log) không chạy được trên Windows | Phải push kèm `--no-verify`, bỏ qua luôn bước nộp log — không tự động hoá được yêu cầu nộp AI log của môn học. | Debug script `scripts/_pyrun.sh`/`log_antigravity.py`/`submit_log.py` trên môi trường Windows Git Bash thật, hoặc viết lại hook bằng `_pyrun.cmd` cho cmd.exe thay vì chỉ bash. | Trung bình — không ảnh hưởng chức năng backend, nhưng ảnh hưởng compliance của môn học |
+| CI trigger trước đây bỏ sót nhánh feature nên chưa từng chạy — đã sửa | Nhiều commit trước đó "xanh" trên giao diện chỉ vì CI không chạy, không phải vì test pass thật. Bài học: CI không chạy đồng nghĩa test không tồn tại. | Đã sửa trigger workflow để chạy trên nhánh feature; xác minh thủ công bằng `docker build` thật (xem lịch sử review) vì org hết hạn mức Actions. | Đã xử lý phần trigger |
+| CI hiện không chạy được do org hết hạn mức GitHub Actions | Không có xác nhận tự động từ CI cho các commit gần đây — không phải lỗi code. | Đang chờ admin org nâng hạn mức/khôi phục Actions; tạm thời xác minh thủ công (build Docker, chạy pytest/ruff/mypy local). | Cao — chặn xác nhận CI, không chặn merge nếu đã verify thủ công |

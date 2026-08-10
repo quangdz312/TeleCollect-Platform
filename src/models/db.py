@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, event
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -83,7 +83,7 @@ class Episode(Base):
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)
     num_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
-    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     trim_start_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end_s: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -111,7 +111,7 @@ class Dataset(Base):
     include_failures: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[DatasetStatus] = mapped_column(String(20), nullable=False, default=DatasetStatus.BUILDING)
     zip_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     num_episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     num_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

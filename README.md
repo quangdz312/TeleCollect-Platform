@@ -94,6 +94,29 @@ rm -rf data/
 # chạy lại server, rồi chạy lại 3 script seed ở trên
 ```
 
+Ví dụ gần đây: đổi `Episode.size_bytes`/`Dataset.size_bytes` từ `Integer` sang `BigInteger`
+(tránh tràn số khi dataset >2GB trên PostgreSQL) — kéo code mới về mà DB SQLite cũ vẫn còn thì
+phải `rm -rf data/` rồi seed lại như trên, không tự động migrate.
+
+### Chuẩn bị demo trực tiếp (test tay luồng review)
+
+Từ khi chặn tự duyệt (`ensure_not_self_review` — xem `detail_backend_withoutRobot.md` §6.3),
+luồng demo → review cần **HAI tài khoản khác nhau**: một tài khoản upload demo (operator), một
+tài khoản khác duyệt (reviewer/admin). Dùng tài khoản admin có sẵn (`create_admin`) để tạo thêm
+một user role `reviewer`:
+
+```bash
+TOKEN=$(curl -s -X POST -d "username=admin&password=Admin12345" \
+  http://localhost:8000/api/v1/auth/login | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"username":"reviewer1","password":"...","display_name":"Reviewer 1","role":"reviewer"}' \
+  http://localhost:8000/api/v1/users
+```
+
+Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh, không cần tài khoản thứ hai),
+đặt `ALLOW_SELF_REVIEW=true` trong `.env` — mặc định `false`.
+
 ### Lưu ý
 
 - Luôn dùng `python -m uvicorn`, `python -m pytest`, `python -m scripts.xxx` — nếu máy có
