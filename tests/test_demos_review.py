@@ -1,5 +1,6 @@
 import pytest
 
+from src.config import get_settings
 from src.models.db import Dataset, DatasetEpisode, Episode, Task, User
 from src.models.enums import DemoOutcome, DemoStatus, UserRole
 from src.services import storage
@@ -168,6 +169,74 @@ async def test_operator_cannot_reopen(client, db_session):
 
     resp = await client.post(f"{API}/{demo.id}/reopen", headers=_auth_headers(owner))
     assert resp.status_code == 403
+
+
+# --- chặn tự duyệt (self-review) --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_self_approve_own_demo_returns_403(client, db_session):
+    task = await _create_task(db_session)
+    reviewer = await _create_user(db_session, "rev_self1", UserRole.REVIEWER)
+    demo = await _create_episode(db_session, task.name, reviewer.id, status=DemoStatus.RECORDED)
+
+    resp = await client.post(
+        f"{API}/{demo.id}/review", json={"decision": "approve"}, headers=_auth_headers(reviewer)
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reviewer_approve_demo_of_other_reviewer_returns_200(client, db_session):
+    task = await _create_task(db_session)
+    uploader = await _create_user(db_session, "rev_self2", UserRole.REVIEWER)
+    approver = await _create_user(db_session, "rev_self3", UserRole.REVIEWER)
+    demo = await _create_episode(db_session, task.name, uploader.id, status=DemoStatus.RECORDED)
+
+    resp = await client.post(
+        f"{API}/{demo.id}/review", json={"decision": "approve"}, headers=_auth_headers(approver)
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reviewer_self_reject_own_demo_returns_403(client, db_session):
+    task = await _create_task(db_session)
+    reviewer = await _create_user(db_session, "rev_self4", UserRole.REVIEWER)
+    demo = await _create_episode(db_session, task.name, reviewer.id, status=DemoStatus.RECORDED)
+
+    resp = await client.post(
+        f"{API}/{demo.id}/review", json={"decision": "reject"}, headers=_auth_headers(reviewer)
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reviewer_self_approve_allowed_when_flag_enabled(client, db_session, monkeypatch):
+    monkeypatch.setattr(get_settings(), "allow_self_review", True)
+    task = await _create_task(db_session)
+    reviewer = await _create_user(db_session, "rev_self5", UserRole.REVIEWER)
+    demo = await _create_episode(db_session, task.name, reviewer.id, status=DemoStatus.RECORDED)
+
+    resp = await client.post(
+        f"{API}/{demo.id}/review", json={"decision": "approve"}, headers=_auth_headers(reviewer)
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reviewer_self_reopen_own_demo_still_allowed(client, db_session):
+    """reopen KHÔNG chặn tự thao tác — chỉ đưa demo về trạng thái trước."""
+    task = await _create_task(db_session)
+    reviewer = await _create_user(db_session, "rev_self6", UserRole.REVIEWER)
+    demo = await _create_episode(
+        db_session, task.name, reviewer.id, status=DemoStatus.APPROVED, outcome=DemoOutcome.SUCCESS
+    )
+    demo.reviewer_id = reviewer.id
+    await db_session.commit()
+
+    resp = await client.post(f"{API}/{demo.id}/reopen", headers=_auth_headers(reviewer))
+    assert resp.status_code == 200
 
 
 # --- transitions qua HTTP --------------------------------------------------------

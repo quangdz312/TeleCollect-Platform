@@ -9,6 +9,7 @@ from src.services.demo_rules import (
     apply_review,
     apply_trim,
     ensure_can_modify,
+    ensure_not_self_review,
     ensure_status_in,
 )
 
@@ -55,6 +56,31 @@ def test_admin_can_modify_demo_of_others():
     demo = _episode(DemoStatus.RECORDED)
     admin = _user("admin1", UserRole.ADMIN)
     ensure_can_modify(demo, admin)  # không raise
+
+
+# --- ensure_not_self_review ---------------------------------------------------
+
+
+def test_ensure_not_self_review_blocks_own_demo():
+    demo = _episode(DemoStatus.RECORDED)
+    demo.operator_id = "rev1"
+    reviewer = _user("rev1", UserRole.REVIEWER)
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_not_self_review(demo, reviewer, allow_self_review=False)
+    assert exc_info.value.status_code == 403
+
+
+def test_ensure_not_self_review_allows_other_demo():
+    demo = _episode(DemoStatus.RECORDED)  # operator_id="owner1"
+    reviewer = _user("rev1", UserRole.REVIEWER)
+    ensure_not_self_review(demo, reviewer, allow_self_review=False)  # không raise
+
+
+def test_ensure_not_self_review_allowed_when_flag_true():
+    demo = _episode(DemoStatus.RECORDED)
+    demo.operator_id = "rev1"
+    reviewer = _user("rev1", UserRole.REVIEWER)
+    ensure_not_self_review(demo, reviewer, allow_self_review=True)  # không raise
 
 
 # --- ensure_status_in ----------------------------------------------------------

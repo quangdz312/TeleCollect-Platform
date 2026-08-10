@@ -50,6 +50,25 @@ def ensure_can_modify(demo: Episode, user: User) -> None:
         )
 
 
+def ensure_not_self_review(demo: Episode, user: User, allow_self_review: bool) -> None:
+    """Chặn reviewer tự duyệt (approve/reject) demo do chính mình upload —
+    phá vỡ bảo đảm "mọi demo đã duyệt đều được người khác thẩm định".
+
+    KHÔNG dùng cho reopen — reopen chỉ đưa demo về trạng thái trước, không
+    tạo ra bảo đảm chất lượng nào nên không cần chặn tự thao tác.
+
+    `allow_self_review=True` (qua settings.allow_self_review) tắt hẳn check
+    này — dùng khi cần demo bằng một tài khoản duy nhất.
+    """
+    if allow_self_review:
+        return
+    if demo.operator_id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Không thể tự duyệt demo do chính mình upload",
+        )
+
+
 def ensure_status_in(demo: Episode, allowed: set[DemoStatus], action: str) -> None:
     """Sai transition -> 409 Conflict (khác 422 — đây là xung đột trạng thái
     nghiệp vụ, không phải input sai định dạng)."""

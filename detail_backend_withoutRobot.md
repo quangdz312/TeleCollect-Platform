@@ -313,12 +313,13 @@ flowchart LR
 | GET | `/api/v1/demos/{id}/thumbnail` | Token qua header hoặc `?token=` | — | image/jpeg | 401, 404 |
 | PATCH | `/api/v1/demos/{id}/trim` | Chủ sở hữu hoặc reviewer+ | `TrimRequest` | `DemoResponse` | 403, 404, 409, 422 |
 | PATCH | `/api/v1/demos/{id}/label` | Chủ sở hữu hoặc reviewer+ | `LabelRequest` | `DemoResponse` | 403, 404, 409 |
-| POST | `/api/v1/demos/{id}/review` | reviewer+ (luôn, không xét sở hữu) | `ReviewRequest` | `DemoResponse` | 403, 404, 409 |
+| POST | `/api/v1/demos/{id}/review` | reviewer+, **không được tự duyệt demo do chính mình upload** (trừ khi `allow_self_review=true`) | `ReviewRequest` | `DemoResponse` | 403, 404, 409 |
 | POST | `/api/v1/demos/{id}/reopen` | reviewer+ | — | `DemoResponse` | 403, 404, 409 |
 | DELETE | `/api/v1/demos/{id}` | Chủ sở hữu hoặc reviewer+ | — | 204 | 403, 404 |
 
 **Quy tắc nghiệp vụ:**
-- `ensure_can_modify()` (`demo_rules.py`): operator chỉ sửa được demo **của chính mình**; reviewer trở lên sửa được mọi demo. Dùng cho trim/label/delete — **không** dùng cho review/reopen (2 hành động đó luôn yêu cầu role reviewer qua `require_min_role`, không xét sở hữu — một operator không được tự duyệt demo của chính mình).
+- `ensure_can_modify()` (`demo_rules.py`): operator chỉ sửa được demo **của chính mình**; reviewer trở lên sửa được mọi demo. Dùng cho trim/label/delete — **không** dùng cho review/reopen (2 hành động đó luôn yêu cầu role reviewer qua `require_min_role`, không xét sở hữu).
+- `ensure_not_self_review()` (`demo_rules.py`): riêng cho `review` (approve **và** reject) — nếu `episode.operator_id == current_user.id` → `403 "Không thể tự duyệt demo do chính mình upload"`, đảm bảo mọi demo đã duyệt được người **khác** thẩm định. Tắt qua `settings.allow_self_review` (mặc định `false`, đặt `true` khi cần demo bằng một tài khoản). **Không áp dụng cho `reopen`** — reopen chỉ đưa demo về trạng thái trước, không tạo bảo đảm chất lượng nào nên tự reopen demo của chính mình vẫn hợp lệ.
 - Route `GET /demos/summary` phải khai báo **trước** `GET /demos/{demo_id}` trong file — FastAPI khớp theo thứ tự khai báo, nếu đảo ngược thì request tới `/demos/summary` bị `/{demo_id}` "nuốt" (`demo_id="summary"` → 404).
 - `DemoSummaryResponse.success_rate` = success / (success+failure) trong số **đã có nhãn**, không chia cho tổng — mẫu số = 0 thì trả `0.0`, không bao giờ `ZeroDivisionError`.
 

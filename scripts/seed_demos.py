@@ -17,6 +17,7 @@ import random
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Cho phép chạy cả `python scripts/seed_demos.py` lẫn `python -m scripts.seed_demos`
@@ -37,6 +38,7 @@ SEED_TASKS = [
 ]
 
 SEED_OPERATORS = ["seed_operator1", "seed_operator2"]
+SEED_REVIEWERS = ["seed_reviewer1"]
 
 # (status, outcome) khả dĩ — rải đều qua toàn bộ vòng đời demo.
 STATUS_OUTCOME_CHOICES: list[tuple[DemoStatus, DemoOutcome | None]] = [
@@ -83,22 +85,22 @@ async def _ensure_tasks(session) -> None:
     await session.commit()
 
 
-async def _ensure_operators(session) -> list[User]:
-    operators = []
-    for username in SEED_OPERATORS:
+async def _ensure_users(session, usernames: list[str], role: UserRole) -> list[User]:
+    users = []
+    for username in usernames:
         existing = await session.scalar(select(User).where(User.username == username))
         if existing is None:
             existing = User(
                 username=username,
                 password_hash=hash_password("seedpassword1"),
                 display_name=username,
-                role=UserRole.OPERATOR,
+                role=role,
             )
             session.add(existing)
             await session.commit()
             await session.refresh(existing)
-        operators.append(existing)
-    return operators
+        users.append(existing)
+    return users
 
 
 async def _reset_existing_demos(session) -> None:
@@ -120,7 +122,8 @@ async def seed_demos(count: int, reset: bool) -> None:
             await _reset_existing_demos(session)
 
         await _ensure_tasks(session)
-        operators = await _ensure_operators(session)
+        operators = await _ensure_users(session, SEED_OPERATORS, UserRole.OPERATOR)
+        reviewers = await _ensure_users(session, SEED_REVIEWERS, UserRole.REVIEWER)
 
         created = 0
         for i in range(count):
@@ -138,11 +141,19 @@ async def seed_demos(count: int, reset: bool) -> None:
                 await media.generate_thumbnail(front_path, thumb_path)
                 size_bytes = storage.dir_size_bytes(tmp_dir)
 
+                is_reviewed = demo_status in (DemoStatus.APPROVED, DemoStatus.REJECTED)
+                # reviewer_id KHÁC operator_id — demo đã duyệt seed ra phải tuân
+                # theo chính quy tắc ensure_not_self_review vừa thêm.
+                reviewer_id = random.choice(reviewers).id if is_reviewed else None
+                reviewed_at = datetime.now(UTC) if is_reviewed else None
+
                 episode = Episode(
                     task_name=task_spec["name"],
                     operator_id=operator.id,
                     status=demo_status,
                     outcome=outcome,
+                    reviewer_id=reviewer_id,
+                    reviewed_at=reviewed_at,
                     fps=probe.fps,
                     num_frames=probe.num_frames,
                     duration_s=probe.duration_s,

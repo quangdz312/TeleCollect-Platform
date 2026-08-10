@@ -49,7 +49,9 @@ LƯU Ý: `ffmpeg`/`ffprobe` là **dependency bắt buộc ở tầng hệ thốn
   | Upload demo | ✅ | ✅ | ✅ |
   | Label/trim/xoá demo **của chính mình** (so `operator_id`) | ✅ | ✅ | ✅ |
   | Label/trim/xoá demo **của người khác** | ❌ | ✅ | ✅ |
-  | Review/reopen demo (mọi demo) | ❌ | ✅ | ✅ |
+  | Review demo (approve/reject) của **người khác** | ❌ | ✅ | ✅ |
+  | Review demo (approve/reject) do **chính mình** upload | ❌ | ❌ (403, trừ khi `allow_self_review=true`) | ❌ (403, trừ khi `allow_self_review=true`) |
+  | Reopen demo (mọi demo, kể cả của chính mình) | ❌ | ✅ | ✅ |
   | Tạo/xoá dataset | ❌ | ✅ | ✅ |
   | CRUD user | ❌ | ❌ | ✅ |
   | CRUD task (POST/PATCH `/tasks`) | ❌ | ❌ | ✅ |
@@ -86,7 +88,7 @@ LƯU Ý: `ffmpeg`/`ffprobe` là **dependency bắt buộc ở tầng hệ thốn
   - Đường dẫn file phải **resolve tuyệt đối và kiểm tra nằm trong `settings.storage_dir`** trước khi mở — chặn path traversal qua `id`/tên file.
 - `PATCH /api/v1/demos/{id}/trim` (`trim_start_s`, `trim_end_s` — đơn vị **giây**, kiểu float; server validate `0 <= trim_start_s < trim_end_s <= duration_s`, sai thì `422`) — cắt bớt đầu/cuối, chỉ ghi metadata, không đụng file gốc. Chốt dùng thời gian (giây) thay vì step/frame index vì bản Core không có control loop sinh ra frame index thật. Tên field `trim_start_s`/`trim_end_s` dùng thống nhất ở request, DB và `meta.json` trong dataset (xem mục 4).
 - `PATCH /api/v1/demos/{id}/label` (outcome, note).
-- `POST /api/v1/demos/{id}/review` (decision, note) — yêu cầu role reviewer (admin cũng đi qua nhờ kế thừa role, xem mục 2.1). Hợp lệ từ `recorded` hoặc `labeled` (xem quy tắc "nới" ở phần chuyển trạng thái bên dưới); approve khi chưa có label sẽ tự gán `outcome=success`.
+- `POST /api/v1/demos/{id}/review` (decision, note) — yêu cầu role reviewer (admin cũng đi qua nhờ kế thừa role, xem mục 2.1). Hợp lệ từ `recorded` hoặc `labeled` (xem quy tắc "nới" ở phần chuyển trạng thái bên dưới); approve khi chưa có label sẽ tự gán `outcome=success`. **Chặn tự duyệt:** nếu `episode.operator_id == current_user.id` → `403` (đảm bảo mọi demo đã duyệt được người khác thẩm định), trừ khi `settings.allow_self_review=true` (mặc định `false`). Không áp dụng cho reopen.
 - `POST /api/v1/demos/{id}/reopen` — mở lại demo đã duyệt.
 - `DELETE /api/v1/demos/{id}` — nếu demo đang được tham chiếu trong `dataset_episodes` (đã nằm trong 1+ dataset), chỉ **xoá row `dataset_episodes` tương ứng**, **không đụng** tới file zip đã đóng gói của dataset đó (zip là bản snapshot độc lập, đã copy nguyên file video vào bên trong lúc build). Dataset zip là snapshot tại thời điểm tạo, không phản ánh trạng thái hiện tại của DB — ghi rõ điều này trong `meta.json` cấp dataset (mục 4) để không ai hiểu nhầm là link động.
 - `GET /api/v1/demos/summary` — bảng tổng hợp (total, by_status, by_label, by_task, success_rate, approval_rate...).

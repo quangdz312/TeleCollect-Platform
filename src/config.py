@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     allow_self_register: bool = True
     """Bật/tắt POST /auth/register. Register luôn tạo role operator, không bao giờ tạo admin."""
 
+    allow_self_review: bool = False
+    """Cho phép reviewer tự duyệt (approve/reject) demo do chính mình upload.
+    Mặc định tắt — bật khi cần demo bằng một tài khoản duy nhất."""
+
     # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
     enable_face_anonymization: bool = True
 

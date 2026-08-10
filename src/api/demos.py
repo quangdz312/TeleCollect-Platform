@@ -451,10 +451,13 @@ async def review_demo(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> DemoResponse:
-    """Luôn yêu cầu role reviewer trở lên — KHÔNG xét sở hữu (một operator
-    không được tự duyệt demo của chính mình, kể cả admin cũng đi qua đây nhờ
-    kế thừa role, không phải nhờ bỏ qua check)."""
+    """Luôn yêu cầu role reviewer trở lên — KHÔNG xét sở hữu theo nghĩa
+    "operator không sửa được demo người khác" (kế thừa role, không phải nhờ
+    bỏ qua check). Nhưng NGƯỢC LẠI: reviewer không được tự duyệt demo do
+    chính mình upload (trừ khi settings.allow_self_review=true) — xem
+    `demo_rules.ensure_not_self_review`."""
     episode = await _get_episode_or_404(demo_id, session)
+    demo_rules.ensure_not_self_review(episode, user, get_settings().allow_self_review)
     demo_rules.apply_review(episode, body.decision, reviewer_id=user.id, note=body.note)
     await session.commit()
     await session.refresh(episode)
