@@ -32,7 +32,7 @@ import json
 import logging
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -154,7 +154,7 @@ def _build_zip_sync(
         if episode_metas:
             dataset_meta = {
                 "schema_version": SCHEMA_VERSION,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "format": "raw",
                 "name": name,
                 "task_names": task_names,

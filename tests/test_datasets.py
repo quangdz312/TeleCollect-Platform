@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
@@ -70,7 +70,7 @@ async def _make_approved_demo(
     episode.status = DemoStatus.APPROVED
     episode.outcome = outcome
     episode.reviewer_id = reviewer.id
-    episode.reviewed_at = datetime.now(timezone.utc)
+    episode.reviewed_at = datetime.now(UTC)
     await db_session.commit()
     await db_session.refresh(episode)
     return demo

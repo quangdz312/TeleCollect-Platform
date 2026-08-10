@@ -19,7 +19,7 @@ có nhãn sẽ tự gán `outcome=success`. `reject` không tự gán outcome v�
 không đồng nghĩa với thất bại.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import HTTPException, status
@@ -99,7 +99,7 @@ def apply_review(
         demo.status = DemoStatus.REJECTED
 
     demo.reviewer_id = reviewer_id
-    demo.reviewed_at = datetime.now(timezone.utc)
+    demo.reviewed_at = datetime.now(UTC)
     if note is not None:
         demo.note = note
 

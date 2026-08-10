@@ -1,3 +1,5 @@
+import logging
+import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,12 +9,21 @@ from src.api.routes import router
 from src.config import get_settings
 from src.models.db import init_db
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.ensure_data_dirs()
     await init_db()
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        logger.warning(
+            "ffmpeg/ffprobe not found on PATH - video upload, thumbnail and "
+            "playback features will fail. Install ffmpeg "
+            "(e.g. `apt-get install ffmpeg` or `choco install ffmpeg`) and "
+            "restart the app."
+        )
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     yield
     print("Shutting down...")

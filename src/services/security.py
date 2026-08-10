@@ -10,7 +10,7 @@ validate 8–72 ký tự trước khi hash (ở tầng Pydantic schema và lại
 """
 
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import bcrypt
@@ -62,7 +62,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def _create_token(user_id: str, role: str, token_type: TokenType, expires_delta: timedelta) -> str:
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": user_id,
         "role": role,

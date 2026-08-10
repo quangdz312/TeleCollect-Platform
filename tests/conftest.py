@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 # `Settings` cache qua `lru_cache` và `src.main` đọc `jwt_secret` ngay lúc
@@ -71,6 +72,8 @@ def storage_dir(tmp_path, monkeypatch):
 def sample_mp4_bytes(tmp_path_factory) -> bytes:
     """Video mp4 thật (2s, testsrc) sinh 1 lần bằng ffmpeg, dùng lại cho mọi
     test upload — tránh gọi ffmpeg lặp lại tốn thời gian."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not found on PATH - install ffmpeg to run this test")
     directory = tmp_path_factory.mktemp("fixtures")
     path = directory / "sample.mp4"
     subprocess.run(

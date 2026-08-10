@@ -188,7 +188,7 @@ async def upload_demo(
             )
 
         has_wrist = wrist is not None
-        if has_wrist:
+        if wrist is not None:
             wrist_path = tmp_dir / storage.WRIST_FILENAME
             try:
                 await _save_upload_chunked(wrist, wrist_path, max_bytes)
@@ -203,7 +203,7 @@ async def upload_demo(
                 )
 
         has_trajectory = trajectory is not None
-        if has_trajectory:
+        if trajectory is not None:
             trajectory_path = tmp_dir / storage.TRAJECTORY_FILENAME
             try:
                 await _save_upload_chunked(trajectory, trajectory_path, max_bytes)

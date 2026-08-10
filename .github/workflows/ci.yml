@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
   pull_request:
-    branches: [main]
 
 jobs:
   lint-and-test:
@@ -19,11 +17,17 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Lint with ruff
         run: ruff check src/ tests/
+
+      - name: Type check with mypy
+        run: mypy src/
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
