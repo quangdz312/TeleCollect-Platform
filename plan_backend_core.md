@@ -73,7 +73,7 @@ LƯU Ý: `ffmpeg`/`ffprobe` là **dependency bắt buộc ở tầng hệ thốn
   - **Guardrail bắt buộc lúc code (không hoãn):**
     - Ghi file theo **chunk** (không load hết vào RAM), đếm byte trong lúc ghi, vượt giới hạn thì huỷ và trả **413 Payload Too Large**.
     - Giới hạn mặc định qua config (`settings.max_upload_mb`, ví dụ 200MB/file), có thể chỉnh qua `.env`.
-    - **Whitelist đuôi file/content-type:** video chỉ nhận `.mp4` (`video/mp4`); `trajectory` chỉ nhận `.json` (`application/json`).
+    - **Kiểm magic bytes, không whitelist đuôi file/content-type:** video được chấp nhận nếu có marker ISO BMFF `ftyp` ở offset 4 (`has_mp4_magic_bytes`, `src/services/media.py:35-44`) — không so khớp đuôi file hay `Content-Type` gửi lên, và không so khớp brand cụ thể (`.mov` cũng có `ftyp` nên cũng qua được, xem `frontend_plan.md` mục 3.10). `trajectory` không có kiểm định dạng riêng ở bước này — được parse trực tiếp như JSON, lỗi parse hoặc sai chiều `action_dim` trả 422 ở bước validate trajectory.
     - **Tên file trên storage dùng UUID** (không dùng tên gốc người dùng upload) để tránh path traversal/đụng tên.
     - Nếu có `trajectory.json`, validate chiều dữ liệu action khớp `task.action_dim` trước khi chấp nhận — sai thì trả 422.
   - Sau khi lưu, sinh **thumbnail** (`GET /api/v1/demos/{id}/thumbnail` → JPEG frame đầu của `front.mp4`, tạo bằng `ffmpeg` ngay lúc upload, không tạo lazy lúc request).
@@ -186,5 +186,5 @@ Schema gốc lẫn nhiều field của control loop (Teleop) — bản Core khô
 
 ## 7. Ghi chú
 
-- Theo `CLAUDE.md` của dự án: chỉ phụ trách Backend, không sửa code Frontend.
+- Theo `CLAUDE.md` của dự án (đã cập nhật): phạm vi phụ trách gồm cả Backend lẫn `frontend/`, không còn giới hạn chỉ Backend.
 - Tài liệu này là bản rút gọn của `plan_backend.md` — giữ nguyên các quyết định thiết kế (schema, role, DB) cho các phần trùng lặp, chỉ khác ở việc loại bỏ pha con phụ thuộc robot thật và đổi nguồn video từ Teleop sang upload thủ công.

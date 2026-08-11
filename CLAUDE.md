@@ -69,8 +69,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 5. Project Context & Environment Rules
 
-- **Role:** Primary focus is Backend development.
-- **Read-Only Frontend:** Do not modify any Frontend code unless explicitly instructed.
+- **Role:** Backend and Frontend development (scope expanded to include `frontend/`).
 - **Safety First:** Do not execute destructive terminal commands (e.g., `git reset --hard`, `rm -rf`, dropping database tables) without explicit confirmation.
 - **Language:** Communicate explanations in Vietnamese, but keep code, comments, and commit messages in English.
 
