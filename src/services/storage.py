@@ -27,6 +27,8 @@ FRONT_FILENAME = "front.mp4"
 WRIST_FILENAME = "wrist.mp4"
 TRAJECTORY_FILENAME = "trajectory.json"
 THUMBNAIL_FILENAME = "thumb.jpg"
+ACTIONS_FILENAME = "actions.parquet"
+META_FILENAME = "meta.json"
 
 
 def episodes_root() -> Path:
@@ -71,6 +73,24 @@ def new_tmp_dir() -> Path:
 
 def episode_dir(episode_id: str) -> Path:
     return _resolve_within(episodes_root(), episode_id)
+
+
+def video_path(episode_id: str, camera: str) -> Path:
+    """Video path for a recorded sim camera inside an episode directory."""
+    filename = f"{camera}.mp4"
+    if camera == "front":
+        filename = FRONT_FILENAME
+    elif camera == "wrist":
+        filename = WRIST_FILENAME
+    return episode_dir(episode_id) / filename
+
+
+def actions_path(episode_id: str) -> Path:
+    return episode_dir(episode_id) / ACTIONS_FILENAME
+
+
+def meta_path(episode_id: str) -> Path:
+    return episode_dir(episode_id) / META_FILENAME
 
 
 def promote_tmp_to_episode(tmp_dir: Path, episode_id: str) -> Path:

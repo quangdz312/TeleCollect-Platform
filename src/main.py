@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import shutil
 from contextlib import asynccontextmanager
@@ -7,9 +9,22 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router
 from src.config import get_settings
+from src.core.session import get_session_manager
 from src.models.db import init_db
 
 logger = logging.getLogger(__name__)
+_REAP_INTERVAL_S = 1.0
+
+
+async def _reaper_task() -> None:
+    """Dọn phiên mất controller và chốt bản ghi dở."""
+    manager = get_session_manager()
+    while True:
+        await asyncio.sleep(_REAP_INTERVAL_S)
+        try:
+            await asyncio.to_thread(manager.reap_stale)
+        except Exception as exc:
+            logger.warning("teleop reaper ignored error: %s", exc)
 
 
 @asynccontextmanager
@@ -25,8 +40,15 @@ async def lifespan(app: FastAPI):
             "restart the app."
         )
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
-    yield
-    print("Shutting down...")
+    reaper = asyncio.create_task(_reaper_task())
+    try:
+        yield
+    finally:
+        reaper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reaper
+        await asyncio.to_thread(get_session_manager().close_all)
+        print("Shutting down...")
 
 
 app = FastAPI(

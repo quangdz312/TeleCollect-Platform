@@ -83,6 +83,7 @@ from src.models.schemas import (
     TrimRequest,
 )
 from src.services import demo_rules, storage
+from src.services.auto_label import classify_teleop_episode
 from src.services.media import MediaProbeError, generate_thumbnail, has_mp4_magic_bytes, probe_video
 from src.services.security import current_user, current_user_allow_query_token, require_min_role
 from src.services.streaming import stream_file_range
@@ -152,6 +153,17 @@ async def _get_episode_or_404(episode_id: str, session: AsyncSession) -> Episode
     if episode is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy demo")
     return episode
+
+
+def _demo_response(episode: Episode) -> DemoResponse:
+    response = DemoResponse.model_validate(episode)
+    recommendation = classify_teleop_episode(storage.episode_dir(episode.id))
+    return response.model_copy(
+        update={
+            "auto_label": recommendation.label,
+            "auto_label_reason": recommendation.reason,
+        }
+    )
 
 
 @router.post("/upload", response_model=DemoUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -245,7 +257,7 @@ async def upload_demo(
         moved = True
 
         return DemoUploadResponse(
-            **DemoResponse.model_validate(episode).model_dump(),
+            **_demo_response(episode).model_dump(),
             has_thumbnail=has_thumbnail,
             warnings=warnings,
         )
@@ -291,7 +303,7 @@ async def list_demos(
     total_pages = math.ceil(total / page_size) if total else 0
 
     return PaginatedResponse[DemoResponse](
-        items=[DemoResponse.model_validate(e) for e in items],
+        items=[_demo_response(e) for e in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -372,7 +384,7 @@ async def get_demo(
     episode = await _get_episode_or_404(demo_id, session)
     thumb_path = storage.episode_dir(episode.id) / storage.THUMBNAIL_FILENAME
     return DemoDetailResponse(
-        **DemoResponse.model_validate(episode).model_dump(),
+        **_demo_response(episode).model_dump(),
         has_thumbnail=thumb_path.exists(),
     )
 
@@ -426,7 +438,7 @@ async def trim_demo(
     demo_rules.apply_trim(episode, body.trim_start_s, body.trim_end_s)
     await session.commit()
     await session.refresh(episode)
-    return DemoResponse.model_validate(episode)
+    return _demo_response(episode)
 
 
 @router.patch("/{demo_id}/label", response_model=DemoResponse)
@@ -441,7 +453,7 @@ async def label_demo(
     demo_rules.apply_label(episode, body.outcome, body.note)
     await session.commit()
     await session.refresh(episode)
-    return DemoResponse.model_validate(episode)
+    return _demo_response(episode)
 
 
 @router.post("/{demo_id}/review", response_model=DemoResponse)
@@ -461,7 +473,7 @@ async def review_demo(
     demo_rules.apply_review(episode, body.decision, reviewer_id=user.id, note=body.note)
     await session.commit()
     await session.refresh(episode)
-    return DemoResponse.model_validate(episode)
+    return _demo_response(episode)
 
 
 @router.post("/{demo_id}/reopen", response_model=DemoResponse)
@@ -474,7 +486,7 @@ async def reopen_demo(
     demo_rules.apply_reopen(episode)
     await session.commit()
     await session.refresh(episode)
-    return DemoResponse.model_validate(episode)
+    return _demo_response(episode)
 
 
 @router.delete("/{demo_id}", status_code=status.HTTP_204_NO_CONTENT)

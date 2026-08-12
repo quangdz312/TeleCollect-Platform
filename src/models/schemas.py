@@ -156,12 +156,54 @@ class TaskStatsResponse(BaseModel):
     approval_rate: float
 
 
+class ActionSpecResponse(BaseModel):
+    """Biên action mà frontend dùng để clamp input trước khi gửi."""
+
+    dim: int
+    low: list[float]
+    high: list[float]
+
+
+class CreateSessionRequest(BaseModel):
+    """Yêu cầu mở một phiên teleop."""
+
+    task_name: str = "lift_cube"
+    operator_id: str = Field(default="", max_length=64)
+    seed: int | None = None
+    image_size: int = Field(default=480, ge=32, le=512)
+
+
 class SessionResponse(BaseModel):
     """Phiên teleop vừa mở."""
 
     session_id: str
     task_name: str
+    state: str = "idle"
     ws_url: str = Field(..., description="URL WebSocket để bắt đầu điều khiển")
+    action_spec: ActionSpecResponse | None = None
+
+
+class SessionDetailResponse(BaseModel):
+    """Trạng thái đầy đủ của một phiên teleop."""
+
+    session_id: str
+    operator_id: str
+    task_name: str
+    state: str
+    seed: int | None = None
+    image_size: int
+    started_at: float
+    last_seen_at: float | None = None
+    episode_id: str | None = None
+    last_error: str | None = None
+    ws_url: str
+
+
+class ErrorResponse(BaseModel):
+    """Lỗi có mã máy đọc được, khớp với event error trên WebSocket."""
+
+    code: str
+    detail: str
 
 
 class LoopStatsResponse(BaseModel):
@@ -171,6 +213,9 @@ class LoopStatsResponse(BaseModel):
     dropped_frames: int
     p95_latency_ms: float
     overruns: int
+    p50_latency_ms: float = 0.0
+    jitter_rms_ms: float = 0.0
+    control_hz_actual: float = 0.0
 
 
 class DemoResponse(BaseModel):
@@ -197,6 +242,9 @@ class DemoResponse(BaseModel):
 
     has_wrist: bool = False
     has_trajectory: bool = False
+
+    auto_label: Literal["accept", "review", "reject"] = "review"
+    auto_label_reason: str = ""
 
     created_at: datetime
 
@@ -320,6 +368,28 @@ class DatasetDetailResponse(DatasetResponse):
 
     error_message: str | None = None
     episodes: list[DemoResponse] = Field(default_factory=list)
+
+
+class ScriptedRunRequest(BaseModel):
+    """Yêu cầu thu một mẻ demo scripted để đem đi chấm tay."""
+
+    task: str
+    quality: str = "clean"
+    episodes: int = Field(default=5, ge=1, le=200)
+    seed: int | None = Field(default=None, ge=0)
+    horizon: int | None = Field(default=None, ge=1)
+    overwrite: bool = False
+
+
+class ScriptedLabelRequest(BaseModel):
+    """Quyết định của người chấm cho một episode scripted."""
+
+    episode_id: str
+    decision: str
+    reasons: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=1000)
+    reviewer: str = Field(default="unknown", max_length=64)
+    blind: bool = True
 
 
 class TrainingJobResponse(BaseModel):
