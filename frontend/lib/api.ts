@@ -1,21 +1,9 @@
 "use client";
 
-/**
- * Demo build of the TeleCollect API client.
- *
- * The exported surface is identical to the real client — same types, same
- * `api.*` methods, same `getToken` / `setToken` / `mediaUrl` — but nothing here
- * touches the network.  Every call is served from the in-memory store in
- * `./demo-data`, after a short artificial delay so loading states, disabled
- * buttons and spinners behave the way they do against a real server.
- *
- * To point this folder back at a real backend, restore the original
- * `lib/api.ts` and `lib/teleop.ts` and set `NEXT_PUBLIC_API_ORIGIN`.
- */
-
 export type Role = "operator" | "reviewer" | "admin";
-export type DemoStatus = "recording" | "recorded" | "approved" | "rejected";
+export type DemoStatus = "recording" | "recorded" | "labeled" | "approved" | "rejected";
 export type LabelValue = "success" | "failure";
+export type AutoLabel = "accept" | "review" | "reject";
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface User {
@@ -60,6 +48,10 @@ export interface Demo {
   reviewer_id: string | null;
   reviewer_name: string | null;
   reviewed_at: string | null;
+  has_wrist?: boolean;
+  has_trajectory?: boolean;
+  auto_label?: AutoLabel;
+  auto_label_reason?: string;
 }
 
 export interface DemoPage {
@@ -111,6 +103,7 @@ export interface DatasetExport {
   size_bytes: number;
   path: string;
   dvc_hash: string | null;
+  status?: string;
 }
 
 export interface TrainingRun {
@@ -140,29 +133,89 @@ export interface EvalRun {
   finished_at: string | null;
 }
 
-import {
-  TASKS,
-  TRAIN_DURATION_MS,
-  db,
-  liveEval,
-  liveRunStatus,
-  newId,
-  roleFor,
-  runHistoryFor,
-  runLogFor,
-  save,
-  summarise,
-  trajectoryFor,
-} from "./demo-data";
+type BackendTask = {
+  name: string;
+  description: string;
+  instruction: string;
+  hints: string[];
+  max_steps: number;
+};
 
-/** No server in this build; kept so anything importing it still type-checks. */
-export const API_ORIGIN = "";
+type BackendDemo = {
+  id: string;
+  task_name: string;
+  operator_id: string;
+  status: DemoStatus;
+  outcome: LabelValue | null;
+  note: string;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  fps: number | null;
+  num_frames: number | null;
+  duration_s: number | null;
+  size_bytes: number | null;
+  trim_start_s: number | null;
+  trim_end_s: number | null;
+  has_wrist: boolean;
+  has_trajectory: boolean;
+  created_at: string;
+  auto_label: AutoLabel;
+  auto_label_reason: string;
+};
+
+type BackendPage<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+type BackendSummary = {
+  total: number;
+  by_status: Record<string, number>;
+  by_outcome: Record<string, number>;
+  by_task: Record<string, number>;
+  labeled_count: number;
+  reviewed_count: number;
+  success_count: number;
+  approved_count: number;
+  success_rate: number;
+  approval_rate: number;
+  total_frames: number;
+  total_duration_hours: number;
+  total_size_bytes: number;
+};
+
+type BackendDataset = {
+  id: string;
+  name: string;
+  task_names: string[];
+  include_failures: boolean;
+  status: string;
+  num_episodes: number;
+  num_frames: number;
+  size_bytes: number | null;
+  created_at: string;
+};
+
+const configuredOrigin =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_ORIGIN || "http://localhost:8000";
+
+export const API_ORIGIN = configuredOrigin.replace(/\/$/, "");
+const API_PREFIX = "/api/v1";
+const TOKEN_KEY = "telecollect.token";
+const REFRESH_TOKEN_KEY = "telecollect.refresh_token";
 
 export function apiUrl(path: string) {
-  return path;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  const normalisedPath = path.startsWith("/") ? path : `/${path}`;
+  if (normalisedPath === "/health") return `${API_ORIGIN}/health`;
+  const versionedPath = normalisedPath.startsWith(API_PREFIX)
+    ? normalisedPath
+    : `${API_PREFIX}${normalisedPath}`;
+  return `${API_ORIGIN}${versionedPath}`;
 }
-
-const TOKEN_KEY = "telecollect.token";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -172,7 +225,16 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
-  else window.localStorage.removeItem(TOKEN_KEY);
+  else {
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+}
+
+function setRefreshToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  else window.localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 export class ApiError extends Error {
@@ -184,105 +246,224 @@ export class ApiError extends Error {
   }
 }
 
-/** Stand-in for network latency, so the UI's loading states are exercised. */
-function delay<T>(value: T, ms = 140): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+async function parseResponse(response: Response) {
+  if (response.status === 204) return undefined;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) return response.text();
+  return response.json();
 }
 
-function currentUser(): User {
+function errorMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object" && "detail" in payload) {
+    const detail = (payload as { detail: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) =>
+          item && typeof item === "object" && "msg" in item
+            ? String((item as { msg: unknown }).msg)
+            : String(item),
+        )
+        .join("; ");
+    }
+  }
+  if (typeof payload === "string" && payload.trim()) return payload;
+  return fallback;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
   const token = getToken();
-  const id = token?.startsWith("demo:") ? token.slice(5) : null;
-  const user = id ? db().users.find((u) => u.id === id) : null;
-  if (!user) throw new ApiError(401, "Not signed in");
-  return user;
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(path), { ...init, headers });
+  } catch (exc) {
+    throw new ApiError(
+      0,
+      `Cannot reach backend at ${API_ORIGIN}. Start FastAPI on port 8000 or set NEXT_PUBLIC_API_URL.`,
+    );
+  }
+
+  const payload = await parseResponse(response);
+  if (!response.ok) {
+    throw new ApiError(response.status, errorMessage(payload, response.statusText));
+  }
+  return payload as T;
+}
+
+function toTask(task: BackendTask): Task {
+  return {
+    id: task.name,
+    title: task.description || task.name,
+    instruction: task.instruction,
+    max_steps: task.max_steps,
+    hints: task.hints,
+  };
+}
+
+function toDemo(demo: BackendDemo): Demo {
+  const fps = demo.fps || 30;
+  const duration = demo.duration_s || 0;
+  const frames = demo.num_frames || Math.round(duration * fps);
+  const trimStart = Math.round((demo.trim_start_s || 0) * fps);
+  const trimEnd = demo.trim_end_s == null ? null : Math.round(demo.trim_end_s * fps);
+
+  return {
+    id: demo.id,
+    task_id: demo.task_name,
+    operator_id: demo.operator_id,
+    operator_name: demo.operator_id,
+    created_at: demo.created_at,
+    seed: 0,
+    fps,
+    num_frames: frames,
+    duration_s: duration,
+    size_bytes: demo.size_bytes || 0,
+    auto_success: demo.outcome === "success",
+    auto_success_frame: null,
+    latency_p50_ms: 0,
+    latency_p95_ms: 0,
+    control_jitter_ms: 0,
+    dropped_frames: 0,
+    status: demo.status,
+    label: demo.outcome,
+    trim_start: trimStart,
+    trim_end: trimEnd,
+    review_notes: demo.note || "",
+    reviewer_id: demo.reviewer_id,
+    reviewer_name: demo.reviewer_id,
+    reviewed_at: demo.reviewed_at,
+    has_wrist: demo.has_wrist,
+    has_trajectory: demo.has_trajectory,
+    auto_label: demo.auto_label || "review",
+    auto_label_reason: demo.auto_label_reason || "",
+  };
+}
+
+function toSummary(summary: BackendSummary): Summary {
+  const byLabel = {
+    success: summary.by_outcome.success || 0,
+    failure: summary.by_outcome.failure || 0,
+  };
+  const byTask = Object.fromEntries(
+    Object.entries(summary.by_task).map(([task, total]) => [
+      task,
+      {
+        total,
+        success: 0,
+        approved: 0,
+        rejected: 0,
+      },
+    ]),
+  );
+  const valid = Math.min(summary.success_count, summary.approved_count);
+  return {
+    total: summary.total,
+    by_status: summary.by_status,
+    by_label: byLabel,
+    by_task: byTask,
+    approved_successes: valid,
+    valid_demo_count: valid,
+    success_rate: summary.success_rate,
+    approval_rate: summary.approval_rate,
+    total_frames: summary.total_frames,
+    total_hours: summary.total_duration_hours,
+    total_size_bytes: summary.total_size_bytes,
+    median_latency_ms: 0,
+    p95_latency_ms: 0,
+  };
+}
+
+function toExport(dataset: BackendDataset): DatasetExport {
+  return {
+    id: dataset.id,
+    name: dataset.name,
+    format: "lerobot",
+    created_at: dataset.created_at,
+    tasks: dataset.task_names,
+    include_failures: dataset.include_failures,
+    num_episodes: dataset.num_episodes,
+    num_frames: dataset.num_frames,
+    size_bytes: dataset.size_bytes || 0,
+    path: `data/datasets/${dataset.id}.zip`,
+    dvc_hash: null,
+    status: dataset.status,
+  };
+}
+
+function emptyTrajectory(demo: Demo): Trajectory {
+  const frames = Math.max(1, demo.num_frames);
+  const rows = Array.from({ length: frames }, () => Array(7).fill(0));
+  return {
+    num_frames: frames,
+    fps: demo.fps,
+    trim_start: demo.trim_start,
+    trim_end: demo.trim_end ?? frames,
+    state: rows,
+    action: rows,
+    ee_pose: Array.from({ length: frames }, () => [0, 0, 0, 0, 0, 0, 1]),
+    success: Array.from({ length: frames }, () => demo.label === "success"),
+    cmd_age_ms: Array.from({ length: frames }, () => 0),
+    rtt_ms: Array.from({ length: frames }, () => 0),
+    tick_dt_ms: Array.from({ length: frames }, () => 1000 / demo.fps),
+  };
 }
 
 export const api = {
-  /**
-   * Any password is accepted — there is nothing to authenticate against.  An
-   * unknown username creates an account on the spot and takes its role from the
-   * name ("…admin…" -> admin, "…review…" -> reviewer, otherwise operator), so
-   * every part of the UI is reachable without a user table.
-   */
   async login(username: string, password: string) {
-    await delay(null, 250);
-    if (!username.trim() || !password) {
-      throw new ApiError(400, "Enter a username and a password");
-    }
-    const store = db();
-    let user = store.users.find((u) => u.username === username.trim());
-    if (!user) {
-      user = {
-        id: newId("u"),
-        username: username.trim(),
-        display_name: username.trim(),
-        role: roleFor(username),
-        is_active: true,
-        created_at: new Date().toISOString(),
-      };
-      store.users.push(user);
-      save();
-    }
-    if (!user.is_active) throw new ApiError(403, "This account is disabled");
-    setToken(`demo:${user.id}`);
-    return user;
+    const body = new URLSearchParams();
+    body.set("username", username);
+    body.set("password", password);
+    const token = await request<{ access_token: string; refresh_token: string }>("/auth/login", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    setToken(token.access_token);
+    setRefreshToken(token.refresh_token);
+    return api.me();
   },
 
-  me: async () => delay(currentUser(), 60),
-  users: async () => delay([...db().users], 80),
+  me: () => request<User>("/auth/me"),
+  users: () => request<User[]>("/users"),
 
-  createUser: async (body: {
+  createUser: (body: {
     username: string;
     password: string;
     display_name?: string;
     role: Role;
-  }) => {
-    const store = db();
-    if (store.users.some((u) => u.username === body.username)) {
-      throw new ApiError(409, "That username is taken");
-    }
-    const user: User = {
-      id: newId("u"),
-      username: body.username,
-      display_name: body.display_name || body.username,
-      role: body.role,
-      is_active: true,
-      created_at: new Date().toISOString(),
-    };
-    store.users.push(user);
-    save();
-    return delay(user, 180);
-  },
+  }) => request<User>("/users", { method: "POST", body: JSON.stringify(body) }),
 
-  updateUser: async (
+  updateUser: (
     id: string,
     body: Partial<{ role: Role; is_active: boolean; password: string; display_name: string }>,
-  ) => {
-    const user = db().users.find((u) => u.id === id);
-    if (!user) throw new ApiError(404, "No such user");
-    if (body.role !== undefined) user.role = body.role;
-    if (body.is_active !== undefined) user.is_active = body.is_active;
-    if (body.display_name !== undefined) user.display_name = body.display_name;
-    save();
-    return delay(user, 140);
+  ) => request<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  tasks: async () => (await request<BackendTask[]>("/tasks")).map(toTask),
+  teleopTasks: async () => (await request<BackendTask[]>("/teleop/tasks")).map(toTask),
+
+  health: async () => {
+    const [health, tasks] = await Promise.all([
+      request<Record<string, any>>("/health").catch(() => ({ status: "unknown" })),
+      api.tasks().catch(() => []),
+    ]);
+    return {
+      version: "1.0.0",
+      control_hz: 30,
+      active_sessions: 0,
+      max_sessions: 0,
+      tasks: tasks.map((task) => task.id),
+      anonymize_faces: false,
+      ...health,
+    };
   },
 
-  tasks: async () => delay(TASKS, 60),
-
-  health: async () =>
-    delay(
-      {
-        version: "1.0.0-demo",
-        control_hz: 30,
-        active_sessions: 0,
-        max_sessions: 4,
-        tasks: TASKS.map((t) => t.id),
-        anonymize_faces: false,
-      } as Record<string, any>,
-      60,
-    ),
-
-  demos: async (
+  async demos(
     params: {
       task_id?: string;
       status?: DemoStatus;
@@ -292,42 +473,33 @@ export const api = {
       limit?: number;
       offset?: number;
     } = {},
-  ): Promise<DemoPage> => {
+  ): Promise<DemoPage> {
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
-    const matching = db()
-      .demos.filter(
-        (demo) =>
-          (!params.task_id || demo.task_id === params.task_id) &&
-          (!params.status || demo.status === params.status) &&
-          (!params.label || demo.label === params.label) &&
-          (!params.operator_id || demo.operator_id === params.operator_id) &&
-          (!params.needs_review || demo.status === "recorded"),
-      )
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    return delay({
-      items: matching.slice(offset, offset + limit),
-      total: matching.length,
+    const search = new URLSearchParams();
+    if (params.task_id) search.set("task", params.task_id);
+    if (params.status) search.set("status", params.status);
+    if (params.label) search.set("outcome", params.label);
+    if (params.needs_review) search.set("status", "recorded");
+    if (params.operator_id) search.set("operator_id", params.operator_id);
+    search.set("page", String(Math.floor(offset / limit) + 1));
+    search.set("page_size", String(limit));
+
+    const page = await request<BackendPage<BackendDemo>>(`/demos?${search}`);
+    return {
+      items: page.items.map(toDemo),
+      total: page.total,
       limit,
       offset,
-    });
+    };
   },
 
-  demo: async (id: string) => {
-    const demo = db().demos.find((d) => d.id === id);
-    if (!demo) throw new ApiError(404, "No such recording");
-    return delay(demo, 90);
-  },
+  demo: async (id: string) => toDemo(await request<BackendDemo>(`/demos/${id}`)),
+  summary: async () => toSummary(await request<BackendSummary>("/demos/summary")),
 
-  summary: async () => delay(summarise(), 90),
+  trajectory: async (id: string) => emptyTrajectory(await api.demo(id)),
 
-  trajectory: async (id: string, stride = 1) => {
-    const demo = db().demos.find((d) => d.id === id);
-    if (!demo) throw new ApiError(404, "No such recording");
-    return delay(trajectoryFor(demo, stride), 160);
-  },
-
-  review: async (
+  async review(
     id: string,
     body: {
       label?: LabelValue;
@@ -336,51 +508,55 @@ export const api = {
       trim_end?: number;
       notes?: string;
     },
-  ) => {
-    const store = db();
-    const demo = store.demos.find((d) => d.id === id);
-    if (!demo) throw new ApiError(404, "No such recording");
-    const reviewer = currentUser();
-    if (reviewer.role === "operator") {
-      throw new ApiError(403, "Only a reviewer or an admin can review recordings");
+  ) {
+    let demo = await api.demo(id);
+    const fps = demo.fps || 30;
+
+    if (body.trim_start !== undefined && body.trim_end !== undefined) {
+      demo = toDemo(
+        await request<BackendDemo>(`/demos/${id}/trim`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            trim_start_s: body.trim_start / fps,
+            trim_end_s: body.trim_end / fps,
+          }),
+        }),
+      );
     }
 
-    if (body.label !== undefined) demo.label = body.label;
-    if (body.trim_start !== undefined) demo.trim_start = body.trim_start;
-    if (body.trim_end !== undefined) demo.trim_end = body.trim_end;
-    if (body.notes !== undefined) demo.review_notes = body.notes;
+    if (body.label !== undefined) {
+      demo = toDemo(
+        await request<BackendDemo>(`/demos/${id}/label`, {
+          method: "PATCH",
+          body: JSON.stringify({ outcome: body.label, note: body.notes ?? demo.review_notes }),
+        }),
+      );
+    }
+
     if (body.approve !== undefined) {
-      demo.status = body.approve ? "approved" : "rejected";
-      // Approving without an explicit label means "yes, this is the success the
-      // auto-check saw", which is what the real endpoint infers too.
-      if (body.approve && demo.label === null) demo.label = "success";
-      demo.reviewer_id = reviewer.id;
-      demo.reviewer_name = reviewer.display_name;
-      demo.reviewed_at = new Date().toISOString();
+      demo = toDemo(
+        await request<BackendDemo>(`/demos/${id}/review`, {
+          method: "POST",
+          body: JSON.stringify({
+            decision: body.approve ? "approve" : "reject",
+            note: body.notes ?? demo.review_notes,
+          }),
+        }),
+      );
     }
-    save();
-    return delay(demo, 220);
+
+    return demo;
   },
 
-  reopen: async (id: string) => {
-    const demo = db().demos.find((d) => d.id === id);
-    if (!demo) throw new ApiError(404, "No such recording");
-    demo.status = "recorded";
-    demo.reviewer_id = null;
-    demo.reviewer_name = null;
-    demo.reviewed_at = null;
-    save();
-    return delay(demo, 160);
-  },
+  reopen: async (id: string) =>
+    toDemo(await request<BackendDemo>(`/demos/${id}/reopen`, { method: "POST" })),
 
-  deleteDemo: async (id: string) => {
-    const store = db();
-    store.demos = store.demos.filter((d) => d.id !== id);
-    save();
-    return delay(undefined as void, 160);
-  },
+  deleteDemo: (id: string) => request<void>(`/demos/${id}`, { method: "DELETE" }),
 
-  exports: async () => delay([...db().exports], 90),
+  exports: async () => {
+    const page = await request<BackendPage<BackendDataset>>("/datasets?page=1&page_size=100");
+    return page.items.map(toExport);
+  },
 
   createExport: async (body: {
     name: string;
@@ -388,167 +564,59 @@ export const api = {
     tasks: string[];
     include_failures: boolean;
     overwrite: boolean;
-  }) => {
-    const store = db();
-    if (!body.name.trim()) throw new ApiError(400, "Give the export a name");
-    if (!body.overwrite && store.exports.some((e) => e.name === body.name)) {
-      throw new ApiError(409, `An export named "${body.name}" already exists — tick Overwrite`);
-    }
-
-    const eligible = store.demos.filter(
-      (demo) =>
-        demo.status === "approved" &&
-        (body.include_failures || demo.label === "success") &&
-        (body.tasks.length === 0 || body.tasks.includes(demo.task_id)),
-    );
-    if (eligible.length === 0) {
-      throw new ApiError(400, "No approved recordings match that filter");
-    }
-
-    const frames = eligible.reduce(
-      (sum, demo) => sum + ((demo.trim_end ?? demo.num_frames) - demo.trim_start),
-      0,
-    );
-    const record: DatasetExport = {
-      id: newId("exp"),
-      name: body.name,
-      format: body.format,
-      created_at: new Date().toISOString(),
-      tasks: body.tasks,
-      include_failures: body.include_failures,
-      num_episodes: eligible.length,
-      num_frames: frames,
-      size_bytes: frames * (body.format === "lerobot" ? 6_100 : 5_400),
-      path: `data/exports/${body.name}`,
-      dvc_hash: Array.from(
-        { length: 32 },
-        () => "0123456789abcdef"[Math.floor(Math.random() * 16)],
-      ).join(""),
-    };
-    store.exports = [record, ...store.exports.filter((e) => e.name !== body.name)];
-    save();
-    return delay(record, 900);
-  },
-
-  exportInfo: async (id: string) => {
-    const record = db().exports.find((e) => e.id === id);
-    if (!record) throw new ApiError(404, "No such export");
-    return delay(record as unknown as Record<string, any>, 120);
-  },
-
-  deleteExport: async (id: string) => {
-    const store = db();
-    store.exports = store.exports.filter((e) => e.id !== id);
-    save();
-    return delay(undefined as void, 160);
-  },
-
-  dvc: async () =>
-    delay(
-      {
-        available: true,
-        status: { clean: true, remote: "s3://telecollect-demo/datasets" },
-      },
-      90,
+  }) =>
+    toExport(
+      await request<BackendDataset>("/datasets", {
+        method: "POST",
+        body: JSON.stringify({
+          name: body.name,
+          task_names: body.tasks,
+          include_failures: body.include_failures,
+          overwrite: body.overwrite,
+        }),
+      }),
     ),
 
-  runs: async () =>
-    delay(
-      db()
-        .runs.map((run) => ({ ...run, status: liveRunStatus(run) }))
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
-      100,
-    ),
+  exportInfo: async (id: string) => toExport(await request<BackendDataset>(`/datasets/${id}`)),
+  deleteExport: (id: string) => request<void>(`/datasets/${id}`, { method: "DELETE" }),
 
-  run: async (id: string) => {
-    const run = db().runs.find((r) => r.id === id);
-    if (!run) throw new ApiError(404, "No such run");
-    return delay({ ...run, status: liveRunStatus(run) }, 90);
+  dvc: async () => ({
+    available: false,
+    reason: "backend stores dataset zips locally in this core build",
+  }),
+
+  runs: async (): Promise<TrainingRun[]> => [],
+  run: async (id: string): Promise<TrainingRun> => {
+    throw new ApiError(404, `Training endpoint is not implemented in the backend core build (${id}).`);
   },
-
-  runLog: async (id: string) => {
-    const run = db().runs.find((r) => r.id === id);
-    if (!run) throw new ApiError(404, "No such run");
-    return delay(runLogFor(run), 110);
+  runLog: async (_id: string) => "",
+  runHistory: async (_id: string): Promise<Record<string, number>[]> => [],
+  createRun: async (_body: Record<string, unknown>): Promise<TrainingRun> => {
+    throw new ApiError(501, "Training endpoint is not implemented in the backend core build.");
   },
-
-  runHistory: async (id: string) => {
-    const run = db().runs.find((r) => r.id === id);
-    if (!run) throw new ApiError(404, "No such run");
-    return delay(runHistoryFor(run), 110);
-  },
-
-  /**
-   * Starts a job that finishes after ~45 s of wall time.  The training page
-   * polls every 4 s while anything is running, so the loss curve fills in and
-   * the badge flips to "succeeded" on its own — no reload needed.
-   */
-  createRun: async (body: Record<string, unknown>) => {
-    const store = db();
-    const source = store.exports.find((e) => e.id === body.export_id);
-    const run: TrainingRun = {
-      id: newId("run"),
-      name: String(body.name || "untitled"),
-      export_id: (body.export_id as string) ?? null,
-      created_at: new Date().toISOString(),
-      status: "running",
-      config: { ...body, export_name: source?.name ?? "", __demo_live: true },
-      metrics: {
-        best_val_l1: 0.0402,
-        num_episodes: source?.num_episodes ?? 0,
-        num_frames: source?.num_frames ?? 0,
-        train_seconds: Math.round(TRAIN_DURATION_MS / 1000),
-        device: "cuda",
-      },
-      output_dir: `data/runs/${String(body.name || "untitled")}`,
-      error: "",
-      finished_at: null,
-    };
-    store.runs = [run, ...store.runs];
-    save();
-    return delay(run, 320);
-  },
-
-  evals: async (training_run_id?: string) =>
-    delay(
-      db()
-        .evals.map(liveEval)
-        .filter((item) => !training_run_id || item.training_run_id === training_run_id)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
-      100,
-    ),
-
-  createEval: async (body: Record<string, unknown>) => {
-    const store = db();
-    const item: EvalRun = {
-      id: newId("eval"),
-      training_run_id: String(body.training_run_id),
-      created_at: new Date().toISOString(),
-      status: "running",
-      task_id: String(body.task_id),
-      num_episodes: Number(body.num_episodes ?? 25),
-      success_rate: 0,
-      mean_episode_length: 0,
-      details: { __demo_live: true, record_videos: 3 },
-      error: "",
-      finished_at: null,
-    };
-    store.evals = [item, ...store.evals];
-    save();
-    return delay(item, 320);
+  evals: async (_training_run_id?: string): Promise<EvalRun[]> => [],
+  createEval: async (_body: Record<string, unknown>): Promise<EvalRun> => {
+    throw new ApiError(501, "Evaluation endpoint is not implemented in the backend core build.");
   },
 };
 
-/**
- * Recording playback.
- *
- * There is no media server here, so every clip resolves to one of two files in
- * `public/demo/` — a real pick-and-place episode rendered out of the simulator.
- * That keeps the review timeline, the trim handles and the two synchronised
- * camera views behaving exactly as they do against live footage.
- */
 export function mediaUrl(path: string) {
-  return path.includes("wrist") ? "/demo/wrist.webm" : "/demo/front.webm";
+  const token = getToken();
+  const legacyDemoMatch = path.match(/\/api\/demos\/([^/]+)\/video\/(front|wrist)/);
+  const legacyEvalMatch = path.match(/\/api\/training\/evals\//);
+
+  let target = path;
+  if (legacyDemoMatch) {
+    target = `/demos/${legacyDemoMatch[1]}/playback?camera=${legacyDemoMatch[2]}`;
+  } else if (legacyEvalMatch) {
+    return "";
+  }
+
+  const url = new URL(apiUrl(target));
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
 }
 
-export { resetDemoData } from "./demo-data";
+export function resetDemoData() {
+  return undefined;
+}

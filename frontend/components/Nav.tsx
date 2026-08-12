@@ -7,7 +7,7 @@ import { Badge, Button, cx } from "@/components/ui";
 
 const LINKS: { href: string; label: string; roles?: string[] }[] = [
   { href: "/", label: "Overview" },
-  { href: "/teleop", label: "Teleoperate", roles: ["operator", "admin"] },
+  { href: "/collect", label: "Collect data", roles: ["operator", "reviewer", "admin"] },
   { href: "/review", label: "Review" },
   { href: "/datasets", label: "Datasets" },
   { href: "/training", label: "Training" },

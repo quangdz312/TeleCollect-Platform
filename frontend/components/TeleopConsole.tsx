@@ -5,11 +5,11 @@ import Link from "next/link";
 import {
   InputCollector,
   KEY_HELP,
-  TeleopClient,
   type FrameState,
   type LatencyStats,
   type TeleopEvent,
 } from "@/lib/teleop";
+import { TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
 
@@ -80,7 +80,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       setFrame(state);
       paint(frontRef.current, images.get("front"));
       paint(wristRef.current, images.get("wrist"));
-      images.forEach((bitmap) => bitmap.close());
     };
     client.onStats = setStats;
     client.onEvent = (event: TeleopEvent) => handleEvent(event, pushLog, setLastSaved);

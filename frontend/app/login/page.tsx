@@ -5,15 +5,15 @@ import { useAuth } from "@/components/AuthProvider";
 import { Alert, Button, Card, Field, Input } from "@/components/ui";
 
 const SEEDS: [string, string, string][] = [
-  ["operator", "operator", "Drive the robot and record demonstrations"],
-  ["reviewer", "reviewer", "Trim, label and approve recordings"],
-  ["admin", "admin", "Everything, plus user management"],
+  ["admin", "Admin12345", "Everything, plus user management"],
+  ["seed_reviewer1", "seedpassword1", "Trim, label and approve recordings"],
+  ["seed_operator1", "seedpassword1", "View and manage operator recordings"],
 ];
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const [username, setUsername] = useState("operator");
-  const [password, setPassword] = useState("operator");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("Admin12345");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

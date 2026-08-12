@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function TeleopPage() {
+export default function ScriptedPage() {
   redirect("/collect");
 }

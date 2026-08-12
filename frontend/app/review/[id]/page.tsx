@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { TrimTimeline } from "@/components/TrimTimeline";
+import { ScriptedReviewDetail } from "@/components/ScriptedReviewDetail";
+import { AutoLabelBadge } from "@/components/AutoLabelBadge";
 import {
   Alert,
   Badge,
@@ -20,6 +22,7 @@ import { bytes, timeAgo } from "@/lib/format";
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const router = useRouter();
 
@@ -37,6 +40,11 @@ export default function ReviewDetailPage() {
   const [loopTrim, setLoopTrim] = useState(true);
 
   const canReview = user?.role === "reviewer" || user?.role === "admin";
+
+  if (!user) return null;
+  if (searchParams.get("source") === "scripted") {
+    return <ScriptedReviewDetail episodeId={decodeURIComponent(id)} />;
+  }
 
   const load = useCallback(async () => {
     const [d, t] = await Promise.all([api.demo(id), api.trajectory(id)]);
@@ -114,7 +122,6 @@ export default function ReviewDetailPage() {
 
   const charts = useMemo(() => buildCharts(trajectory), [trajectory]);
 
-  if (!user) return null;
   if (error && !demo) return <Alert>{error}</Alert>;
   if (!demo || !trajectory) return <Empty>Loading recording…</Empty>;
 
@@ -132,6 +139,7 @@ export default function ReviewDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <AutoLabelBadge label={demo.auto_label ?? "review"} reason={demo.auto_label_reason} />
           {demo.auto_success ? (
             <Badge tone="ok">auto-check: completed @ frame {demo.auto_success_frame}</Badge>
           ) : (
@@ -154,12 +162,18 @@ export default function ReviewDetailPage() {
                 loop={!loopTrim}
                 className="w-full rounded-lg border border-ink-700 bg-black"
               />
-              <video
-                ref={wristRef}
-                src={mediaUrl(`/api/demos/${demo.id}/video/wrist`)}
-                muted
-                className="w-full self-start rounded-lg border border-ink-700 bg-black"
-              />
+              {demo.has_wrist ? (
+                <video
+                  ref={wristRef}
+                  src={mediaUrl(`/api/demos/${demo.id}/video/wrist`)}
+                  muted
+                  className="w-full self-start rounded-lg border border-ink-700 bg-black"
+                />
+              ) : (
+                <div className="grid aspect-square w-full place-items-center self-start rounded-lg border border-ink-700 bg-ink-900 text-xs text-ink-400">
+                  No wrist camera
+                </div>
+              )}
             </div>
 
             <div className="mt-4">

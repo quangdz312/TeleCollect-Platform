@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { ScriptedReviewRows } from "@/components/ScriptedReviewPanel";
+import { AutoLabelBadge } from "@/components/AutoLabelBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge, Button, Card, Empty, Select } from "@/components/ui";
 import {
@@ -13,7 +15,7 @@ import {
   type Summary,
   type Task,
 } from "@/lib/api";
-import { bytes, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 
 const PAGE_SIZE = 25;
 
@@ -25,7 +27,7 @@ export default function ReviewQueuePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [taskFilter, setTaskFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<DemoStatus | "">("recorded");
+  const [statusFilter, setStatusFilter] = useState<DemoStatus | "">("");
   const [labelFilter, setLabelFilter] = useState<LabelValue | "">("");
   const [loading, setLoading] = useState(true);
 
@@ -91,6 +93,7 @@ export default function ReviewQueuePage() {
           >
             <option value="">All statuses</option>
             <option value="recorded">Needs review</option>
+            <option value="labeled">Labeled · needs review</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </Select>
@@ -153,22 +156,26 @@ export default function ReviewQueuePage() {
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
                 <tr>
-                  <th className="pb-2">Task</th>
+                  <th className="pb-2">Task / Source</th>
                   <th className="pb-2">Operator</th>
                   <th className="pb-2">Recorded</th>
                   <th className="pb-2 text-right">Length</th>
                   <th className="pb-2 text-right">Frames</th>
-                  <th className="pb-2 text-right">Latency p50</th>
-                  <th className="pb-2 text-right">Size</th>
-                  <th className="pb-2">Auto-check</th>
-                  <th className="pb-2">Status</th>
+                  <th className="pb-2 whitespace-nowrap pl-4 text-right">Latency p50</th>
+                  <th className="pb-2 whitespace-nowrap pl-5">Auto label</th>
+                  <th className="pb-2 whitespace-nowrap pl-5">Status</th>
                   <th className="pb-2" />
                 </tr>
               </thead>
               <tbody className="tabular">
                 {demos.map((demo) => (
                   <tr key={demo.id} className="border-t border-ink-700/50 hover:bg-ink-850/50">
-                    <td className="py-2">{demo.task_id}</td>
+                    <td className="py-2">
+                      <div className="flex items-center gap-2">
+                        <span>{demo.task_id}</span>
+                        <Badge tone="info">Teleop</Badge>
+                      </div>
+                    </td>
                     <td className="py-2 text-ink-300">{demo.operator_name}</td>
                     <td className="py-2 text-ink-400">{timeAgo(demo.created_at)}</td>
                     <td className="py-2 text-right">{demo.duration_s.toFixed(1)}s</td>
@@ -177,16 +184,11 @@ export default function ReviewQueuePage() {
                         ? `${demo.trim_end - demo.trim_start}/${demo.num_frames}`
                         : demo.num_frames}
                     </td>
-                    <td className="py-2 text-right">{demo.latency_p50_ms.toFixed(0)} ms</td>
-                    <td className="py-2 text-right text-ink-400">{bytes(demo.size_bytes)}</td>
-                    <td className="py-2">
-                      {demo.auto_success ? (
-                        <Badge tone="ok">completed</Badge>
-                      ) : (
-                        <Badge tone="neutral">incomplete</Badge>
-                      )}
+                    <td className="py-2 pl-4 text-right">{demo.latency_p50_ms.toFixed(0)} ms</td>
+                    <td className="py-2 pl-5">
+                      <AutoLabelBadge label={demo.auto_label ?? "review"} reason={demo.auto_label_reason} />
                     </td>
-                    <td className="py-2">
+                    <td className="py-2 pl-5">
                       <StatusBadge demo={demo} />
                     </td>
                     <td className="py-2 text-right">
@@ -196,6 +198,7 @@ export default function ReviewQueuePage() {
                     </td>
                   </tr>
                 ))}
+                {(user.role === "reviewer" || user.role === "admin") && <ScriptedReviewRows />}
               </tbody>
             </table>
           </div>

@@ -676,32 +676,32 @@ function percentile(values: number[], p: number) {
 // ---------------------------------------------------------------------------
 
 /**
- * Keyboard mapping, chosen relative to what the operator sees in the front
- * camera rather than to the robot's base frame: the camera looks back along
+ * Keyboard mapping follows robosuite's Keyboard driver. Its ArrowUp command is
+ * already -x, which matches the front camera view: the camera looks back along
  * -x, so "forward" on the keyboard is -x in the world.
  */
 export const KEY_BINDINGS: Record<string, { axis: "linear" | "angular"; index: number; sign: number }> = {
-  KeyW: { axis: "linear", index: 0, sign: -1 },
-  KeyS: { axis: "linear", index: 0, sign: +1 },
-  KeyA: { axis: "linear", index: 1, sign: -1 },
-  KeyD: { axis: "linear", index: 1, sign: +1 },
-  KeyR: { axis: "linear", index: 2, sign: +1 },
-  KeyF: { axis: "linear", index: 2, sign: -1 },
-  ArrowLeft: { axis: "angular", index: 2, sign: +1 },
-  ArrowRight: { axis: "angular", index: 2, sign: -1 },
-  ArrowUp: { axis: "angular", index: 1, sign: -1 },
-  ArrowDown: { axis: "angular", index: 1, sign: +1 },
-  KeyQ: { axis: "angular", index: 0, sign: -1 },
-  KeyE: { axis: "angular", index: 0, sign: +1 },
+  ArrowUp: { axis: "linear", index: 0, sign: -1 },
+  ArrowDown: { axis: "linear", index: 0, sign: +1 },
+  ArrowLeft: { axis: "linear", index: 1, sign: -1 },
+  ArrowRight: { axis: "linear", index: 1, sign: +1 },
+  Period: { axis: "linear", index: 2, sign: -1 },
+  Semicolon: { axis: "linear", index: 2, sign: +1 },
+  KeyY: { axis: "angular", index: 0, sign: +1 },
+  KeyH: { axis: "angular", index: 0, sign: -1 },
+  KeyE: { axis: "angular", index: 1, sign: -1 },
+  KeyR: { axis: "angular", index: 1, sign: +1 },
+  KeyP: { axis: "angular", index: 2, sign: +1 },
+  KeyO: { axis: "angular", index: 2, sign: -1 },
 };
 
 export const KEY_HELP: [string, string][] = [
-  ["W / S", "Move away / toward the camera"],
-  ["A / D", "Move left / right"],
-  ["R / F", "Raise / lower"],
-  ["← / →", "Rotate the wrist (yaw)"],
-  ["↑ / ↓", "Tilt the wrist (pitch)"],
-  ["Q / E", "Roll the wrist"],
+  ["Up / Down", "Move away / toward the camera"],
+  ["Left / Right", "Move left / right"],
+  [". / ;", "Lower / raise"],
+  ["E / R", "Rotate the wrist (roll)"],
+  ["Y / H", "Rotate the wrist (pitch)"],
+  ["O / P", "Rotate the wrist (yaw)"],
   ["Space", "Toggle the gripper"],
   ["Shift", "Precision mode (30 % speed)"],
 ];
@@ -793,7 +793,7 @@ export class InputCollector {
     return {
       linear: linear.map((v) => clamp(v, -1, 1) * precision) as [number, number, number],
       angular: angular.map((v) => clamp(v, -1, 1) * precision) as [number, number, number],
-      gripper: this.gripperClosed ? 0.1 : 1,
+      gripper: this.gripperClosed ? 1 : -1,
     };
   }
 
