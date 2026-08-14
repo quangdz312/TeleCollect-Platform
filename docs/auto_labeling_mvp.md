@@ -188,6 +188,44 @@ that never appears in `obs`. `EpisodeArrays` exposes a `*_trajectory` view of
 length `T + 1` for exactly this reason; reading `obs` alone makes every
 successful Lift look like the cube barely moved. There is a regression test.
 
+## ToolHang always routes to review, deliberately
+
+`src/services/auto_label.py` returns `review` for every `tool_hang` episode that
+is not an outright failure, with the reason *"ToolHang accepts are pending a full
+quality rule"*. This is a decision, not an oversight: the task-specific checks in
+`src/labeling/checks.py` still only measure stage-1 frame transport
+(`task_specific: "tool_hang_stage1_frame_transport"`), so an `accept` would assert
+more than anything actually verified. It stays this way until a full two-stage
+quality rule is written.
+
+## Known defect: `wandering_path` is batch-relative
+
+**Not fixed — deferred by the project owner. Do not treat a `wandering_path`
+score as an absolute quality statement.**
+
+`src/labeling/penalties.py` computes the penalty as a ratio against
+`stats.path_length_median`, the median path length *of the other episodes in the
+same scoring batch*:
+
+```text
+ratio = path_length_m / task_median_m
+```
+
+So the same episode, byte-for-byte identical, scores differently depending on
+which corpus it happens to be labelled alongside. Adding a batch of long
+episodes makes previously-normal episodes look efficient, and vice versa.
+
+Observed: on a mixed corpus the penalty fired at **0.9987**, which dragged that
+episode's `auto_score` down to **0.001253** — because the score is
+`(product of hard checks) x (1 - worst penalty)`, a penalty approaching 1.0
+annihilates the score no matter how well the episode actually ran.
+
+The neighbouring `unusual_length` penalty shows the intended shape: it is gated
+behind `relative_ready` and abstains below 30 episodes per task, returning
+`insufficient_corpus`. `wandering_path` has **no such gate**, which is the
+defect. A proper fix needs an absolute per-task path-length threshold measured
+from clean episodes, not a within-batch median.
+
 ## Thresholds
 
 None are set, and none should be until `shadow_report.py` says otherwise. It

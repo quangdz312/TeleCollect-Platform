@@ -62,3 +62,11 @@ out/
 .ai-log/*.jsonl
 .ai-log/archive/
 data/
+
+# Runtime artefacts — written while the app runs, not source
+MUJOCO_LOG.TXT
+frontend/.devserver*.log
+
+# Written by `next dev` itself on every run
+frontend/AGENTS.md
+frontend/CLAUDE.md

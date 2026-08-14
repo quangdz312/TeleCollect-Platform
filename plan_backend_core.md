@@ -1,5 +1,16 @@
 # Kế hoạch phát triển Backend (Core) — TeleCollect
 
+> ⚠️ **TÀI LIỆU KẾ HOẠCH CŨ — GIỮ LÀM LỊCH SỬ, KHÔNG PHẢI TRẠNG THÁI HIỆN TẠI.**
+>
+> Những điều dưới đây **không còn đúng**:
+> - "**Không làm** ... Teleoperation" — Teleoperation **đã làm xong** và đang
+>   chạy (WebSocket + robosuite/MuJoCo). Xem `SIM_BACKEND_FRONTEND_INTEGRATION.md`.
+> - "Video demo đưa vào qua upload thủ công" — nay còn thu được từ teleop thật
+>   và từ scripted collection.
+> - "BACKEND DÙNG PYTHON 3.11.x (bắt buộc)" — thực tế đang chạy **Python 3.12.6**.
+>
+> Trạng thái thật: xem `README.md`.
+
 > Phạm vi rút gọn từ `plan_backend.md`: chỉ làm các chức năng nền tảng kiểu
 > "web thương mại điện tử cơ bản" (đăng nhập/đăng ký, danh mục, xem/tua video, duyệt nội dung, tải file).
 > **Không làm** phần liên quan robot thật: Teleoperation (điều khiển realtime qua MuJoCo/ROS2),

@@ -1,5 +1,8 @@
 # Chạy web local
 
+> Phiên bản môi trường (Python 3.12.6, robosuite 1.5.2, MuJoCo 3.8.1, Node 22.18,
+> Next 16) và cách chọn GPU trên Windows: xem [`README.md`](README.md).
+
 Mở PowerShell tại thư mục project:
 
 ```powershell

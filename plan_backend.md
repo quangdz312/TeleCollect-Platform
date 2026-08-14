@@ -3,7 +3,10 @@
 > Tài liệu phân tích, chưa động vào code. Dùng để duyệt trước khi bắt tay code.
 > Vai trò: Senior Technical Analyst — Backend owner.
 
-LƯU Ý: BACKEND DÙNG PYTHON 3.11.x (bắt buộc)
+> ⚠️ **KẾ HOẠCH BAN ĐẦU — GIỮ LÀM LỊCH SỬ.** Đây là bản kế hoạch đầy đủ viết
+> trước khi code. Phần Teleoperation và thu dữ liệu sim nay **đã làm xong**;
+> Training/Eval và export LeRobot/RLDS/DVC thì **chưa**. Python thực tế đang
+> chạy là **3.12.6**, không phải 3.11.x. Trạng thái thật: xem `README.md`.
 
 ---
 

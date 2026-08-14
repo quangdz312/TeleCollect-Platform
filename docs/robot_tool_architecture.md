@@ -23,6 +23,14 @@ The built-in implementations are registered as `lift_cube`, `pick_place_can`,
 and `assemble_square`. To add another task, create its operator, expose it
 through a `RobotTool` adapter, add a task context adapter, and register the
 factory in `src/sim/tools/defaults.py`.
+
+> **ToolHang is the exception and does not go through this registry.** Its skill
+> is vendored wholesale at `src/sim/skillgen/` and driven by its own collection
+> path, `src/sim/tool_hang_collection.py`, reached through the boundary module
+> `src/sim/tool_hang.py`. Nothing named `tool_hang_stage1` is registered in
+> `build_default_registry()`; that string is a stored dataset identifier, not a
+> lookup key. So the pipeline above describes three of the four collectable
+> tasks. See [`toolhang_integration.md`](toolhang_integration.md).
 Neither the generic executor nor a future LLM planner should contain task
 branches. A planner calls skill-level tools and never emits OSC actions itself.
 

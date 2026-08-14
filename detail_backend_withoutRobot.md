@@ -1,7 +1,18 @@
 # Backend TeleCollect — Tài liệu chi tiết (bản Core, không có robot)
 
-> Cập nhật: 2026-08-10 · Test hiện tại: **198 pass** (`python -m pytest -q`)
+> Cập nhật: 2026-08-10 · Test lúc viết: **198 pass** (`python -m pytest -q`)
 > Phạm vi: bản Core theo `plan_backend_core.md` — Auth/Users, Tasks, Demos (upload/xem/tua/trim/nhãn/duyệt), Datasets (đóng gói zip/tải về). Không có Teleoperation, Training/Eval, Export LeRobot/RLDS thật.
+
+> ⚠️ **TÀI LIỆU CŨ — mô tả bản "Core, không có robot", không phải hệ thống hiện tại.**
+>
+> - Tiền đề "không có robot" **đã hết hiệu lực**: Teleoperation thật và scripted
+>   collection (4 task, gồm ToolHang hai giai đoạn) đều đã chạy.
+> - Số test **198 pass** là con số lúc viết. Hiện tại: **222 pass, 1 fail, 39
+>   skipped** — lỗi `tests/test_rule_engine.py::test_can_rule_passes` đã tồn tại
+>   từ trước và đang được để lại có chủ ý.
+>
+> Phần mô tả Auth/Users/Tasks/Demos/Datasets bên dưới **vẫn còn chính xác** và là
+> lý do giữ file này. Trạng thái tổng thể: xem `README.md`.
 
 ---
 

@@ -9,8 +9,9 @@ line is produced exactly the way the calibration bank was.
 ## Contract
 
 ```text
-task:     lift | can | square         (tool_hang is rejected in v1.0)
+task:     lift | can | square | tool_hang
 quality:  clean | good | medium | poor   default clean
+          (tool_hang supports clean only)
 episodes: positive integer
 seed:     integer 0..2147483647
 output:   path to a new file
@@ -25,11 +26,19 @@ python scripts/collect_scripted_can.py --quality medium --episodes 100 --seed 42
 zero, so every executed action is the operator's plan clipped to the action
 bounds and the operator's observation is passed through untouched.
 
-Tool Hang is refused with:
+Tool Hang **is** collectable — it is in `SUPPORTED_TASKS` and has its own
+collection path (`src/sim/tool_hang_collection.py`), separate from the shared
+tool-registry runner the other three use. What it does not have is a calibrated
+perturbation profile, so asking for any quality other than `clean` is refused by
+`src/sim/perturbations/profiles.py` with:
 
 ```text
 Tool Hang perturbation is not enabled in v1.0; clean baseline C0 is pending.
 ```
+
+Its difficulty control surface is the three placement knobs
+(`--frame-extra`, `--tool-extra`, `--yaw-extra`) instead — see
+[`toolhang_integration.md`](toolhang_integration.md).
 
 ## Presets
 
@@ -64,12 +73,20 @@ SeedSequence([base_seed, task_code, episode_index, 1])
 Task codes are Lift 1, Can 2, Square 3. The variation is sampled once at reset
 and is immutable for the episode; no RNG is called per timestep.
 
-> Known limitation: the environment seed does not currently reproduce object
-> placement. `reset_*_environment` rebinds `env.rng`, but the Robosuite
-> placement sampler holds the generator captured when the environment was built,
-> and `hard_reset=False` never rebuilds it. Variations are fully reproducible
-> from provenance; whole rollouts are not. See
+> Known limitation, **lift / can / square only**: the environment seed does not
+> reproduce object placement. `reset_*_environment` *rebinds* `env.rng` (e.g.
+> `src/sim/lift_env.py:73`), but the Robosuite placement sampler holds the
+> generator captured when the environment was built, and `hard_reset=False`
+> never rebuilds it. Variations are fully reproducible from provenance; whole
+> rollouts are not. See
 > `tests/sim/test_scripted_generation_mujoco.py::test_seeded_reset_reproduces_object_placement`.
+>
+> **ToolHang does not have this defect.** It reseeds the environment's own
+> generator *in place* via `src/sim/skillgen/compat.py::seed_env`, so a seed
+> reproduces an episode bit-identically. Applying the same fix to the other
+> three would invalidate the Phase A baselines and the D2 held-out figures that
+> profile v1 was published against, which is why it has not been done — see
+> `docs/telecollect_phase_e_report.md` §"Open items".
 
 ## Landmarks
 

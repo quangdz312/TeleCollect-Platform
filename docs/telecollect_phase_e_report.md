@@ -4,6 +4,20 @@ Date: 2026-08-09
 Branch: `feat/robosuite-panda`
 Scope: Lift, Can, Square. Tool Hang remains out of v1.0.
 
+> **Historical record — read the date.** This is a point-in-time completion
+> report for Phase E and is kept as it was written; it is not a description of
+> the system today. Two statements above have since been overtaken:
+>
+> - *"Tool Hang remains out of v1.0"* is **no longer true**. ToolHang is
+>   integrated as the full two-stage task — see
+>   [`toolhang_integration.md`](toolhang_integration.md). Its perturbation
+>   *profile* is still pending, which is the part that remains accurate.
+> - Open item 1 below ("seeded reset does not reproduce object placement")
+>   **has been fixed for ToolHang** via `src/sim/skillgen/compat.py::seed_env`.
+>   It is still open for Lift, Can and Square, for the reason the item gives.
+>
+> Current state lives in the repo `README.md` and in `docs/`.
+
 Phase E takes the Phase D perturbation runtime and makes it reachable from the
 user-facing collectors: pick a task and a quality, get a raw dataset whose
 provenance says how it was made.

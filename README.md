@@ -39,11 +39,43 @@ Chi tiết đầy đủ nằm trong các file `.md` được dẫn ở mỗi m�
 
 ### Yêu cầu môi trường
 
-- **Python 3.11.x** (không dùng 3.13 — một số thư viện chưa có wheel sẵn)
+Phiên bản đang chạy thật trong `.venv` của repo này (đo bằng `pip`/`node --version`,
+không phải con số mong muốn):
+
+| Thành phần | Phiên bản | Ghi chú |
+|---|---|---|
+| Python | **3.12.6** | Không dùng 3.13 — một số thư viện chưa có wheel sẵn |
+| robosuite | **1.5.2** | Xem cảnh báo port 1.4.1 → 1.5.2 bên dưới |
+| MuJoCo | **3.8.1** | |
+| NumPy | 1.26.4 | |
+| FastAPI | 0.140.0 | |
+| Node | **22.18.0** | |
+| Next.js | 16.3.x | |
+| React | 19.2.x | |
+| TypeScript | 5.8.x | |
+
+> **Port robosuite 1.4.1 → 1.5.2 làm gãy hai thứ**, đã vá trong
+> `src/sim/skillgen/compat.py`:
+> 1. *Tên site:* `gripper0_grip_site` (1.4) đổi thành `gripper0_right_grip_site`
+>    (1.5) — xử lý trong `compat.grip_site_id()`.
+> 2. *Seeding RNG:* 1.5 chuyển mọi lần bốc reset từ RNG toàn cục của numpy sang
+>    `np.random.default_rng(seed)` riêng theo environment, nên `np.random.seed()`
+>    mà skill vendor dùng không còn tác dụng gì. `compat.seed_env()` gieo lại
+>    generator của chính environment.
+
 - **ffmpeg / ffprobe** cài sẵn và nằm trong PATH — bắt buộc, dùng để đọc metadata
   video, sinh thumbnail và tạo dữ liệu mẫu.
   Kiểm tra: `ffprobe -version`
   Windows: `winget install Gyan.FFmpeg` (mở lại terminal sau khi cài)
+
+### Chọn GPU (Windows / NVIDIA Optimus)
+
+Trên laptop hai card, Windows giao OpenGL cho GPU tích hợp và mọi lần render
+offscreen của MuJoCo phải trả giá. Đặt `SHIM_MCCOMPAT` trong `.env` để đẩy tiến
+trình sang card rời — xem `src/sim/gpu.py`. **Đây là thứ chỉ có trên
+Windows/Optimus**, trên Linux/macOS không cần và không có tác dụng.
+
+Đo trên máy phát triển: thu một batch 36.1 s → **16.9 s**, render 62.4 s → **8.3 s**.
 
 ### Cài đặt
 
@@ -127,11 +159,48 @@ Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh,
 
 ### Phạm vi hiện tại
 
-Backend đang ở **bản Core**: Auth/Users, Tasks, Demos (upload, xem, tua, trim, gắn nhãn,
-duyệt), Datasets (đóng gói zip, tải về). Video demo được đưa vào qua upload thủ công.
+- **Auth/Users, Tasks, Demos** (upload, xem, tua, trim, gắn nhãn, duyệt), **Datasets**
+  (đóng gói zip, tải về).
+- **Teleoperation thật** — điều khiển realtime qua WebSocket trên robosuite/MuJoCo,
+  ghi episode vào DB. Xem `SIM_BACKEND_FRONTEND_INTEGRATION.md`.
+- **Thu scripted tự động** cho 4 task: `lift`, `can`, `square`, `tool_hang`.
+- **Chấm nhãn tự động (MVP)** — xem `docs/auto_labeling_mvp.md`.
 
-Phần Teleoperation (điều khiển robot realtime), Training/Eval và export LeRobot/RLDS
-**chưa làm** — xem `plan_backend_core.md` để biết ranh giới phạm vi, và `plan_backend.md`
-cho kế hoạch đầy đủ.
+Chưa làm: Training/Eval (PyTorch) và export LeRobot/RLDS/DVC.
+
+> `plan_backend_core.md`, `plan_backend.md` và `detail_backend_withoutRobot.md` là
+> **tài liệu kế hoạch cũ**, giữ lại làm lịch sử. Chúng nói Teleoperation "không làm" —
+> điều đó **không còn đúng**. Đọc mục này và các file trong `docs/` để biết trạng
+> thái thật.
+
+### Task ToolHang
+
+Là **task đầy đủ hai giai đoạn**: giai đoạn 1 cắm khung móc vào đế dựng, giai đoạn 2
+treo cờ-lê lên móc vừa dựng. Skill được vendor tại `src/sim/skillgen/`.
+Chi tiết: [`docs/toolhang_integration.md`](docs/toolhang_integration.md).
+
+> Lưu ý về định danh: dataset của ToolHang ghi `tool_name = "tool_hang_stage1"`.
+> Đó là **định danh lịch sử** từ thời chỉ có giai đoạn 1, giữ nguyên để dữ liệu đã
+> thu vẫn đọc được. Tên hiển thị cho người đọc là `TOOLHANG_DISPLAY_NAME`
+> ("ToolHang (stage 1 + stage 2)") trong `src/sim/tool_hang.py`.
+
+### Camera review
+
+Ba camera, dùng **cùng một khung hình** ở cả Teleop lẫn lúc review:
+
+| Camera | Nguồn |
+|---|---|
+| `review_front` | Cài vào scene bởi `src/sim/review_camera.py` |
+| `birdview` | Có sẵn trong robosuite |
+| `robot0_eye_in_hand` | Camera cổ tay, có sẵn |
+
+File mp4 được ghi **ngay lúc thu**, nên mở trang review không phải chờ render.
+
+### Hiệu năng vòng điều khiển — số đo thật
+
+`control_hz` đặt **60**, nhưng đo thật chỉ đạt **~46.6 Hz**. Mục tiêu 60 Hz
+**chưa đạt**. Nguyên nhân: physics 3.2 ms + ba camera 640 px 7.2 ms ≈ **13.4 ms**
+so với ngân sách 16.7 ms; phần còn lại là chi phí vòng lặp và mã hoá.
+Kiểm `control_hz_actual` trong `stats` để biết loop có giữ nhịp không.
 
 ---
