@@ -176,6 +176,7 @@ class ControlLoop:
         self._stream_period = 1.0 / settings.stream_fps
         self._preview_camera = settings.preview_camera
         self._preview_camera_secondary = settings.preview_camera_secondary
+        self._preview_camera_tertiary = settings.preview_camera_tertiary
         # 0 = không giới hạn: operator tự quyết lúc nào dừng, giống local UI.
         # Trần cũ lấy từ `TaskSpec.max_steps` (500 bước ≈ 16 giây) làm episode
         # tự chốt giữa chừng khi thao tác dài hơn.
@@ -202,6 +203,7 @@ class ControlLoop:
         self._output: LoopOutput | None = None
         self._frame: bytes | None = None
         self._frame_secondary: bytes | None = None
+        self._frame_tertiary: bytes | None = None
         self._frame_seq = 0
         self._session_state = "idle"
         self._episode_id: str | None = None
@@ -323,18 +325,19 @@ class ControlLoop:
             seq = self._frame_seq
         return None if frame is None else (seq, frame)
 
-    def take_frames(self) -> tuple[int, bytes | None, bytes | None]:
-        """Lấy cả camera chính lẫn camera phụ trong một lần khoá.
+    def take_frames(self) -> tuple[int, bytes | None, bytes | None, bytes | None]:
+        """Lấy cả ba camera preview trong một lần khoá.
 
-        Lấy chung một lần để hai khung hình trên browser thuộc cùng một tick —
-        hai lời gọi riêng có thể rơi vào hai tick khác nhau và khiến ảnh cổ tay
+        Lấy chung một lần để ba khung hình trên browser thuộc cùng một tick —
+        ba lời gọi riêng có thể rơi vào ba tick khác nhau và khiến ảnh cổ tay
         lệch pha với ảnh tổng thể.
         """
         with self._state_lock:
             primary, self._frame = self._frame, None
             secondary, self._frame_secondary = self._frame_secondary, None
+            tertiary, self._frame_tertiary = self._frame_tertiary, None
             seq = self._frame_seq
-        return seq, primary, secondary
+        return seq, primary, secondary, tertiary
 
     def session_state(self) -> str:
         with self._state_lock:
@@ -534,14 +537,19 @@ class ControlLoop:
                 renderer = self.env._renderer
             jpeg = renderer.encode_jpeg(frame, quality=self._jpeg_quality)
 
-            # Camera phụ (vd cổ tay) lấy thẳng ảnh đã render cho dataset —
-            # khung nhỏ nên không cần độ phân giải cao, và không tốn thêm
-            # một lần render mỗi tick.
-            jpeg_secondary: bytes | None = None
-            if self._preview_camera_secondary:
-                raw = obs.images.get(self._preview_camera_secondary)
-                if raw is not None:
-                    jpeg_secondary = self.env._renderer.encode_jpeg(raw, quality=self._jpeg_quality)
+            # Hai camera phụ (tổng quan trên cao + cổ tay) lấy thẳng ảnh đã
+            # render cho dataset — khung nhỏ nên không cần độ phân giải cao, và
+            # không tốn thêm lần render nào mỗi tick.
+            def side(name: str) -> bytes | None:
+                if not name:
+                    return None
+                raw = obs.images.get(name)
+                if raw is None:
+                    return None
+                return self.env._renderer.encode_jpeg(raw, quality=self._jpeg_quality)
+
+            jpeg_secondary = side(self._preview_camera_secondary)
+            jpeg_tertiary = side(self._preview_camera_tertiary)
         except Exception as exc:
             self._set_error("RENDER_FAILED", str(exc))
             return
@@ -554,6 +562,7 @@ class ControlLoop:
                     self._dropped_frames += 1
             self._frame = jpeg
             self._frame_secondary = jpeg_secondary
+            self._frame_tertiary = jpeg_tertiary
             self._frame_seq = seq
 
     # ----- command handlers (chỉ chạy trên worker thread) -----

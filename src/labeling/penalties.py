@@ -31,7 +31,26 @@ EXPECTED_GRIPPER_TOGGLES: Mapping[str, int] = {
     "lift": 1,   # close on the cube and hold
     "can": 2,    # close on the can, open over the bin
     "square": 2,  # close on the nut, open over the peg
+    # Two grasps, not one: stage 1 closes on the hook frame and opens to let the
+    # rod seat, stage 2 closes on the wrench and opens to hang it. Measured as 4
+    # on collected full-task episodes, not assumed from the source.
+    "tool_hang": 4,
 }
+
+#: Tasks whose label comes from the simulator's own physics predicate rather
+#: than from inferred quality. For these, three measures stop being gates and
+#: become information only:
+#:
+#: * ``jerkiness`` and ``unusual_length`` are defined against the batch, which
+#:   INTEGRATION.md 6.5 forbids and measured backwards: a batch-relative fence
+#:   over successes rejected a correct episode, while the same fence over a
+#:   dirtier batch rejected nobody.
+#: * ``idle_after_trim`` because the stillness is physically mandated -- the rod
+#:   only seats under gravity after the fingers open, so a *correct* episode is
+#:   ~19% idle with a 21.3 s still stretch (6.4).
+#:
+#: They are still measured and reported; they simply contribute zero.
+PREDICATE_LABELLED_TASKS: frozenset[str] = frozenset({"tool_hang"})
 
 
 @dataclass(frozen=True)
@@ -190,12 +209,22 @@ def penalties(
     # existence for being the worst of eight. Report 0 until the corpus is big
     # enough to mean something. Under-penalising is the safe direction, because
     # a penalty can only ever push an episode toward human review.
-    relative_ready = stats.count >= config.min_corpus_for_relative
+    #
+    # A task labelled by the simulator's own predicate reaches the same "report
+    # it, do not gate on it" state permanently rather than until the corpus
+    # grows, so it takes the same path out.
+    advisory = stats.task in PREDICATE_LABELLED_TASKS
+    relative_ready = stats.count >= config.min_corpus_for_relative and not advisory
     insufficient = {
         "corpus_count": stats.count,
         "corpus_required": config.min_corpus_for_relative,
         "status": "insufficient_corpus",
     }
+    advisory_only = {
+        "status": "advisory_only",
+        "reason": f"{stats.task} is labelled by the simulator predicate",
+    }
+    not_gated = advisory_only if advisory else insufficient
 
     percentile = stats.jerk_percentile(raw.jerk_rms)
     results.append(
@@ -205,7 +234,7 @@ def penalties(
             percentile,
             {"jerk_rms": raw.jerk_rms, "corpus_count": stats.count}
             if relative_ready
-            else {"jerk_rms": raw.jerk_rms, **insufficient},
+            else {"jerk_rms": raw.jerk_rms, **not_gated},
         ),
     )
 
@@ -246,7 +275,7 @@ def penalties(
             config.length_zscore(zscore) if relative_ready else 0.0,
             zscore,
             {"length": raw.length, "task_median": stats.length_median, "mad": stats.length_mad}
-            | ({} if relative_ready else insufficient),
+            | ({} if relative_ready else not_gated),
         ),
     )
 
@@ -262,9 +291,9 @@ def penalties(
     results.append(
         PenaltyResult(
             "idle_after_trim",
-            config.idle_after_trim(raw.idle_ratio_after_trim),
+            0.0 if advisory else config.idle_after_trim(raw.idle_ratio_after_trim),
             raw.idle_ratio_after_trim,
-            {},
+            advisory_only if advisory else {},
         ),
     )
     return results

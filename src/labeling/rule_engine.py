@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -138,6 +138,8 @@ def evaluate_rules(
         results = _can_rules(episode, config)
     elif task == "square":
         results = _square_rules(episode, config)
+    elif task == "tool_hang":
+        results = _tool_hang_rules(episode)
     else:
         results = [
             RuleResult(
@@ -221,18 +223,24 @@ def load_scripted_rule_episode(
 
     import h5py
 
+    # The `telecollect_*` attribute decoding, including the sampled-variation
+    # JSON, already lives next to the array loader; ToolHang's rule reads its
+    # verdict out of it, so carry it through rather than re-parsing it here.
+    from .features import _provenance
+
     source = Path(hdf5_path)
     episode_id = f"{source.name}::{demo_key}"
     with h5py.File(source, "r") as handle:
         demo = handle["data"][demo_key]
         recorded_success = bool(demo.attrs.get("success", False))
+        provenance = _provenance(demo)
         if "states" not in demo:
             return RuleEpisode(
                 episode_id,
                 task,
                 "scripted",
                 recorded_success=recorded_success,
-                metadata={"missing": "states"},
+                metadata=provenance | {"missing": "states"},
             )
         states = np.asarray(demo["states"], dtype=np.float64)
     if env is None:
@@ -241,9 +249,9 @@ def load_scripted_rule_episode(
             task,
             "scripted",
             recorded_success=recorded_success,
-            metadata={"state_frames": int(states.shape[0])},
+            metadata=provenance | {"state_frames": int(states.shape[0])},
         )
-    return episode_from_env_states(
+    decoded = episode_from_env_states(
         env=env,
         states=states,
         task=task,
@@ -252,6 +260,7 @@ def load_scripted_rule_episode(
         control_hz=_env_control_hz(env),
         recorded_success=recorded_success,
     )
+    return replace(decoded, metadata=provenance)
 
 
 def episode_from_env_states(
@@ -311,6 +320,11 @@ def _normalize_task(task: str) -> str:
         "nut_assembly_square": "square",
         "assemble_square": "square",
         "square": "square",
+        # The collector writes task "tool_hang" and tool_name "tool_hang_stage1"
+        # (kept at the stage-1 name so already-collected datasets stay readable,
+        # even though the task is now both stages).
+        "tool_hang": "tool_hang",
+        "tool_hang_stage1": "tool_hang",
     }
     return mapping.get(task, task)
 
@@ -446,6 +460,65 @@ def _square_rules(episode: RuleEpisode, config: RuleConfig) -> list[RuleResult]:
                 "release_distance_m": config.release_distance_m,
                 "angle_tolerance_deg": config.square_angle_tolerance_deg,
             },
+        )
+    ]
+
+
+def _tool_hang_rules(episode: RuleEpisode) -> list[RuleResult]:
+    """ToolHang is judged by the simulator, not by this engine.
+
+    Every other task here infers a verdict from the trajectory because nothing
+    better exists. ToolHang does have something better: the collector records
+    robosuite's own `_check_frame_assembled` and `_check_tool_on_frame` into
+    episode provenance. Re-deriving a verdict from trajectory shape while
+    holding that predicate would be strictly worse, so the predicate *is* the
+    rule and there is no threshold to configure.
+
+    Datasets collected before those predicates were recorded degrade to
+    ``cannot_evaluate``, which routes them to a human -- the existing behaviour
+    for ToolHang and the right answer when the ground truth is simply absent.
+    """
+
+    variation = episode.metadata.get("sampled_variation")
+    variation = variation if isinstance(variation, Mapping) else {}
+    stage1 = variation.get("stage1_env_predicate")
+    stage2 = variation.get("stage2_tool_on_frame")
+    measured: dict[str, Any] = {
+        "stage1_env_predicate": stage1,
+        "stage2_tool_on_frame": stage2,
+    }
+    if not isinstance(stage1, bool) or not isinstance(stage2, bool):
+        return [
+            RuleResult(
+                "tool_hang.env_predicate",
+                "cannot_evaluate",
+                measured_values=measured,
+                message="episode provenance does not carry the simulator predicates",
+            )
+        ]
+    if stage1 and stage2:
+        return [
+            RuleResult(
+                "tool_hang.env_predicate",
+                "pass",
+                measured_values=measured,
+                message="robosuite confirms the frame is assembled and the wrench is hung",
+            )
+        ]
+
+    # `failure_stage` holds the failure *kind* the collector settled on (it
+    # prefers the stage's own code over an unexplained predicate miss), and it
+    # is written as an empty string rather than absent when there is none.
+    failed_stage = "stage1" if not stage1 else "stage2"
+    kind = str(episode.metadata.get("failure_stage") or "unknown")
+    phase = str(episode.metadata.get("terminal_phase") or "unknown")
+    measured |= {"failed_stage": failed_stage, "failure_kind": kind, "terminal_phase": phase}
+    return [
+        RuleResult(
+            "tool_hang.env_predicate",
+            "fail",
+            measured_values=measured,
+            message=f"{failed_stage} predicate false: {kind} in phase {phase}",
         )
     ]
 

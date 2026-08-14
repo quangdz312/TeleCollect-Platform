@@ -198,6 +198,10 @@ def submit_collection(
             output=output,
             overwrite=True,
             logger=log,
+            # Write the review video as the rollout happens. `render_video`
+            # below returns the cached file when one exists, so the loop that
+            # follows becomes a no-op for anything captured here.
+            video_dir=workspace.videos_dir,
         )
         scores = workspace.rescore()
         batch_scores = [
@@ -244,9 +248,10 @@ def render_video(workspace: Workspace, episode_id: str) -> Path:
 
     from .playback import PlaybackConfig, render_demo
 
-    # Bigger than the CLI default: the reviewer is judging whether a grasp was
-    # solid, and 256 px upscaled in a browser hides exactly that.
-    config = PlaybackConfig(height=480, width=480)
+    # Matches what the collection-time recorder writes, so a rebuilt video is
+    # interchangeable with a cached one. The reviewer is judging whether a grasp
+    # was solid, and a small frame upscaled in a browser hides exactly that.
+    config = PlaybackConfig(height=640, width=640)
 
     target = workspace.video_path(episode_id)
     if target.exists():

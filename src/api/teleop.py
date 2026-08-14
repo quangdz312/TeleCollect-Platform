@@ -19,8 +19,9 @@ Giao thức WebSocket trên `/teleop/ws/{session_id}`:
         JSON   {"type": "stats", ...} / {"type": "pong", ...}
         JSON   {"type": "error", "code": "...", "detail": "..."}
         BINARY 1 byte chỉ số camera + JPEG thuần
-               b"\\x00" = camera chính (preview_camera)
-               b"\\x01" = camera phụ   (preview_camera_secondary, vd cổ tay)
+               b"\\x00" = camera chính (preview_camera, vd review_front)
+               b"\\x01" = camera phụ 1 (preview_camera_secondary, vd birdview)
+               b"\\x02" = camera phụ 2 (preview_camera_tertiary, vd cổ tay)
 
 `seq` được phản chiếu lại trong `obs` để client đo round-trip latency mà
 không cần đồng bộ đồng hồ hai phía. Frame gửi dạng binary thuần thay vì base64
@@ -117,10 +118,12 @@ def _ensure_playback_aliases(episode_id: str) -> tuple[bool, int]:
         if source.exists() and source.resolve() != target.resolve():
             shutil.copyfile(source, target)
 
+    # The wrist view is the tertiary preview: secondary is the overhead
+    # `birdview`, which is not what `wrist.mp4` is supposed to hold.
     wrist_source = None
-    secondary = settings.preview_camera_secondary.strip()
-    if secondary:
-        wrist_source = storage.video_path(episode_id, secondary)
+    wrist_camera = settings.preview_camera_tertiary.strip()
+    if wrist_camera:
+        wrist_source = storage.video_path(episode_id, wrist_camera)
     if (wrist_source is None or not wrist_source.exists()) and len(cameras) > 1:
         wrist_source = storage.video_path(episode_id, cameras[1])
 
@@ -372,7 +375,8 @@ class _Controller:
         Định dạng khung binary: 1 byte chỉ số camera + JPEG thuần.
 
             b"\\x00" + jpeg   -> camera chính (preview_camera, độ phân giải cao)
-            b"\\x01" + jpeg   -> camera phụ   (preview_camera_secondary, vd cổ tay)
+            b"\\x01" + jpeg   -> camera phụ 1 (preview_camera_secondary, vd birdview)
+            b"\\x02" + jpeg   -> camera phụ 2 (preview_camera_tertiary, vd cổ tay)
 
         Một byte header rẻ hơn nhiều so với bọc JSON + base64 (phình 33% trên
         đường nóng), mà vẫn cho client biết khung hình thuộc camera nào.
@@ -384,12 +388,14 @@ class _Controller:
             await asyncio.sleep(period)
             if loop is None or not loop.is_alive():
                 return
-            _, primary, secondary = loop.take_frames()
+            _, primary, secondary, tertiary = loop.take_frames()
             try:
                 if primary is not None:
                     await self.ws.send_bytes(b"\x00" + primary)
                 if secondary is not None:
                     await self.ws.send_bytes(b"\x01" + secondary)
+                if tertiary is not None:
+                    await self.ws.send_bytes(b"\x02" + tertiary)
             except Exception:
                 self._closing.set()
                 return

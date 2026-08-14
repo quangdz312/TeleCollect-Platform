@@ -78,14 +78,25 @@ def _task_catalogue() -> list[dict[str, Any]]:
     """Horizon mặc định lấy từ chính task spec, không chép tay lại."""
 
     from src.sim.scripted_generation import collection_task_spec
+    from src.sim.tool_hang import TOOLHANG_DISPLAY_NAME, TOOLHANG_TOOL_NAME
 
     catalogue = []
     for task in supported_tasks():
         spec = collection_task_spec(task)
+        # `tool_name` is a stored dataset identifier, and ToolHang's is the
+        # historical `tool_hang_stage1` even though the task runs both stages.
+        # Send a display name so the picker does not tell the operator they are
+        # collecting stage 1 only.
+        label = (
+            TOOLHANG_DISPLAY_NAME
+            if spec.tool_name == TOOLHANG_TOOL_NAME
+            else spec.tool_name
+        )
         catalogue.append(
             {
                 "task": task,
                 "tool": spec.tool_name,
+                "tool_label": label,
                 "default_horizon": spec.default_horizon,
             },
         )
@@ -144,9 +155,12 @@ async def start_run(
     if request.task not in supported_tasks():
         raise HTTPException(400, f"task không hợp lệ: {request.task}")
     if request.quality not in supported_qualities():
-        if request.task == "tool_hang" and request.quality != "clean":
-            raise HTTPException(400, "ToolHang hiện chỉ hỗ trợ quality clean")
         raise HTTPException(400, f"quality không hợp lệ: {request.quality}")
+    # Nested under the check above this only fired for qualities that were
+    # already rejected, so every valid-but-unsupported quality reached the
+    # collector and failed there instead.
+    if request.task == "tool_hang" and request.quality != "clean":
+        raise HTTPException(400, "ToolHang hiện chỉ hỗ trợ quality clean")
 
     space = workspace()
     from src.labeling.jobs import submit_collection

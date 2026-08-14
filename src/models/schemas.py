@@ -170,7 +170,13 @@ class CreateSessionRequest(BaseModel):
     task_name: str = "lift_cube"
     operator_id: str = Field(default="", max_length=64)
     seed: int | None = None
-    image_size: int = Field(default=480, ge=32, le=512)
+    image_size: int = Field(default=640, ge=32, le=1024)
+    """Độ phân giải ảnh ghi vào dataset.
+
+    Trần nâng lên 1024 để cho phép 640: đo trên GPU rời, render 3 camera 640px
+    tốn 3.4 ms so với 1.9 ms ở 256px, nên độ phân giải gần như miễn phí và
+    không đáng đánh đổi lấy tốc độ (xem `src/sim/gpu.py`).
+    """
 
 
 class SessionResponse(BaseModel):
