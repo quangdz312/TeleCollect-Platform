@@ -12,6 +12,8 @@ import {
 import { TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
+import { HandControl } from "@/components/HandControl";
+import type { AxisInput } from "@/lib/teleop";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -35,6 +37,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     y: 0,
   });
   const logId = useRef(0);
+  const handInputRef = useRef<AxisInput | null>(null);
 
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "pick_place");
   const [status, setStatus] = useState<Status>("idle");
@@ -61,6 +64,14 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
         ...previous,
       ].slice(0, 60),
     );
+  }, []);
+
+  const handleHandInput = useCallback((input: AxisInput | null) => {
+    handInputRef.current = input;
+  }, []);
+
+  const handleHandGripper = useCallback((closed: boolean) => {
+    inputRef.current.setGripper(closed);
   }, []);
 
   // -- connection ------------------------------------------------------
@@ -118,7 +129,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     let raf = 0;
     const pump = () => {
       const client = clientRef.current;
-      if (client) client.input = collector.sample();
+      if (client) client.input = handInputRef.current ?? collector.sample();
       const pads = navigator.getGamepads?.() ?? [];
       const pad = Array.from(pads).find((p) => p && p.connected);
       setGamepad(pad ? pad.id.slice(0, 40) : null);
@@ -324,6 +335,16 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               value={stats ? String(stats.dropped) : "—"}
               tone={stats && stats.dropped > 0 ? "warn" : "ok"}
             />
+            <Metric
+              label="JPEG decode"
+              value={stats?.decode !== undefined ? `${stats.decode.toFixed(1)} ms` : "—"}
+              tone={stats?.decode !== undefined && stats.decode > 12 ? "warn" : "ok"}
+            />
+            <Metric
+              label="Decode p95"
+              value={stats?.decodeP95 !== undefined ? `${stats.decodeP95.toFixed(1)} ms` : "—"}
+              tone={stats?.decodeP95 !== undefined && stats.decodeP95 > 20 ? "warn" : "ok"}
+            />
           </div>
           <p className="mt-3 text-xs text-ink-400">
             Round trip is measured on the browser clock: the server echoes back the timestamp of
@@ -401,6 +422,13 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               </ul>
             </div>
           )}
+        </Card>
+
+        <Card title="Hand camera control" subtitle="Relative RGB depth via palm size">
+          <HandControl
+            onInput={handleHandInput}
+            onGripper={handleHandGripper}
+          />
         </Card>
 
         <Card title="Session log">

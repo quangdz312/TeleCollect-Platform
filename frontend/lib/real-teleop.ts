@@ -50,13 +50,16 @@ function wsOrigin() {
   return configured.replace(/^http/, "ws").replace(/\/$/, "");
 }
 
-async function bitmapFromPayload(blob: Blob): Promise<{ camera: string; bitmap: ImageBitmap } | null> {
+async function bitmapFromPayload(blob: Blob): Promise<{ camera: string; bitmap: ImageBitmap; decodeMs: number } | null> {
   if (blob.size < 2) return null;
   const cameraIndex = new Uint8Array(await blob.slice(0, 1).arrayBuffer())[0];
   const jpeg = blob.slice(1, undefined, "image/jpeg");
+  const decodeStartedAt = performance.now();
+  const bitmap = await createImageBitmap(jpeg);
   return {
     camera: cameraIndex === 1 ? "wrist" : "front",
-    bitmap: await createImageBitmap(jpeg),
+    bitmap,
+    decodeMs: performance.now() - decodeStartedAt,
   };
 }
 
@@ -69,6 +72,7 @@ export class TeleopClient {
   private inputSentAt = new Map<number, number>();
   private rttSamples: number[] = [];
   private frameTimes: number[] = [];
+  private decodeSamples: number[] = [];
   private latestImages = new Map<string, ImageBitmap>();
   private latestObs: ObsMessage | null = null;
   private latestStats: StatsMessage | null = null;
@@ -194,6 +198,8 @@ export class TeleopClient {
     if (!payload || !this.latestObs) return;
     this.latestImages.get(payload.camera)?.close();
     this.latestImages.set(payload.camera, payload.bitmap);
+    this.decodeSamples.push(payload.decodeMs);
+    if (this.decodeSamples.length > RTT_WINDOW) this.decodeSamples.shift();
     this.frameTimes.push(performance.now());
     while (this.frameTimes.length && performance.now() - this.frameTimes[0] > 1000) {
       this.frameTimes.shift();
@@ -289,6 +295,8 @@ export class TeleopClient {
       tick: 1000 / (stats?.control_hz_actual || CONTROL_HZ),
       work: stats?.p50_latency_ms ?? 0,
       dropped: stats?.dropped_frames ?? 0,
+      decode: percentile(this.decodeSamples, 0.5),
+      decodeP95: percentile(this.decodeSamples, 0.95),
     });
   }
 }
