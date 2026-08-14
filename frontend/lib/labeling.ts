@@ -11,7 +11,9 @@ export type AutoLabel = "accept" | "review" | "reject";
 
 export interface TaskOption {
   task: string;
+  /** Stored dataset identifier. Not for display — use `tool_label`. */
   tool: string;
+  tool_label?: string;
   default_horizon: number;
 }
 

@@ -78,7 +78,7 @@ export function ScriptedCollector() {
           <Field label="Task">
             <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
               {config?.tasks.map((item) => (
-                <option key={item.task} value={item.task}>{item.task} · {item.tool}</option>
+                <option key={item.task} value={item.task}>{item.task} · {item.tool_label ?? item.tool}</option>
               ))}
             </Select>
           </Field>

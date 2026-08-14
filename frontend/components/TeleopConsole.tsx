@@ -9,7 +9,7 @@ import {
   type LatencyStats,
   type TeleopEvent,
 } from "@/lib/teleop";
-import { TeleopClient } from "@/lib/real-teleop";
+import { CONTROL_HZ, TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
 
@@ -26,6 +26,7 @@ const JOINT_LABELS = ["j1", "j2", "j3", "j4", "j5", "j6", "grip"];
 
 export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const frontRef = useRef<HTMLCanvasElement | null>(null);
+  const topRef = useRef<HTMLCanvasElement | null>(null);
   const wristRef = useRef<HTMLCanvasElement | null>(null);
   const clientRef = useRef<TeleopClient | null>(null);
   const inputRef = useRef(new InputCollector());
@@ -79,6 +80,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     client.onFrame = (state, images) => {
       setFrame(state);
       paint(frontRef.current, images.get("front"));
+      paint(topRef.current, images.get("top"));
       paint(wristRef.current, images.get("wrist"));
     };
     client.onStats = setStats;
@@ -159,7 +161,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const recording = frame?.recording ?? false;
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="space-y-5">
         <Card
           title={
@@ -201,94 +203,59 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             </>
           }
         >
-          {/* Sized to whatever vertical space is left rather than to a fixed
-              number of pixels: `flex-1 min-h-0` takes the remainder of the card
-              and the square aspect derives the width from it.  That keeps the
-              view as large as it can be while the transport buttons under it
-              stay on screen, at any window height, with no scrolling. */}
-          <div className="flex flex-col xl:h-[calc(100dvh-11.5rem)]">
-          <div className="relative mx-auto aspect-square min-h-0 w-auto flex-1 overflow-hidden rounded-lg border border-ink-700 bg-black">
-            <canvas
-              ref={frontRef}
-              width={256}
-              height={256}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-              onWheel={onWheel}
-              className={cx(
-                "block h-full w-full touch-none select-none",
-                connected ? "cursor-grab active:cursor-grabbing" : "opacity-30",
-              )}
-              style={{ imageRendering: "auto" }}
-            />
-            <canvas
-              ref={wristRef}
-              width={128}
-              height={128}
-              className="absolute bottom-3 right-3 h-32 w-32 rounded-md border border-ink-600 bg-black shadow-lg"
-            />
-            {frame?.success && (
-              <div className="absolute left-3 top-3 rounded-md bg-ok-600/90 px-2.5 py-1 text-xs font-semibold text-white">
-                Task complete
-              </div>
-            )}
-            {!connected && (
-              <div className="absolute inset-0 grid place-items-center text-sm text-ink-400">
-                {status === "connecting" ? "Connecting…" : "Not connected"}
-              </div>
-            )}
-          </div>
+          <div className="flex flex-col">
+          {/* Three panes, same layout and same rendered size as the scripted
+              review: the main review angle on the left, overhead and wrist
+              stacked to its right. A square main pane beside a half-width
+              column makes the row 3:2, and splitting it 2:1 sizes every pane
+              from the row alone.
 
-          <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              variant={recording ? "danger" : "success"}
-              disabled={!connected}
-              onClick={() =>
-                recording
-                  ? clientRef.current?.stopRecording(true)
-                  : clientRef.current?.startRecording()
-              }
-            >
-              {recording ? "Stop & save" : "Start recording"}
-            </Button>
-            <Button
-              variant="subtle"
-              disabled={!connected || !recording}
-              onClick={() => clientRef.current?.stopRecording(false)}
-            >
-              Discard take
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!connected}
-              onClick={() => clientRef.current?.reset()}
-            >
-              New scene
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!connected}
-              onClick={() => {
-                inputRef.current.setGripper(!gripperClosed);
-              }}
-            >
-              {gripperClosed ? "Open gripper" : "Close gripper"}
-            </Button>
-            {lastSaved && (
-              <Link
-                href={`/review/${lastSaved}`}
-                className="ml-auto text-xs text-accent-400 hover:underline"
-              >
-                Review the take just saved →
-              </Link>
-            )}
+              `w-full` with no height cap is exactly what review's
+              `<video className="w-full">` does: the row takes the column's
+              width and derives its height from the 3:2 ratio. Nothing sits
+              under the panes any more — the transport buttons now live in the
+              right column — so there is no vertical budget left to reserve
+              and no reason to clamp the width down to fit one. */}
+          <div className="flex aspect-[3/2] w-full gap-2">
+            <div className="relative h-full flex-[2] overflow-hidden rounded-lg border border-ink-700 bg-black">
+              <canvas
+                ref={frontRef}
+                width={256}
+                height={256}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                onWheel={onWheel}
+                className={cx(
+                  "block h-full w-full touch-none select-none",
+                  connected ? "cursor-grab active:cursor-grabbing" : "opacity-30",
+                )}
+                style={{ imageRendering: "auto" }}
+              />
+              {frame?.success && (
+                <div className="absolute left-3 top-3 rounded-md bg-ok-600/90 px-2.5 py-1 text-xs font-semibold text-white">
+                  Task complete
+                </div>
+              )}
+              {!connected && (
+                <div className="absolute inset-0 grid place-items-center text-sm text-ink-400">
+                  {status === "connecting" ? "Connecting…" : "Not connected"}
+                </div>
+              )}
+            </div>
+            {/* `basis-0 min-h-0` makes the two panes split the column's height
+                evenly instead of each demanding its own square size, which
+                would grow the row past the card and push the transport buttons
+                off screen. */}
+            <div className="flex h-full min-h-0 flex-1 flex-col gap-2">
+              <SidePane label="overhead" canvasRef={topRef} connected={connected} />
+              <SidePane label="wrist" canvasRef={wristRef} connected={connected} />
+            </div>
           </div>
 
           <p className="mt-2 shrink-0 text-xs text-ink-400">
-            Recording starts from a fresh randomised scene. Drag on the view to move in the
-            table plane, scroll to change height, or use the keyboard/gamepad.
+            Drag to move in the table plane, scroll for height, or use the keyboard/gamepad.
           </p>
           </div>
         </Card>
@@ -312,12 +279,12 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             <Metric
               label="Tick interval"
               value={stats ? `${stats.tick.toFixed(1)} ms` : "—"}
-              tone={stats && Math.abs(stats.tick - 33.3) > 8 ? "warn" : "ok"}
+              tone={stats && Math.abs(stats.tick - 1000 / CONTROL_HZ) > 5 ? "warn" : "ok"}
             />
             <Metric
               label="Server work"
               value={stats ? `${stats.work.toFixed(1)} ms` : "—"}
-              tone={stats && stats.work > 28 ? "warn" : "ok"}
+              tone={stats && stats.work > 0.85 * (1000 / CONTROL_HZ) ? "warn" : "ok"}
             />
             <Metric
               label="Frames dropped"
@@ -335,6 +302,60 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       </div>
 
       <div className="space-y-5">
+        {/* Transport lives here, the way review puts Accept / Reject /
+            Refresh video in its "Verdict" card. Out from under the panes,
+            nothing below them competes for their height. */}
+        <Card title="Transport">
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={recording ? "danger" : "success"}
+                disabled={!connected}
+                onClick={() =>
+                  recording
+                    ? clientRef.current?.stopRecording(true)
+                    : clientRef.current?.startRecording()
+                }
+              >
+                {recording ? "Stop & save" : "Start recording"}
+              </Button>
+              <Button
+                variant="subtle"
+                disabled={!connected || !recording}
+                onClick={() => clientRef.current?.stopRecording(false)}
+              >
+                Discard take
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="ghost"
+                disabled={!connected}
+                onClick={() => clientRef.current?.reset()}
+              >
+                New scene
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!connected}
+                onClick={() => {
+                  inputRef.current.setGripper(!gripperClosed);
+                }}
+              >
+                {gripperClosed ? "Open gripper" : "Close gripper"}
+              </Button>
+            </div>
+            {lastSaved && (
+              <Link
+                href={`/review/${lastSaved}`}
+                className="block text-xs text-accent-400 hover:underline"
+              >
+                Review the take just saved →
+              </Link>
+            )}
+          </div>
+        </Card>
+
         <Card title="Robot state">
           {frame ? (
             <div className="space-y-3">
@@ -477,6 +498,30 @@ function handleEvent(
       }
       break;
   }
+}
+
+function SidePane({
+  label,
+  canvasRef,
+  connected,
+}: {
+  label: string;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  connected: boolean;
+}) {
+  return (
+    <div className="relative min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-ink-700 bg-black">
+      <canvas
+        ref={canvasRef}
+        width={128}
+        height={128}
+        className={cx("block h-full w-full", connected ? "" : "opacity-30")}
+      />
+      <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-300">
+        {label}
+      </span>
+    </div>
+  );
 }
 
 function paint(canvas: HTMLCanvasElement | null, bitmap: ImageBitmap | undefined) {

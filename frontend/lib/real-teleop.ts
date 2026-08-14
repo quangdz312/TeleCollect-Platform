@@ -3,7 +3,10 @@
 import { API_ORIGIN, apiUrl } from "./api";
 import type { AxisInput, FrameState, LatencyStats, TeleopEvent } from "./teleop";
 
-const CONTROL_HZ = 30;
+// Input send rate. Matches the server's `control_hz` so each tick gets a fresh
+// command; the server overwrites unread input anyway, so being off is safe but
+// wasteful in one direction and laggy in the other.
+export const CONTROL_HZ = 60;
 const RTT_WINDOW = 120;
 
 type ObsMessage = {
@@ -50,12 +53,16 @@ function wsOrigin() {
   return configured.replace(/^http/, "ws").replace(/\/$/, "");
 }
 
+// Index order matches the server's frame header (see src/api/teleop.py):
+// 0 = main review angle, 1 = overhead birdview, 2 = wrist camera.
+const CAMERA_BY_INDEX = ["front", "top", "wrist"] as const;
+
 async function bitmapFromPayload(blob: Blob): Promise<{ camera: string; bitmap: ImageBitmap } | null> {
   if (blob.size < 2) return null;
   const cameraIndex = new Uint8Array(await blob.slice(0, 1).arrayBuffer())[0];
   const jpeg = blob.slice(1, undefined, "image/jpeg");
   return {
-    camera: cameraIndex === 1 ? "wrist" : "front",
+    camera: CAMERA_BY_INDEX[cameraIndex] ?? "front",
     bitmap: await createImageBitmap(jpeg),
   };
 }
@@ -95,7 +102,7 @@ export class TeleopClient {
           Authorization: `Bearer ${this.token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ task_name: task, image_size: 480 }),
+        body: JSON.stringify({ task_name: task, image_size: 640 }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
