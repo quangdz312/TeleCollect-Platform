@@ -99,7 +99,7 @@ export function ScriptedCollector() {
               <Badge tone={job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : "info"}>{job.status}</Badge>
               <span className="tabular text-ink-400">{job.done}/{job.total}</span>
             </div>
-            <div className="max-h-36 space-y-1 overflow-y-auto text-ink-300">{job.log.slice(-8).map((line) => <div key={line}>{line}</div>)}</div>
+            <div className="max-h-36 space-y-1 overflow-y-auto text-ink-300">{job.log.slice(-8).map((line, i) => <div key={i}>{line}</div>)}</div>
           </div>
         )}
       </Card>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
   Alert,
@@ -12,8 +12,27 @@ import {
   Input,
   Select,
 } from "@/components/ui";
-import { api, type DatasetExport, type Summary, type Task } from "@/lib/api";
+import {
+  api,
+  DATASET_POLL_INTERVAL_MS,
+  mediaUrl,
+  type DatasetExport,
+  type Summary,
+  type Task,
+} from "@/lib/api";
 import { bytes, timeAgo } from "@/lib/format";
+
+const STATUS_TONE: Record<string, "ok" | "warn" | "bad" | "info"> = {
+  building: "warn",
+  ready: "ok",
+  failed: "bad",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  building: "Đang đóng gói…",
+  ready: "Sẵn sàng",
+  failed: "Lỗi",
+};
 
 export default function DatasetsPage() {
   const { user } = useAuth();
@@ -31,12 +50,46 @@ export default function DatasetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  const mounted = useRef(true);
+  const pollTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      Object.values(pollTimers.current).forEach(clearTimeout);
+      pollTimers.current = {};
+    };
+  }, []);
+
+  const pollExport = useCallback((id: string) => {
+    if (pollTimers.current[id]) return;
+    const tick = async () => {
+      delete pollTimers.current[id];
+      let detail: DatasetExport;
+      try {
+        detail = await api.exportInfo(id);
+      } catch {
+        return;
+      }
+      if (!mounted.current) return;
+      setExports((prev) => prev.map((it) => (it.id === id ? detail : it)));
+      if (detail.status === "building") {
+        pollTimers.current[id] = setTimeout(tick, DATASET_POLL_INTERVAL_MS);
+      }
+    };
+    pollTimers.current[id] = setTimeout(tick, DATASET_POLL_INTERVAL_MS);
+  }, []);
+
   const load = useCallback(async () => {
     const [e, s, d] = await Promise.all([api.exports(), api.summary(), api.dvc()]);
     setExports(e);
     setSummary(s);
     setDvc(d);
-  }, []);
+    for (const item of e) {
+      if (item.status === "building") pollExport(item.id);
+    }
+  }, [pollExport]);
 
   useEffect(() => {
     if (!user) return;
@@ -59,12 +112,16 @@ export default function DatasetsPage() {
         include_failures: includeFailures,
         overwrite,
       });
-      setInfo(
-        `Exported ${created.num_episodes} episodes / ${created.num_frames.toLocaleString()} frames ` +
-          `(${bytes(created.size_bytes)})` +
-          (created.dvc_hash ? ` · DVC ${created.dvc_hash.slice(0, 12)}` : ""),
-      );
-      await load();
+      setExports((prev) => [created, ...prev.filter((it) => it.id !== created.id)]);
+      if (created.status === "building") {
+        pollExport(created.id);
+        setInfo(`Dataset "${created.name}" đang được đóng gói…`);
+      } else {
+        setInfo(
+          `Exported ${created.num_episodes} episodes / ${created.num_frames.toLocaleString()} frames ` +
+            `(${bytes(created.size_bytes)})`,
+        );
+      }
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Export failed");
     } finally {
@@ -169,47 +226,64 @@ export default function DatasetsPage() {
               <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
                 <tr>
                   <th className="pb-2">Name</th>
-                  <th className="pb-2">Format</th>
+                  <th className="pb-2">Status</th>
                   <th className="pb-2">Tasks</th>
                   <th className="pb-2 text-right">Episodes</th>
                   <th className="pb-2 text-right">Frames</th>
                   <th className="pb-2 text-right">Size</th>
-                  <th className="pb-2">DVC hash</th>
                   <th className="pb-2">Created</th>
-                  {user.role === "admin" && <th className="pb-2" />}
+                  <th className="pb-2" />
                 </tr>
               </thead>
               <tbody className="tabular">
-                {exports.map((item) => (
-                  <tr key={item.id} className="border-t border-ink-700/50">
-                    <td className="py-2 font-medium">{item.name}</td>
-                    <td className="py-2">
-                      <Badge tone="info">{item.format}</Badge>
-                    </td>
-                    <td className="py-2 text-xs text-ink-400">{item.tasks.join(", ")}</td>
-                    <td className="py-2 text-right">{item.num_episodes}</td>
-                    <td className="py-2 text-right">{item.num_frames.toLocaleString()}</td>
-                    <td className="py-2 text-right">{bytes(item.size_bytes)}</td>
-                    <td className="py-2 font-mono text-xs text-ink-400">
-                      {item.dvc_hash ? item.dvc_hash.slice(0, 16) : "—"}
-                    </td>
-                    <td className="py-2 text-xs text-ink-400">{timeAgo(item.created_at)}</td>
-                    {user.role === "admin" && (
-                      <td className="py-2 text-right">
-                        <Button
-                          variant="ghost"
-                          onClick={async () => {
-                            if (!confirm(`Delete export ${item.name}?`)) return;
-                            await api.deleteExport(item.id);
-                            await load();
-                          }}
-                        >
-                          Delete
-                        </Button>
+                {exports.map((item) => {
+                  const status = item.status ?? "ready";
+                  const ready = status === "ready";
+                  return (
+                    <tr key={item.id} className="border-t border-ink-700/50 align-top">
+                      <td className="py-2 font-medium">{item.name}</td>
+                      <td className="py-2">
+                        <Badge tone={STATUS_TONE[status] ?? "info"}>
+                          {STATUS_LABEL[status] ?? status}
+                        </Badge>
+                        {status === "failed" && item.error_message && (
+                          <p className="mt-1 max-w-xs text-xs text-red-400">{item.error_message}</p>
+                        )}
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="py-2 text-xs text-ink-400">{item.tasks.join(", ")}</td>
+                      <td className="py-2 text-right">{ready ? item.num_episodes : "—"}</td>
+                      <td className="py-2 text-right">
+                        {ready ? item.num_frames.toLocaleString() : "—"}
+                      </td>
+                      <td className="py-2 text-right">{ready ? bytes(item.size_bytes) : "—"}</td>
+                      <td className="py-2 text-xs text-ink-400">{timeAgo(item.created_at)}</td>
+                      <td className="py-2 text-right whitespace-nowrap">
+                        {ready && (
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              window.location.href = mediaUrl(`/datasets/${item.id}/download`);
+                            }}
+                          >
+                            Download
+                          </Button>
+                        )}
+                        {user.role === "admin" && (
+                          <Button
+                            variant="ghost"
+                            onClick={async () => {
+                              if (!confirm(`Delete export ${item.name}?`)) return;
+                              await api.deleteExport(item.id);
+                              await load();
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

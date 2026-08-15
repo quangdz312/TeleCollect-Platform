@@ -16,7 +16,7 @@ import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
 
 interface LogLine {
-  id: number;
+  id: string;
   text: string;
   tone: "info" | "ok" | "bad";
   at: string;
@@ -35,7 +35,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     x: 0,
     y: 0,
   });
-  const logId = useRef(0);
 
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "pick_place");
   const [status, setStatus] = useState<Status>("idle");
@@ -50,11 +49,10 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const task = useMemo(() => tasks.find((t) => t.id === taskId), [tasks, taskId]);
 
   const pushLog = useCallback((text: string, tone: LogLine["tone"] = "info") => {
-    logId.current += 1;
     setLogs((previous) =>
       [
         {
-          id: logId.current,
+          id: crypto.randomUUID(),
           text,
           tone,
           at: new Date().toLocaleTimeString(),

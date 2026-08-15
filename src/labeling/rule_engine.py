@@ -534,7 +534,10 @@ def _longest_run(mask: np.ndarray) -> int:
 def _max_tail_speed(position: np.ndarray, control_hz: float, frames: int) -> float:
     if position.shape[0] <= 1:
         return math.inf
-    tail = position[-min(position.shape[0], frames + 1) :]
+    # Only measure velocity *within* the tail window itself — including one
+    # frame before it would count the object's approach into position as
+    # part of its "settled" speed and always fail a genuinely stable tail.
+    tail = position[-min(position.shape[0], frames) :]
     speed = np.linalg.norm(np.diff(tail, axis=0), axis=1) * control_hz
     return float(np.max(speed)) if speed.size else math.inf
 

@@ -6,9 +6,10 @@ import { useAuth } from "@/components/AuthProvider";
 import { ScriptedReviewRows } from "@/components/ScriptedReviewPanel";
 import { AutoLabelBadge } from "@/components/AutoLabelBadge";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Badge, Button, Card, Empty, Select } from "@/components/ui";
+import { Alert, Badge, Button, Card, Empty, Select, Skeleton, Thumbnail } from "@/components/ui";
 import {
   api,
+  thumbnailUrl,
   type Demo,
   type DemoStatus,
   type LabelValue,
@@ -30,6 +31,8 @@ export default function ReviewQueuePage() {
   const [statusFilter, setStatusFilter] = useState<DemoStatus | "">("");
   const [labelFilter, setLabelFilter] = useState<LabelValue | "">("");
   const [loading, setLoading] = useState(true);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,8 +46,12 @@ export default function ReviewQueuePage() {
       });
       setDemos(page.items);
       setTotal(page.total);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load demos");
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   }, [taskFilter, statusFilter, labelFilter, offset]);
 
@@ -147,61 +154,78 @@ export default function ReviewQueuePage() {
       </Card>
 
       <Card>
-        {loading ? (
-          <Empty>Loading…</Empty>
-        ) : demos.length === 0 ? (
+        {!loadedOnce && loading ? (
+          <div className="space-y-2" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </div>
+        ) : loadError && demos.length === 0 ? (
+          <Alert>{loadError}</Alert>
+        ) : loadedOnce && demos.length === 0 ? (
           <Empty>Nothing matches these filters.</Empty>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
-                <tr>
-                  <th className="pb-2">Task / Source</th>
-                  <th className="pb-2">Operator</th>
-                  <th className="pb-2">Recorded</th>
-                  <th className="pb-2 text-right">Length</th>
-                  <th className="pb-2 text-right">Frames</th>
-                  <th className="pb-2 whitespace-nowrap pl-4 text-right">Latency p50</th>
-                  <th className="pb-2 whitespace-nowrap pl-5">Auto label</th>
-                  <th className="pb-2 whitespace-nowrap pl-5">Status</th>
-                  <th className="pb-2" />
-                </tr>
-              </thead>
-              <tbody className="tabular">
-                {demos.map((demo) => (
-                  <tr key={demo.id} className="border-t border-ink-700/50 hover:bg-ink-850/50">
-                    <td className="py-2">
-                      <div className="flex items-center gap-2">
-                        <span>{demo.task_id}</span>
-                        <Badge tone="info">Teleop</Badge>
-                      </div>
-                    </td>
-                    <td className="py-2 text-ink-300">{demo.operator_name}</td>
-                    <td className="py-2 text-ink-400">{timeAgo(demo.created_at)}</td>
-                    <td className="py-2 text-right">{demo.duration_s.toFixed(1)}s</td>
-                    <td className="py-2 text-right">
-                      {demo.trim_end !== null && demo.trim_end - demo.trim_start !== demo.num_frames
-                        ? `${demo.trim_end - demo.trim_start}/${demo.num_frames}`
-                        : demo.num_frames}
-                    </td>
-                    <td className="py-2 pl-4 text-right">{demo.latency_p50_ms.toFixed(0)} ms</td>
-                    <td className="py-2 pl-5">
-                      <AutoLabelBadge label={demo.auto_label ?? "review"} reason={demo.auto_label_reason} />
-                    </td>
-                    <td className="py-2 pl-5">
-                      <StatusBadge demo={demo} />
-                    </td>
-                    <td className="py-2 text-right">
-                      <Link href={`/review/${demo.id}`}>
-                        <Button variant="subtle">Open</Button>
-                      </Link>
-                    </td>
+          <>
+            {loadError && (
+              <div className="mb-3">
+                <Alert>{loadError}</Alert>
+              </div>
+            )}
+            <div className="overflow-x-auto" aria-busy={loading}>
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
+                  <tr>
+                    <th className="pb-2" />
+                    <th className="pb-2">Task / Source</th>
+                    <th className="pb-2">Operator</th>
+                    <th className="pb-2">Recorded</th>
+                    <th className="pb-2 text-right">Length</th>
+                    <th className="pb-2 text-right">Frames</th>
+                    <th className="pb-2 whitespace-nowrap pl-4 text-right">Latency p50</th>
+                    <th className="pb-2 whitespace-nowrap pl-5">Auto label</th>
+                    <th className="pb-2 whitespace-nowrap pl-5">Status</th>
+                    <th className="pb-2" />
                   </tr>
-                ))}
-                {(user.role === "reviewer" || user.role === "admin") && <ScriptedReviewRows />}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="tabular">
+                  {demos.map((demo) => (
+                    <tr key={demo.id} className="border-t border-ink-700/50 hover:bg-ink-850/50">
+                      <td className="py-2 w-16">
+                        <Thumbnail src={thumbnailUrl(demo.id)} alt="" className="h-10 w-16" />
+                      </td>
+                      <td className="py-2">
+                        <div className="flex items-center gap-2">
+                          <span>{demo.task_id}</span>
+                          <Badge tone="info">Teleop</Badge>
+                        </div>
+                      </td>
+                      <td className="py-2 text-ink-300">{demo.operator_name}</td>
+                      <td className="py-2 text-ink-400">{timeAgo(demo.created_at)}</td>
+                      <td className="py-2 text-right">{demo.duration_s.toFixed(1)}s</td>
+                      <td className="py-2 text-right">
+                        {demo.trim_end !== null && demo.trim_end - demo.trim_start !== demo.num_frames
+                          ? `${demo.trim_end - demo.trim_start}/${demo.num_frames}`
+                          : demo.num_frames}
+                      </td>
+                      <td className="py-2 pl-4 text-right">{demo.latency_p50_ms.toFixed(0)} ms</td>
+                      <td className="py-2 pl-5">
+                        <AutoLabelBadge label={demo.auto_label ?? "review"} reason={demo.auto_label_reason} />
+                      </td>
+                      <td className="py-2 pl-5">
+                        <StatusBadge demo={demo} />
+                      </td>
+                      <td className="py-2 text-right">
+                        <Link href={`/review/${demo.id}`}>
+                          <Button variant="subtle">Open</Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                  {(user.role === "reviewer" || user.role === "admin") && <ScriptedReviewRows />}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Card>
     </div>

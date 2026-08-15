@@ -70,6 +70,18 @@ export function TrimTimeline({
     dragging.current = null;
   };
 
+  const onHandleKeyDown = (mode: "start" | "end") => (event: React.KeyboardEvent) => {
+    const current = mode === "start" ? start : end;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") next = current - 1;
+    else if (event.key === "ArrowRight") next = current + 1;
+    else if (event.key === "Home") next = mode === "start" ? 0 : start + 1;
+    else if (event.key === "End") next = mode === "start" ? end - 1 : numFrames - 1;
+    if (next === null) return;
+    event.preventDefault();
+    apply(mode, Math.min(Math.max(next, 0), numFrames - 1));
+  };
+
   const pct = (frame: number) => `${(frame / Math.max(1, numFrames - 1)) * 100}%`;
 
   // Contiguous runs where the task's success predicate held, so the reviewer
@@ -123,13 +135,22 @@ export function TrimTimeline({
         {(["start", "end"] as const).map((handle) => (
           <div
             key={handle}
+            role="slider"
+            tabIndex={0}
+            aria-label={handle === "start" ? "Trim start" : "Trim end"}
+            aria-valuemin={handle === "start" ? 0 : start + 1}
+            aria-valuemax={handle === "start" ? end - 1 : numFrames - 1}
+            aria-valuenow={handle === "start" ? start : end}
+            aria-valuetext={frameTime(handle === "start" ? start : end, fps)}
             onPointerDown={onPointerDown(handle)}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onKeyDown={onHandleKeyDown(handle)}
             className={cx(
               "absolute top-0 h-full w-3 -translate-x-1/2 cursor-ew-resize rounded",
               "bg-accent-500 hover:bg-accent-400",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80",
             )}
             style={{ left: pct(handle === "start" ? start : end) }}
             title={`${handle} of clip`}

@@ -104,6 +104,7 @@ export interface DatasetExport {
   path: string;
   dvc_hash: string | null;
   status?: string;
+  error_message?: string | null;
 }
 
 export interface TrainingRun {
@@ -197,6 +198,7 @@ type BackendDataset = {
   num_frames: number;
   size_bytes: number | null;
   created_at: string;
+  error_message?: string | null;
 };
 
 const configuredOrigin =
@@ -393,8 +395,12 @@ function toExport(dataset: BackendDataset): DatasetExport {
     path: `data/datasets/${dataset.id}.zip`,
     dvc_hash: null,
     status: dataset.status,
+    error_message: dataset.error_message ?? null,
   };
 }
+
+/** Client-side poll cadence for `building` datasets — backend gives no SLA, just a reasonable default. */
+export const DATASET_POLL_INTERVAL_MS = 3000;
 
 function emptyTrajectory(demo: Demo): Trajectory {
   const frames = Math.max(1, demo.num_frames);
@@ -553,6 +559,61 @@ export const api = {
 
   deleteDemo: (id: string) => request<void>(`/demos/${id}`, { method: "DELETE" }),
 
+  /**
+   * `POST /api/v1/demos/upload` (multipart) — uploads a demo recorded elsewhere
+   * (e.g. real hardware) so it enters the review queue. Uses `XMLHttpRequest`
+   * instead of `request()`/`fetch` for `xhr.upload.onprogress`, the only way to
+   * get real upload progress across browsers. Deliberately skips the shared
+   * `request()` 401-refresh-retry: a `FormData` with already-consumed `File`
+   * streams can't be safely replayed.
+   */
+  uploadDemo: (params: {
+    taskName: string;
+    front: File;
+    wrist?: File | null;
+    trajectory?: File | null;
+    onProgress?: (percent: number) => void;
+  }): Promise<Demo> =>
+    new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.set("task_name", params.taskName);
+      formData.set("front", params.front);
+      if (params.wrist) formData.set("wrist", params.wrist);
+      if (params.trajectory) formData.set("trajectory", params.trajectory);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", apiUrl("/demos/upload"));
+      const token = getToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          params.onProgress?.(Math.round((event.loaded / event.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(toDemo(JSON.parse(xhr.responseText) as BackendDemo));
+          } catch {
+            reject(new ApiError(xhr.status, "Upload succeeded but the response could not be read"));
+          }
+          return;
+        }
+        let payload: unknown;
+        try {
+          payload = JSON.parse(xhr.responseText);
+        } catch {
+          payload = xhr.responseText;
+        }
+        reject(new ApiError(xhr.status, errorMessage(payload, xhr.statusText)));
+      };
+      xhr.onerror = () => reject(new ApiError(0, "Network error — could not reach the server"));
+
+      xhr.send(formData);
+    }),
+
   exports: async () => {
     const page = await request<BackendPage<BackendDataset>>("/datasets?page=1&page_size=100");
     return page.items.map(toExport);
@@ -615,6 +676,10 @@ export function mediaUrl(path: string) {
   const url = new URL(apiUrl(target));
   if (token) url.searchParams.set("token", token);
   return url.toString();
+}
+
+export function thumbnailUrl(demoId: string) {
+  return mediaUrl(`/demos/${demoId}/thumbnail`);
 }
 
 export function resetDemoData() {

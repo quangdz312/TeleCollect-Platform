@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Button, Card, Empty, Stat } from "@/components/ui";
-import { api, type Demo, type Summary, type Task } from "@/lib/api";
+import { Button, Card, Empty, Skeleton, Stat, Thumbnail } from "@/components/ui";
+import { api, thumbnailUrl, type Demo, type Summary, type Task } from "@/lib/api";
 import { bytes, percent, timeAgo } from "@/lib/format";
 
 export default function OverviewPage() {
@@ -14,21 +14,34 @@ export default function OverviewPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [recent, setRecent] = useState<Demo[]>([]);
   const [health, setHealth] = useState<Record<string, any> | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
+    let mounted = true;
+    setLoading(true);
     void (async () => {
-      const [s, t, d, h] = await Promise.all([
-        api.summary(),
-        api.tasks(),
-        api.demos({ limit: 8 }),
-        api.health(),
-      ]);
-      setSummary(s);
-      setTasks(t);
-      setRecent(d.items);
-      setHealth(h);
-    })().catch(() => undefined);
+      try {
+        const [s, t, d, h] = await Promise.all([
+          api.summary(),
+          api.tasks(),
+          api.demos({ limit: 8 }),
+          api.health(),
+        ]);
+        if (!mounted) return;
+        setSummary(s);
+        setTasks(t);
+        setRecent(d.items);
+        setHealth(h);
+      } catch {
+        // ignored — Stat/Card sections fall back to their empty state
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, [user]);
 
   if (!user) return null;
@@ -60,36 +73,48 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="Valid demonstrations"
-          value={summary?.valid_demo_count ?? "—"}
-          hint="approved and labelled success"
-          tone="ok"
-        />
-        <Stat
-          label="Demonstration success rate"
-          value={summary ? percent(summary.success_rate, 1) : "—"}
-          hint={`${summary?.by_label.success ?? 0} of ${
-            (summary?.by_label.success ?? 0) + (summary?.by_label.failure ?? 0)
-          } labelled`}
-        />
-        <Stat
-          label="Approval rate"
-          value={summary ? percent(summary.approval_rate, 1) : "—"}
-          hint={`${summary?.by_status.recorded ?? 0} awaiting review`}
-        />
-        <Stat
-          label="Teleop latency (p50)"
-          value={summary ? `${summary.median_latency_ms.toFixed(0)} ms` : "—"}
-          hint={summary ? `p95 ${summary.p95_latency_ms.toFixed(0)} ms` : undefined}
-          tone={summary && summary.median_latency_ms > 90 ? "warn" : "ok"}
-        />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-busy={loading}>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[74px]" />)
+        ) : (
+          <>
+            <Stat
+              label="Valid demonstrations"
+              value={summary?.valid_demo_count ?? "—"}
+              hint="approved and labelled success"
+              tone="ok"
+            />
+            <Stat
+              label="Demonstration success rate"
+              value={summary ? percent(summary.success_rate, 1) : "—"}
+              hint={`${summary?.by_label.success ?? 0} of ${
+                (summary?.by_label.success ?? 0) + (summary?.by_label.failure ?? 0)
+              } labelled`}
+            />
+            <Stat
+              label="Approval rate"
+              value={summary ? percent(summary.approval_rate, 1) : "—"}
+              hint={`${summary?.by_status.recorded ?? 0} awaiting review`}
+            />
+            <Stat
+              label="Teleop latency (p50)"
+              value={summary ? `${summary.median_latency_ms.toFixed(0)} ms` : "—"}
+              hint={summary ? `p95 ${summary.p95_latency_ms.toFixed(0)} ms` : undefined}
+              tone={summary && summary.median_latency_ms > 90 ? "warn" : "ok"}
+            />
+          </>
+        )}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <Card title="Collection by task">
-          {summary && Object.keys(summary.by_task).length > 0 ? (
+          {loading ? (
+            <div className="space-y-2" aria-busy="true">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-full" />
+            </div>
+          ) : summary && Object.keys(summary.by_task).length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
@@ -146,7 +171,13 @@ export default function OverviewPage() {
         </Card>
 
         <Card title="Recent recordings">
-          {recent.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2" aria-busy="true">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : recent.length === 0 ? (
             <Empty>Nothing recorded yet.</Empty>
           ) : (
             <ul className="space-y-2">
@@ -154,9 +185,10 @@ export default function OverviewPage() {
                 <li key={demo.id}>
                   <Link
                     href={`/review/${demo.id}`}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-ink-700/50 px-3 py-2 text-sm hover:border-accent-500/40 hover:bg-ink-850"
+                    className="flex items-center gap-3 rounded-lg border border-ink-700/50 px-3 py-2 text-sm hover:border-accent-500/40 hover:bg-ink-850"
                   >
-                    <span className="min-w-0">
+                    <Thumbnail src={thumbnailUrl(demo.id)} alt="" className="h-10 w-16 shrink-0" />
+                    <span className="min-w-0 flex-1">
                       <span className="block truncate">{demo.task_id}</span>
                       <span className="text-xs text-ink-400">
                         {demo.operator_name} · {timeAgo(demo.created_at)} ·{" "}

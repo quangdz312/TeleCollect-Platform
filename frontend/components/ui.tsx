@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -61,6 +61,7 @@ export function Button({
       className={cx(
         "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium",
         "transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         BUTTON_STYLES[variant],
         className,
       )}
@@ -169,7 +170,47 @@ export function Alert({
     info: "border-accent-500/40 bg-accent-500/10 text-accent-400",
   };
   return (
-    <div className={cx("rounded-lg border px-3 py-2 text-sm", tones[tone])}>{children}</div>
+    <div className={cx("fade-in rounded-lg border px-3 py-2 text-sm", tones[tone])}>{children}</div>
+  );
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cx("motion-safe:animate-pulse rounded-md bg-ink-700/50", className)}
+    />
+  );
+}
+
+/** Fixed-aspect thumbnail with a neutral placeholder on missing/broken image; no retry. */
+export function Thumbnail({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div
+      className={cx(
+        "flex aspect-video w-full items-center justify-center overflow-hidden rounded-md bg-ink-800",
+        className,
+      )}
+    >
+      {failed ? (
+        <span aria-hidden="true" className="text-ink-500">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <circle cx="9" cy="10" r="1.5" />
+            <path d="M21 16l-5.5-5.5a1.5 1.5 0 0 0-2.1 0L3 21" />
+          </svg>
+        </span>
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
   );
 }
 
