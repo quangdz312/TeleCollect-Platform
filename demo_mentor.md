@@ -45,8 +45,6 @@ cd frontend && npm run dev                              # terminal 2 (hoặc `ma
 - Điều khiển bằng bàn phím/chuột, xem 2–3 camera (`review_front`, `birdview`,
   `robot0_eye_in_hand`) render realtime.
 - Bấm ghi (record) một đoạn ngắn → dừng lại giữ episode.
-- Nói thêm: control loop mục tiêu 60Hz, đo thật ~46.6Hz, minh bạch số liệu
-  thật trong `stats` (`control_hz_actual`) chứ không che giấu.
 
 **Cách B — Scripted collection (`/scripted`)**
 - Chọn task `tool_hang` (task 2 giai đoạn: cắm khung móc rồi treo cờ-lê —

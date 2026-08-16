@@ -84,7 +84,7 @@ sequenceDiagram
     WS->>Loop: khởi động luồng worker
     Loop->>Env: reset(seed) · gắn camera review
 
-    loop mỗi nhịp (yêu cầu 60 Hz, đo được ~47 Hz)
+    loop mỗi nhịp điều khiển
         Op->>UI: kéo chuột / cuộn / bàn phím / tay cầm
         UI->>WS: action [dx dy dz drx dry drz grip]
         WS->>Loop: đưa action vào hàng đợi
@@ -144,9 +144,12 @@ graph LR
     WS --> HUMAN["Người duyệt<br/>/review"]
 ```
 
-**ToolHang luôn trả về `review`.** Tiêu chí chấp nhận của nó cần một luật chất
-lượng chưa được viết, mà đoán bừa thì sẽ đẩy episode chưa ai xem vào tập đã
-duyệt. Nhãn này là lựa chọn có chủ đích, không phải lỗ hổng của pipeline.
+**ToolHang luôn trả về `review`.** Bộ metric đánh giá `accept` cho task này đang
+được xây dựng: là task hai giai đoạn, nó cần thêm tiêu chí cho chất lượng thao
+tác bên cạnh điều kiện thành công. Trong lúc đó, giữ người duyệt trong vòng lặp
+vừa bảo đảm không có episode nào vào tập đã duyệt mà chưa ai xem, vừa tích luỹ
+dữ liệu để hiệu chỉnh ngưỡng. Đây là bước có chủ đích trong lộ trình, không phải
+lỗ hổng của pipeline.
 
 **Lỗi chấm điểm đã biết.** `wandering_path` chấm theo tương quan trong lô thay
 vì so với ngưỡng tuyệt đối, nên cùng một episode đem chấm ở hai lô khác nhau sẽ
@@ -221,7 +224,12 @@ mà chúng có thể nhận.
 | `nut_assembly_square` | robosuite NutAssemblySquare | `accept` · `review` · `reject` |
 | `tool_hang` | skillgen vendor sẵn, giai đoạn 1 + 2 | `review` · `reject` |
 
-`tool_hang` không bao giờ được `accept` tự động: thất bại rõ ràng vẫn bị
-`reject`, nhưng mọi trường hợp còn lại đều chuyển cho người duyệt. Với `lift`,
-episode thành công mà chưa đánh giá được chất lượng nắm cũng bị đẩy sang
-`review` thay vì `accept`.
+`tool_hang` hiện đang trong giai đoạn **xây dựng bộ metric đánh giá `accept`**.
+Là task hai giai đoạn phức tạp nhất trong bốn task, nó cần thêm các tiêu chí
+riêng cho chất lượng thao tác — cắm khung có dứt khoát không, treo cờ lê có
+trúng móc không — nên trước mắt mọi episode không thất bại rõ ràng đều chuyển
+cho người duyệt. Dữ liệu người duyệt tạo ra ở bước này chính là cơ sở để hiệu
+chỉnh ngưỡng cho luật `accept` tự động.
+
+Cơ chế tương tự cũng áp dụng cho `lift`: episode thành công nhưng chưa đánh giá
+được chất lượng nắm thì đẩy sang `review` thay vì `accept`.
