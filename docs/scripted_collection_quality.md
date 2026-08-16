@@ -9,7 +9,7 @@ line is produced exactly the way the calibration bank was.
 ## Contract
 
 ```text
-task:     lift | can | square         (tool_hang is rejected in v1.0)
+task:     lift | can | square | tool_hang
 quality:  clean | good | medium | poor   default clean
 episodes: positive integer
 seed:     integer 0..2147483647
@@ -25,11 +25,9 @@ python scripts/collect_scripted_can.py --quality medium --episodes 100 --seed 42
 zero, so every executed action is the operator's plan clipped to the action
 bounds and the operator's observation is passed through untouched.
 
-Tool Hang is refused with:
-
-```text
-Tool Hang perturbation is not enabled in v1.0; clean baseline C0 is pending.
-```
+Tool Hang uses the same episode-scoped runtime with an arm-only candidate
+profile. Its semantic faults and perception bias remain disabled until a
+separate calibration round is complete.
 
 ## Presets
 
@@ -41,6 +39,7 @@ Phase D2 frozen candidate values, unchanged.
 | Lift | 0.00 | 0.25 | 1.70 | 2.50 |
 | Can | 0.00 | 0.25 | 1.10 | 1.20 |
 | Square | 0.00 | 0.18 | 0.90 | 1.30 |
+| Tool Hang (candidate) | 0.00 | 0.20 | 0.60 | 1.00 |
 
 A preset name is a *request*, not an observed quality label. A batch requested
 as `medium` whose metrics land in the `good` band is kept as collected and the

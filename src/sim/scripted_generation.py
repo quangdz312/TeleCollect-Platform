@@ -28,6 +28,7 @@ from src.sim.perturbations.profiles import (
     resolve_profile,
 )
 from src.sim.perturbations.runtime import MAX_BASE_SEED, environment_seed
+from src.sim.tool_hang import TOOLHANG_TOOL_NAME
 from src.sim.tools.defaults import build_default_registry
 from src.sim.tools.executor import execute_tool
 
@@ -103,14 +104,16 @@ def _tool_hang_spec() -> CollectionTaskSpec:
 
     return CollectionTaskSpec(
         task='tool_hang',
-        tool_name='tool_hang_stage1',
+        tool_name=TOOLHANG_TOOL_NAME,
         default_horizon=6000,
         environment_factory=environment,
         context_factory=lambda *args, **kwargs: None,
         env_args_reader=lambda _reference: {
             'env_name': 'ToolHang',
             'type': 1,
-            'env_kwargs': {'robots': 'Panda', 'control_freq': 20, 'stage': 1},
+            'env_kwargs': {
+                'robots': 'Panda', 'control_freq': 20, 'stage': 'stage1+stage2',
+            },
         },
         reference_dataset=Path('data/toolhang_stage1_reference.hdf5'),
     )
@@ -248,59 +251,73 @@ def run_collection(
     verbose: bool = False,
     logger: Callable[[str], None] = print,
     reference_path: str | Path | None = None,
+    video_dir: str | Path | None = None,
 ) -> CollectionResult:
     """Collect one task/quality batch into a raw Robomimic-compatible HDF5.
 
     Failed and horizon episodes are written like any other; nothing is
     resampled, relabelled or dropped to reach a target success rate.
+
+    `video_dir` (ToolHang only for now) writes each episode's review mp4 during
+    the rollout, so opening the review page costs no render.
     """
 
     if task == 'tool_hang':
-        if quality != DEFAULT_QUALITY:
-            raise ValueError('ToolHang currently supports only the clean quality preset')
+        profile = resolve_profile(task, quality)
+        resolved_horizon = 6000 if horizon is None else int(horizon)
+        _validate_request(episodes, resolved_horizon, seed)
+        batch_provenance = dataset_provenance(
+            profile,
+            base_seed=seed,
+            stream_code=NOISE_STREAM_CODE,
+            coverage='stage1+stage2',
+        )
         if not dry_run and output is None:
             raise ValueError('output is required unless dry_run is used')
         if dry_run:
             return CollectionResult(
-                task='tool_hang', tool_name='tool_hang_stage1', quality='clean',
-                output=None, horizon=6000, episodes=(),
-                provenance=DatasetProvenance(
-                    task='tool_hang', tool_name='tool_hang_stage1',
-                    requested_quality='clean', profile_version='tool-hang-stage1-baseline',
-                    candidate_profile_version='tool-hang-stage1-baseline',
-                    acceptance_amendment='stage1-geometric-gate', noise_scale=0.0,
-                    base_seed=seed, task_code=4, stream_code=1, coverage='stage1-only',
-                    position_landmarks=('frame_pos',), orientation_landmarks=('frame_quat',),
-                ),
+                task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
+                quality=profile.quality.value,
+                output=None, horizon=resolved_horizon, episodes=(),
+                provenance=batch_provenance,
             )
         from src.sim.tool_hang_collection import collect
 
-        result = collect(output, episodes=episodes, seed=seed, overwrite=overwrite, logger=logger)
+        result = collect(
+            output, episodes=episodes, seed=seed, overwrite=overwrite, logger=logger,
+            video_dir=video_dir, quality=profile.quality.value,
+        )
         records = tuple(
             EpisodeRecord(
-                episode_index=index, environment_seed=seed + index,
-                steps=0, success=True, outcome='success', termination_reason='success',
+                episode_index=item['episode_index'],
+                environment_seed=item['seed'],
+                steps=item['steps'],
+                success=item['success'],
+                outcome=_outcome(item['success'], item['terminal_reason']),
+                termination_reason=item['terminal_reason'],
                 provenance=EpisodeProvenance(
-                    task='tool_hang', tool_name='tool_hang_stage1', requested_quality='clean',
-                    profile_version='tool-hang-stage1-baseline',
-                    candidate_profile_version='tool-hang-stage1-baseline', noise_scale=0.0,
-                    base_seed=seed, task_code=4, stream_code=1, episode_index=index,
-                    environment_seed=seed + index, outcome='success', success=True,
-                    terminal_reason='success', terminal_phase='stage1_done',
+                    task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
+                    requested_quality=profile.quality.value,
+                    profile_version=profile.profile_version,
+                    candidate_profile_version=profile.candidate_profile_version,
+                    noise_scale=profile.noise_scale,
+                    base_seed=seed, task_code=profile.task_code,
+                    stream_code=NOISE_STREAM_CODE,
+                    episode_index=item['episode_index'], environment_seed=item['seed'],
+                    sampled_variation=item.get('sampled_variation', item['summary']),
+                    outcome=_outcome(item['success'], item['terminal_reason']),
+                    success=item['success'], episode_length=item['steps'],
+                    terminal_reason=item['terminal_reason'],
+                    failure_stage=item['failure_stage'],
+                    terminal_phase=item['terminal_phase'],
                 ),
-            ) for index in range(int(result['successes']))
+            ) for item in result['records']
         )
         return CollectionResult(
-            task='tool_hang', tool_name='tool_hang_stage1', quality='clean',
-            output=Path(output), horizon=6000, episodes=records,
-            provenance=DatasetProvenance(
-                task='tool_hang', tool_name='tool_hang_stage1', requested_quality='clean',
-                profile_version='tool-hang-stage1-baseline',
-                candidate_profile_version='tool-hang-stage1-baseline',
-                acceptance_amendment='stage1-geometric-gate', noise_scale=0.0,
-                base_seed=seed, task_code=4, stream_code=1, coverage='stage1-only',
-                position_landmarks=('frame_pos',), orientation_landmarks=('frame_quat',),
-            ),
+            task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
+            quality=profile.quality.value,
+            output=Path(output), horizon=resolved_horizon, episodes=records,
+            provenance=batch_provenance,
         )
 
     profile = resolve_profile(task, quality)

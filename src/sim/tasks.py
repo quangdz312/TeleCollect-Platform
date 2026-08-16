@@ -111,8 +111,8 @@ register(
     TaskSpec(
         name="tool_hang",
         description=(
-            "Giai doan 1: cam khung moc vao de dung; giai doan 2 treo co-le "
-            "len moc se duoc mo sau khi hoan thien reachability."
+            "Giai doan 1: cam khung moc vao de dung; giai doan 2: treo co-le "
+            "len moc vua dung. Thanh cong khi ca hai giai doan dat."
         ),
         model_path="ToolHang:Panda",
         max_steps=1500,
