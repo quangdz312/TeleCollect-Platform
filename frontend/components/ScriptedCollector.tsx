@@ -5,13 +5,16 @@ import { Alert, Badge, Button, Card, Field, Input, Select, Stat } from "@/compon
 import { labeling, type CollectionJob, type LabelingConfig } from "@/lib/labeling";
 
 const POLL_MS = 1500;
-const QUALITY = "clean";
 
 export function ScriptedCollector() {
   const [config, setConfig] = useState<LabelingConfig | null>(null);
   const [job, setJob] = useState<CollectionJob | null>(null);
   const [task, setTask] = useState("lift");
-  const [episodeCount, setEpisodeCount] = useState(5);
+  const [quality, setQuality] = useState("clean");
+  // Keep the raw text while editing so users can select the value, clear it,
+  // and type e.g. "100". A number-controlled input turns the intermediate
+  // empty value into 0 and makes direct replacement awkward in some browsers.
+  const [episodeCount, setEpisodeCount] = useState("5");
   const [seed, setSeed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -28,9 +31,9 @@ export function ScriptedCollector() {
   }, [loadConfig]);
 
   useEffect(() => {
-    const suggested = config?.suggested_seeds[`${task}:${QUALITY}`];
+    const suggested = config?.suggested_seeds[`${task}:${quality}`];
     if (suggested !== undefined) setSeed(suggested);
-  }, [config, task]);
+  }, [config, quality, task]);
 
   const running = job?.status === "queued" || job?.status === "running";
 
@@ -55,8 +58,13 @@ export function ScriptedCollector() {
   const startRun = async () => {
     setError(null);
     setNotice(null);
+    const parsedEpisodes = Number(episodeCount);
+    if (!Number.isInteger(parsedEpisodes) || parsedEpisodes < 1 || parsedEpisodes > 200) {
+      setError("Episodes phải là số nguyên từ 1 đến 200.");
+      return;
+    }
     try {
-      setJob(await labeling.startRun({ task, quality: QUALITY, episodes: episodeCount, seed }));
+      setJob(await labeling.startRun({ task, quality, episodes: parsedEpisodes, seed }));
     } catch (problem) {
       setError((problem as Error).message);
     }
@@ -74,25 +82,50 @@ export function ScriptedCollector() {
         <Stat label="Pending" value={config?.workspace.pending ?? 0} tone="warn" />
       </div>
       <Card title="Thu tự động" subtitle="Sinh episode scripted để chuyển sang hàng đợi review.">
-        <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_140px_auto] md:items-end">
           <Field label="Task">
             <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
               {config?.tasks.map((item) => (
-                <option key={item.task} value={item.task}>{item.task} · {item.tool}</option>
+                <option key={item.task} value={item.task}>{item.task} · {item.tool_label ?? item.tool}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Quality">
+            <Select value={quality} disabled={running} onChange={(event) => setQuality(event.target.value)}>
+              {config?.qualities.map((item) => (
+                <option key={item} value={item}>{item}</option>
               ))}
             </Select>
           </Field>
           <Field label="Episodes">
-            <Input type="number" min={1} max={200} value={episodeCount} disabled={running} onChange={(event) => setEpisodeCount(Number(event.target.value))} />
+            <Input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={episodeCount}
+              disabled={running}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (/^\d*$/.test(value)) setEpisodeCount(value);
+              }}
+              onBlur={() => {
+                if (episodeCount === "") setEpisodeCount("5");
+              }}
+            />
           </Field>
           <Field label="Seed">
             <Input type="number" min={0} value={seed} disabled={running} onChange={(event) => setSeed(Number(event.target.value))} />
           </Field>
-          <Button variant="primary" disabled={running || !config} onClick={startRun}>
+          <Button
+            variant="primary"
+            disabled={running || !config || !/^\d+$/.test(episodeCount)}
+            onClick={startRun}
+          >
             {running ? `Đang chạy ${Math.round((job?.progress ?? 0) * 100)}%` : "Bắt đầu thu"}
           </Button>
         </div>
-        <Alert tone="info">Auto-label accept/review/reject chưa bật; episode sẽ đi qua review thủ công trước.</Alert>
+        <Alert tone="info">Noise giảm theo phase; một số episode non-clean có tối đa một semantic fault có kiểm soát. Auto-gate xử lý các trường hợp chắc chắn và giữ trường hợp không rõ để review.</Alert>
         {job && (
           <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-850/60 p-3 text-xs">
             <div className="mb-2 flex items-center justify-between">

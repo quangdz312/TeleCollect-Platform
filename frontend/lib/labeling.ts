@@ -12,6 +12,7 @@ export type AutoLabel = "accept" | "review" | "reject";
 export interface TaskOption {
   task: string;
   tool: string;
+  tool_label?: string;
   default_horizon: number;
 }
 
@@ -29,9 +30,24 @@ export interface WorkspaceSummary {
   episodes: number;
   reviewed: number;
   approved: number;
+  approved_successes: number;
   rejected: number;
   pending: number;
-  per_task: Record<string, { total: number; reviewed: number }>;
+  auto_approved: number;
+  auto_rejected: number;
+  human_reviewed: number;
+  audit_pending: number;
+  audit_reviewed: number;
+  audit_failed: number;
+  audit_error_rate: number | null;
+  per_task: Record<string, {
+    total: number;
+    reviewed: number;
+    pending: number;
+    approved: number;
+    approved_successes: number;
+    rejected: number;
+  }>;
   scorer_version: string | null;
 }
 
@@ -69,6 +85,9 @@ export interface LabelRecord {
   note: string;
   reviewer: string;
   reviewed_at: string;
+  decision_source?: "human" | "auto_gate";
+  gate_version?: string | null;
+  gate_reason?: string;
 }
 
 /** Điểm máy chỉ có mặt khi client xin — mặc định server giữ lại để chấm mù. */
@@ -100,6 +119,10 @@ export interface Episode {
   auto_flags?: AutoFlags;
   auto_label: AutoLabel;
   auto_label_reason: string;
+  gate_action: "approve" | "reject" | "review" | "audit";
+  audit_required: boolean;
+  auto_gate_version: string;
+  auto_gate_reason: string;
 }
 
 export interface ShadowReport {
@@ -122,6 +145,31 @@ export interface ShadowReport {
   checks_that_missed: { episode_id: string; reason: string; check: string; status: string }[];
   workspace: WorkspaceSummary;
   targets: { min_auc: number; target_approve_zone: number; min_reviews_for_yield: number };
+}
+
+export type DiversityScope = "approved" | "reviewed" | "all";
+
+export interface DiversityReport {
+  task: string;
+  scope: DiversityScope;
+  episodes: number;
+  success_rate: number | null;
+  coverage: { overall: number | null; x: number | null; y: number | null; reference_episodes: number };
+  status: { code: string; label: string; detail: string };
+  quality: Array<{
+    quality: string; total: number; success: number; failure: number;
+    approved: number; rejected: number; pending: number;
+  }>;
+  position_sets: Array<{
+    key: string;
+    label: string;
+    points: Array<{
+      episode_id: string; quality: string; decision: string; success: boolean;
+      x: number; y: number; z: number;
+    }>;
+  }>;
+  length_histogram: { edges: number[]; counts: number[] };
+  phases: Array<{ phase: string; action_scale: number; failures: number }>;
 }
 
 import { apiUrl, getToken } from "./api";
@@ -192,4 +240,18 @@ export const labeling = {
   }) => post<{ label: LabelRecord; workspace: WorkspaceSummary }>("/labels", payload),
 
   report: () => request<ShadowReport>("/report"),
+
+  applyAutoGate: () => post<{
+    result: {
+      approved: number; rejected: number; audit: number; review: number; skipped: number;
+      auto_approve_enabled: boolean; disabled_tasks: string[];
+      audit_error_rates: Record<string, number>;
+    };
+    workspace: WorkspaceSummary;
+  }>("/auto-gate/apply"),
+
+  diversity: (task: string, scope: DiversityScope) => {
+    const query = new URLSearchParams({ task, scope });
+    return request<DiversityReport>(`/diversity?${query}`);
+  },
 };

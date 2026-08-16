@@ -238,6 +238,7 @@ function buildStore(): Store {
       size_bytes: exportFrames * 6_100,
       path: "data/exports/v1",
       dvc_hash: "9f1c4b7e2a6d05c38e4417ab9c2f6d81",
+      status: "ready",
     },
     {
       id: "exp-002",
@@ -256,6 +257,7 @@ function buildStore(): Store {
           .reduce((sum, d) => sum + d.num_frames, 0) * 6_100,
       path: "data/exports/pick-place-only",
       dvc_hash: "3ba0e51d7c9482f6015d7ee4a8b3c020",
+      status: "ready",
     },
     {
       id: "exp-003",
@@ -269,6 +271,7 @@ function buildStore(): Store {
       size_bytes: exportFrames * 5_400,
       path: "data/exports/v1-rlds",
       dvc_hash: null,
+      status: "ready",
     },
   ];
 

@@ -12,18 +12,26 @@ import {
   Input,
   Select,
 } from "@/components/ui";
-import { api, type DatasetExport, type Summary, type Task } from "@/lib/api";
+import { api, type DatasetExport, type Summary } from "@/lib/api";
+import { labeling, type TaskOption } from "@/lib/labeling";
 import { bytes, timeAgo } from "@/lib/format";
+
+const EXPORT_POLL_INTERVAL_MS = 750;
+const EXPORT_POLL_LIMIT = 160;
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
 
 export default function DatasetsPage() {
   const { user } = useAuth();
   const [exports, setExports] = useState<DatasetExport[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [dvc, setDvc] = useState<{ available: boolean; reason?: string } | null>(null);
 
   const [name, setName] = useState("v1");
-  const [format, setFormat] = useState("lerobot");
+  const [format, setFormat] = useState("robomimic");
   const [taskFilter, setTaskFilter] = useState("");
   const [includeFailures, setIncludeFailures] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
@@ -32,17 +40,31 @@ export default function DatasetsPage() {
   const [info, setInfo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [e, s, d] = await Promise.all([api.exports(), api.summary(), api.dvc()]);
+    const [e, s, d, scripted] = await Promise.all([
+      api.exports(),
+      api.summary(),
+      api.dvc(),
+      labeling.config().catch(() => null),
+    ]);
     setExports(e);
-    setSummary(s);
+    setTasks(scripted?.tasks ?? []);
+    setSummary(scripted ? {
+      ...s,
+      approved_successes: s.approved_successes + scripted.workspace.approved_successes,
+    } : s);
     setDvc(d);
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    void api.tasks().then(setTasks);
     void load();
   }, [user, load]);
+
+  useEffect(() => {
+    if (!user || !exports.some((item) => item.status === "building")) return;
+    const timer = window.setInterval(() => { void load(); }, 1500);
+    return () => window.clearInterval(timer);
+  }, [exports, load, user]);
 
   if (!user) return null;
   const canExport = user.role === "reviewer" || user.role === "admin";
@@ -59,12 +81,26 @@ export default function DatasetsPage() {
         include_failures: includeFailures,
         overwrite,
       });
-      setInfo(
-        `Exported ${created.num_episodes} episodes / ${created.num_frames.toLocaleString()} frames ` +
-          `(${bytes(created.size_bytes)})` +
-          (created.dvc_hash ? ` · DVC ${created.dvc_hash.slice(0, 12)}` : ""),
-      );
+      setInfo(`Building ${created.name}… The page will update when the HDF5 is ready.`);
       await load();
+      let completed = created;
+      for (let attempt = 0; attempt < EXPORT_POLL_LIMIT && completed.status === "building"; attempt += 1) {
+        await delay(EXPORT_POLL_INTERVAL_MS);
+        completed = await api.exportInfo(created.id);
+        setExports((current) => current.map((item) => item.id === completed.id ? completed : item));
+      }
+      if (completed.status === "failed") {
+        throw new Error(completed.error_message || `Export ${completed.name} failed.`);
+      }
+      if (completed.status !== "ready") {
+        setInfo(`Export ${completed.name} is still building. Its status will continue updating below.`);
+        return;
+      }
+      setInfo(
+        `Exported ${completed.num_episodes} episodes / ${completed.num_frames.toLocaleString()} frames ` +
+          `(${bytes(completed.size_bytes)})` +
+          (completed.dvc_hash ? ` · DVC ${completed.dvc_hash.slice(0, 12)}` : ""),
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Export failed");
     } finally {
@@ -97,16 +133,15 @@ export default function DatasetsPage() {
             </Field>
             <Field label="Format">
               <Select value={format} onChange={(e) => setFormat(e.target.value)}>
-                <option value="lerobot">LeRobot v2.1 (parquet + mp4)</option>
-                <option value="rlds">RLDS (TFRecord / SequenceExample)</option>
+                <option value="robomimic">RoboMimic (HDF5)</option>
               </Select>
             </Field>
-            <Field label="Task filter" hint="Empty exports every task into one dataset">
+            <Field label="Task" hint="RoboMimic BC requires one environment per dataset">
               <Select value={taskFilter} onChange={(e) => setTaskFilter(e.target.value)}>
-                <option value="">All tasks</option>
+                <option value="">Select a task…</option>
                 {tasks.map((task) => (
-                  <option key={task.id} value={task.id}>
-                    {task.title}
+                  <option key={task.task} value={task.task}>
+                    {task.tool_label ?? task.task}
                   </option>
                 ))}
               </Select>
@@ -132,7 +167,7 @@ export default function DatasetsPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button variant="primary" disabled={busy} onClick={createExport}>
+            <Button variant="primary" disabled={busy || !taskFilter} onClick={createExport}>
               {busy ? "Exporting…" : "Export dataset"}
             </Button>
             {dvc && (
@@ -142,9 +177,9 @@ export default function DatasetsPage() {
             )}
           </div>
           <p className="mt-2 text-xs text-ink-400">
-            Failures are excluded by default. They are still worth keeping: a labelled failure
-            documents what went wrong, and some algorithms use them — but behaviour cloning
-            should not imitate them.
+            The exported HDF5 contains only human-approved scripted demonstrations and can be
+            passed directly to RoboMimic BC. Export each task separately because every task has
+            different environment metadata and observation semantics.
           </p>
 
           {error && (
@@ -171,6 +206,7 @@ export default function DatasetsPage() {
                   <th className="pb-2">Name</th>
                   <th className="pb-2">Format</th>
                   <th className="pb-2">Tasks</th>
+                  <th className="pb-2">Status</th>
                   <th className="pb-2 text-right">Episodes</th>
                   <th className="pb-2 text-right">Frames</th>
                   <th className="pb-2 text-right">Size</th>
@@ -187,9 +223,14 @@ export default function DatasetsPage() {
                       <Badge tone="info">{item.format}</Badge>
                     </td>
                     <td className="py-2 text-xs text-ink-400">{item.tasks.join(", ")}</td>
-                    <td className="py-2 text-right">{item.num_episodes}</td>
-                    <td className="py-2 text-right">{item.num_frames.toLocaleString()}</td>
-                    <td className="py-2 text-right">{bytes(item.size_bytes)}</td>
+                    <td className="py-2">
+                      <Badge tone={item.status === "ready" ? "ok" : item.status === "failed" ? "bad" : "warn"}>
+                        {item.status}
+                      </Badge>
+                    </td>
+                    <td className="py-2 text-right">{item.status === "ready" ? item.num_episodes : "—"}</td>
+                    <td className="py-2 text-right">{item.status === "ready" ? item.num_frames.toLocaleString() : "—"}</td>
+                    <td className="py-2 text-right">{item.status === "ready" ? bytes(item.size_bytes) : "—"}</td>
                     <td className="py-2 font-mono text-xs text-ink-400">
                       {item.dvc_hash ? item.dvc_hash.slice(0, 16) : "—"}
                     </td>

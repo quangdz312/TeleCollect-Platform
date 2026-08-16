@@ -103,7 +103,8 @@ export interface DatasetExport {
   size_bytes: number;
   path: string;
   dvc_hash: string | null;
-  status?: string;
+  status: string;
+  error_message?: string | null;
 }
 
 export interface TrainingRun {
@@ -192,11 +193,13 @@ type BackendDataset = {
   name: string;
   task_names: string[];
   include_failures: boolean;
+  format: string;
   status: string;
   num_episodes: number;
   num_frames: number;
   size_bytes: number | null;
   created_at: string;
+  error_message?: string | null;
 };
 
 const configuredOrigin =
@@ -383,16 +386,17 @@ function toExport(dataset: BackendDataset): DatasetExport {
   return {
     id: dataset.id,
     name: dataset.name,
-    format: "lerobot",
+    format: dataset.format,
     created_at: dataset.created_at,
     tasks: dataset.task_names,
     include_failures: dataset.include_failures,
     num_episodes: dataset.num_episodes,
     num_frames: dataset.num_frames,
     size_bytes: dataset.size_bytes || 0,
-    path: `data/datasets/${dataset.id}.zip`,
+    path: `data/datasets/${dataset.id}.${dataset.format === "robomimic" ? "hdf5" : "zip"}`,
     dvc_hash: null,
     status: dataset.status,
+    error_message: dataset.error_message,
   };
 }
 
@@ -570,6 +574,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({
           name: body.name,
+          format: body.format,
           task_names: body.tasks,
           include_failures: body.include_failures,
           overwrite: body.overwrite,
