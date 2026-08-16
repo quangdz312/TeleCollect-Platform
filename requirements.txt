@@ -13,8 +13,10 @@ python-dotenv>=1.0.0
 mujoco>=3.3.0,<3.9.0
 numpy>=1.26.0,<2.0.0
 scipy>=1.14.0
-robosuite>=1.5.0
+robosuite>=1.5.0,<1.6.0
 h5py>=3.11.0
+PyOpenGL>=3.1.7
+glfw>=2.7.0
 
 # Vision / Video I/O
 opencv-python-headless>=4.10.0,<4.12.0

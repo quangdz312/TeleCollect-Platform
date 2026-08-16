@@ -343,6 +343,10 @@ class DatasetCreateRequest(BaseModel):
     overwrite: bool = Field(
         default=False, description="True: xoá dataset cùng tên (record + zip cũ) rồi tạo lại"
     )
+    format: str = Field(
+        default="raw", pattern="^(raw|robomimic)$",
+        description="raw: core ZIP cũ; robomimic: HDF5 từ scripted review workspace",
+    )
 
 
 class DatasetResponse(BaseModel):
@@ -353,6 +357,7 @@ class DatasetResponse(BaseModel):
     name: str
     task_names: list[str]
     include_failures: bool
+    format: str
     status: DatasetStatus
     num_episodes: int
     num_frames: int
