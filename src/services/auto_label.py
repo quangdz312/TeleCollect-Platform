@@ -25,6 +25,11 @@ def classify_scripted(
 ) -> AutoLabelResult:
     if recorded_success is False or gate_decision in {"rejected", "auto_reject"}:
         return AutoLabelResult("reject", "Hard failure or failed task predicate")
+    # ToolHang keeps a human in the loop on anything that is not an outright
+    # failure: its quality rules are still the Stage-1 ones, so an accept here
+    # would be asserting more than the checks actually verified.
+    if task == "tool_hang":
+        return AutoLabelResult("review", "ToolHang accepts are pending a full quality rule")
     if gate_decision in {"approved", "suggest_pass"} and recorded_success is not False:
         return AutoLabelResult("accept", "All available scripted checks passed")
     if recorded_success is True and auto_flags is not None:

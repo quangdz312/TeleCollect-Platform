@@ -189,6 +189,7 @@ def submit_collection(
         )
 
     def work(log: Callable[[str], None]) -> dict[str, Any]:
+        capture_video_dir = None if task == "tool_hang" else workspace.videos_dir
         result = run_collection(
             task,
             episodes=episodes,
@@ -198,17 +199,35 @@ def submit_collection(
             output=output,
             overwrite=True,
             logger=log,
+            # Tool Hang episodes are long and use a three-pane camera. Holding
+            # every live frame until encode used several GB and could kill the
+            # API before the HDF5 writer closed. Finish the trajectory first;
+            # its videos are queued on the single render worker below.
+            video_dir=capture_video_dir,
         )
         scores = workspace.rescore()
+        from .auto_gate import apply as apply_auto_gate
+
+        gate_counts = apply_auto_gate(workspace)
         batch_scores = [
             score for score in scores
             if Path(str(score.get("source", ""))).name == output.name
         ]
         rendered = 0
-        for score in batch_scores:
-            render_video(workspace, str(score["episode_id"]))
-            rendered += 1
-            log(f"video saved: {score.get('display_name', score['episode_id'])}")
+        videos_queued = 0
+        if task == "tool_hang":
+            # The HDF5 is closed and scores are visible before anything enters
+            # the render queue. The render pool has one worker, so videos are
+            # built sequentially and an encoder failure cannot lose the batch.
+            for score in batch_scores:
+                submit_render(workspace, str(score["episode_id"]))
+                videos_queued += 1
+                log(f"video queued: {score.get('display_name', score['episode_id'])}")
+        else:
+            for score in batch_scores:
+                render_video(workspace, str(score["episode_id"]))
+                rendered += 1
+                log(f"video saved: {score.get('display_name', score['episode_id'])}")
         return {
             "output": str(output),
             "task": result.task,
@@ -218,6 +237,8 @@ def submit_collection(
             "profile_version": result.provenance.profile_version,
             "corpus_episodes": len(scores),
             "videos": rendered,
+            "videos_queued": videos_queued,
+            "auto_gate": gate_counts,
         }
 
     return registry().submit(
@@ -244,9 +265,10 @@ def render_video(workspace: Workspace, episode_id: str) -> Path:
 
     from .playback import PlaybackConfig, render_demo
 
-    # Bigger than the CLI default: the reviewer is judging whether a grasp was
-    # solid, and 256 px upscaled in a browser hides exactly that.
-    config = PlaybackConfig(height=480, width=480)
+    # Matches what the collection-time recorder writes, so a rebuilt video is
+    # interchangeable with a cached one. The reviewer is judging whether a grasp
+    # was solid, and a small frame upscaled in a browser hides exactly that.
+    config = PlaybackConfig(height=640, width=640)
 
     target = workspace.video_path(episode_id)
     if target.exists():

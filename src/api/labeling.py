@@ -21,7 +21,7 @@ bằng `require_role(UserRole.REVIEWER)`.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -29,8 +29,11 @@ from fastapi.responses import FileResponse
 from src.models.db import User
 from src.models.enums import UserRole
 from src.models.schemas import ScriptedLabelRequest, ScriptedRunRequest
-from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
 from src.services.auto_label import classify_scripted
+from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
+
+if TYPE_CHECKING:
+    from src.labeling.workspace import Workspace
 
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 reviewer_required = require_min_role(UserRole.REVIEWER)
@@ -78,14 +81,25 @@ def _task_catalogue() -> list[dict[str, Any]]:
     """Horizon mặc định lấy từ chính task spec, không chép tay lại."""
 
     from src.sim.scripted_generation import collection_task_spec
+    from src.sim.tool_hang import TOOLHANG_DISPLAY_NAME, TOOLHANG_TOOL_NAME
 
     catalogue = []
     for task in supported_tasks():
         spec = collection_task_spec(task)
+        # `tool_name` is a stored dataset identifier, and ToolHang's is the
+        # historical `tool_hang_stage1` even though the task runs both stages.
+        # Send a display name so the picker does not tell the operator they are
+        # collecting stage 1 only.
+        label = (
+            TOOLHANG_DISPLAY_NAME
+            if spec.tool_name == TOOLHANG_TOOL_NAME
+            else spec.tool_name
+        )
         catalogue.append(
             {
                 "task": task,
                 "tool": spec.tool_name,
+                "tool_label": label,
                 "default_horizon": spec.default_horizon,
             },
         )
@@ -104,6 +118,13 @@ def _public(record: dict[str, Any], *, include_score: bool) -> dict[str, Any]:
     )
     public["auto_label"] = recommendation.label
     public["auto_label_reason"] = recommendation.reason
+    from src.labeling.auto_gate import AUTO_GATE_VERSION, evaluate
+
+    gate = evaluate(record)
+    public["gate_action"] = gate.action
+    public["audit_required"] = gate.action == "audit"
+    public["auto_gate_version"] = AUTO_GATE_VERSION
+    public["auto_gate_reason"] = gate.reason
     return public
 
 
@@ -133,6 +154,29 @@ async def overview(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
     return workspace().summary()
 
 
+@router.post("/auto-gate/apply")
+async def apply_auto_gate(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
+    """Apply the conservative gate to unlabeled episodes; human labels are immutable."""
+
+    from src.labeling.auto_gate import apply
+
+    space = workspace()
+    return {"result": apply(space), "workspace": space.summary()}
+
+
+@router.get("/diversity")
+async def diversity(
+    task: str = Query(...),
+    scope: str = Query("approved", pattern="^(approved|reviewed|all)$"),
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    if task not in supported_tasks():
+        raise HTTPException(400, f"task không hợp lệ: {task}")
+    from src.labeling.diversity import diversity_report
+
+    return diversity_report(workspace(), task=task, scope=scope)
+
+
 # --- thu dữ liệu ------------------------------------------------------------
 
 
@@ -144,10 +188,7 @@ async def start_run(
     if request.task not in supported_tasks():
         raise HTTPException(400, f"task không hợp lệ: {request.task}")
     if request.quality not in supported_qualities():
-        if request.task == "tool_hang" and request.quality != "clean":
-            raise HTTPException(400, "ToolHang hiện chỉ hỗ trợ quality clean")
         raise HTTPException(400, f"quality không hợp lệ: {request.quality}")
-
     space = workspace()
     from src.labeling.jobs import submit_collection
 
@@ -325,7 +366,12 @@ async def report(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
 
     space = workspace()
     scores = space.scores()
-    labels = space.labels()
+    # Automatic verdicts must never be used to calibrate the same gate that
+    # produced them. Only independent human decisions are valid shadow truth.
+    labels = [
+        label for label in space.labels()
+        if label.get("decision_source", "human") != "auto_gate"
+    ]
     if not scores:
         raise HTTPException(409, "workspace chưa có episode nào")
 
