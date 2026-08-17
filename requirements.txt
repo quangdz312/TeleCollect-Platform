@@ -9,12 +9,22 @@ pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 
 # Simulation
-mujoco>=3.2.0
-numpy>=1.26.0
+# robosuite 1.5.x still depends on MuJoCo APIs that changed in 3.9.
+mujoco>=3.3.0,<3.9.0
+numpy>=1.26.0,<2.0.0
 scipy>=1.14.0
+# src/sim/skillgen/compat.py works around the 1.4 -> 1.5 grip site rename and
+# the move to a per-env RNG, so we are pinned to the 1.5 API shape.
+robosuite>=1.5.0,<1.6.0
+h5py>=3.11.0
+# Pulled in by mujoco, but we import them directly: OpenGL.GL for renderer
+# identification in src/sim/gpu.py, glfw for the teleop window in
+# scripts/teleop_ui.py.
+PyOpenGL>=3.1.7
+glfw>=2.7.0
 
 # Vision / Video I/O
-opencv-python-headless>=4.10.0
+opencv-python-headless>=4.10.0,<4.12.0
 av>=13.0.0
 
 # Database
