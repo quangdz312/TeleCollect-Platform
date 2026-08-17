@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from numbers import Integral
 from typing import TypeAlias
 
-
 Vector3: TypeAlias = tuple[float, float, float]
 ArmVector: TypeAlias = tuple[float, float, float, float, float, float]
 Vector2: TypeAlias = tuple[float, float]
@@ -63,6 +62,9 @@ class EpisodeVariation:
     arm_bias: ArmVector
     schedule: EventSchedule
     retry_cap: int
+    fault_type: str
+    fault_phase: str
+    fault_magnitude: float
 
     @property
     def is_zero(self) -> bool:
@@ -74,6 +76,7 @@ class EpisodeVariation:
             and self.arm_bias == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
             and self.schedule.empty
             and self.retry_cap == 0
+            and self.fault_type == "none"
         )
 
 
@@ -155,7 +158,12 @@ class SquareVariation(EpisodeVariation):
         )
 
 
-TaskVariation: TypeAlias = LiftVariation | CanVariation | SquareVariation
+@dataclass(frozen=True)
+class ToolHangVariation(EpisodeVariation):
+    """Arm-only candidate variation; semantic fields are intentionally absent."""
+
+
+TaskVariation: TypeAlias = LiftVariation | CanVariation | SquareVariation | ToolHangVariation
 
 VariationType: TypeAlias = type[EpisodeVariation]
 _VARIATION_TYPES: dict[str, VariationType] = {}
@@ -184,3 +192,4 @@ def variation_type_for_task(task: str) -> VariationType:
 register_variation_type("lift", LiftVariation)
 register_variation_type("can", CanVariation)
 register_variation_type("square", SquareVariation)
+register_variation_type("tool_hang", ToolHangVariation)
