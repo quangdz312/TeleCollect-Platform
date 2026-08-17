@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   InputCollector,
   KEY_HELP,
+  type AxisInput,
   type FrameState,
   type LatencyStats,
   type TeleopEvent,
@@ -12,6 +13,7 @@ import {
 import { CONTROL_HZ, TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
+import { HandControl } from "@/components/HandControl";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -35,6 +37,10 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     x: 0,
     y: 0,
   });
+  // Set while the hand camera is tracking, null the rest of the time. The
+  // send loop below reads it instead of the keyboard/pointer collector, so
+  // the two input paths never fight over the same tick.
+  const handInputRef = useRef<AxisInput | null>(null);
 
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "pick_place");
   const [status, setStatus] = useState<Status>("idle");
@@ -60,6 +66,17 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
         ...previous,
       ].slice(0, 60),
     );
+  }, []);
+
+  // -- hand camera -----------------------------------------------------
+  // `HandControl` owns the camera, the landmark model and the gesture
+  // mapping; these two callbacks are the whole interface to it.
+  const handleHandInput = useCallback((input: AxisInput | null) => {
+    handInputRef.current = input;
+  }, []);
+
+  const handleHandGripper = useCallback((closed: boolean) => {
+    inputRef.current.setGripper(closed);
   }, []);
 
   // -- connection ------------------------------------------------------
@@ -118,7 +135,9 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     let raf = 0;
     const pump = () => {
       const client = clientRef.current;
-      if (client) client.input = collector.sample();
+      // The hand camera takes over while it is tracking; the keyboard and
+      // pointer collector drives the arm the rest of the time.
+      if (client) client.input = handInputRef.current ?? collector.sample();
       const pads = navigator.getGamepads?.() ?? [];
       const pad = Array.from(pads).find((p) => p && p.connected);
       setGamepad(pad ? pad.id.slice(0, 40) : null);
@@ -352,6 +371,10 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               </Link>
             )}
           </div>
+        </Card>
+
+        <Card title="Hand camera control" subtitle="Relative RGB depth via palm size">
+          <HandControl onInput={handleHandInput} onGripper={handleHandGripper} />
         </Card>
 
         <Card title="Robot state">
