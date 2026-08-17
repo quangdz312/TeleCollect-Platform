@@ -13,21 +13,22 @@ from enum import Enum
 from types import MappingProxyType
 
 
-TOOL_HANG_DISABLED_MESSAGE = (
-    "Tool Hang perturbation is not enabled in v1.0; clean baseline C0 is pending."
-)
 #: The candidate marker these doses carried through Phase D2. Kept so dataset
 #: provenance can trace a published episode back to the frozen candidate run.
 CANDIDATE_PROFILE_VERSION = "candidate-phase-d2-frozen"
 #: Accepted under amendment TC-QP-2026-08-09-02; see docs/telecollect_profile_v1_decision.md.
 PROFILE_VERSION = "v1"
 PROFILE_ACCEPTANCE_AMENDMENT = "TC-QP-2026-08-09-02"
+TOOLHANG_PROFILE_VERSION = "toolhang-candidate-v1"
+TOOLHANG_CANDIDATE_PROFILE_VERSION = "toolhang-phase-decay-calibration"
+TOOLHANG_ACCEPTANCE_AMENDMENT = "pending-calibration"
 
 
 class PerturbationTask(str, Enum):
     LIFT = "lift"
     CAN = "can"
     SQUARE = "square"
+    TOOL_HANG = "tool_hang"
 
 
 class Quality(str, Enum):
@@ -41,6 +42,7 @@ TASK_CODES = MappingProxyType({
     PerturbationTask.LIFT: 1,
     PerturbationTask.CAN: 2,
     PerturbationTask.SQUARE: 3,
+    PerturbationTask.TOOL_HANG: 4,
 })
 NOISE_STREAM_CODE = 1
 
@@ -71,6 +73,12 @@ TASK_QUALITY_SCALES = MappingProxyType({
         Quality.GOOD: 0.18,
         Quality.MEDIUM: 0.90,
         Quality.POOR: 1.30,
+    }),
+    PerturbationTask.TOOL_HANG: MappingProxyType({
+        Quality.CLEAN: 0.00,
+        Quality.GOOD: 0.20,
+        Quality.MEDIUM: 0.60,
+        Quality.POOR: 1.00,
     }),
 })
 
@@ -171,6 +179,15 @@ _TASK_LIMITS = {
             release_timing_steps=3,
         ),
     ),
+    # Candidate arm-only dose. ToolHang deliberately starts without perception
+    # bias or semantic faults; those require their own calibration round.
+    PerturbationTask.TOOL_HANG: CandidateLimits(
+        0.0,
+        0.0,
+        0.04,
+        0.008,
+        event_window_steps=64,
+    ),
 }
 
 _ALIASES = {
@@ -180,12 +197,15 @@ _ALIASES = {
     "pick_place_can": PerturbationTask.CAN,
     "square": PerturbationTask.SQUARE,
     "assemble_square": PerturbationTask.SQUARE,
+    "tool_hang": PerturbationTask.TOOL_HANG,
+    "assemble_tool_hang": PerturbationTask.TOOL_HANG,
 }
 
 _TOOL_NAMES = {
     PerturbationTask.LIFT: "lift_cube",
     PerturbationTask.CAN: "pick_place_can",
     PerturbationTask.SQUARE: "assemble_square",
+    PerturbationTask.TOOL_HANG: "tool_hang_stage1",
 }
 
 
@@ -213,8 +233,6 @@ def resolve_profile(
     """Resolve a v1.0 candidate without importing a simulator backend."""
 
     task_value = task.value if isinstance(task, PerturbationTask) else str(task).lower()
-    if task_value in {"tool_hang", "assemble_tool_hang"}:
-        raise PerturbationNotEnabledError(TOOL_HANG_DISABLED_MESSAGE)
     try:
         resolved_task = _ALIASES[task_value]
     except KeyError as exc:
@@ -228,6 +246,7 @@ def resolve_profile(
             f"Unsupported perturbation quality: {quality!r}; expected one of {supported}",
         ) from exc
 
+    tool_hang = resolved_task == PerturbationTask.TOOL_HANG
     return ResolvedProfile(
         task=resolved_task,
         tool_name=_TOOL_NAMES[resolved_task],
@@ -235,4 +254,11 @@ def resolve_profile(
         quality=resolved_quality,
         noise_scale=TASK_QUALITY_SCALES[resolved_task][resolved_quality],
         limits=_TASK_LIMITS[resolved_task],
+        profile_version=TOOLHANG_PROFILE_VERSION if tool_hang else PROFILE_VERSION,
+        candidate_profile_version=(
+            TOOLHANG_CANDIDATE_PROFILE_VERSION if tool_hang else CANDIDATE_PROFILE_VERSION
+        ),
+        acceptance_amendment=(
+            TOOLHANG_ACCEPTANCE_AMENDMENT if tool_hang else PROFILE_ACCEPTANCE_AMENDMENT
+        ),
     )
