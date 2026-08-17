@@ -126,6 +126,31 @@ export interface ShadowReport {
   targets: { min_auc: number; target_approve_zone: number; min_reviews_for_yield: number };
 }
 
+export type DiversityScope = "approved" | "reviewed" | "all";
+
+export interface DiversityReport {
+  task: string;
+  scope: DiversityScope;
+  episodes: number;
+  success_rate: number | null;
+  coverage: { overall: number | null; x: number | null; y: number | null; reference_episodes: number };
+  status: { code: string; label: string; detail: string };
+  quality: Array<{
+    quality: string; total: number; success: number; failure: number;
+    approved: number; rejected: number; pending: number;
+  }>;
+  position_sets: Array<{
+    key: string;
+    label: string;
+    points: Array<{
+      episode_id: string; quality: string; decision: string; success: boolean;
+      x: number; y: number; z: number;
+    }>;
+  }>;
+  length_histogram: { edges: number[]; counts: number[] };
+  phases: Array<{ phase: string; action_scale: number; failures: number }>;
+}
+
 import { apiUrl, getToken } from "./api";
 
 const BASE = "/labeling";
@@ -194,4 +219,9 @@ export const labeling = {
   }) => post<{ label: LabelRecord; workspace: WorkspaceSummary }>("/labels", payload),
 
   report: () => request<ShadowReport>("/report"),
+
+  diversity: (task: string, scope: DiversityScope) => {
+    const query = new URLSearchParams({ task, scope });
+    return request<DiversityReport>(`/diversity?${query}`);
+  },
 };

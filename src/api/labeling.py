@@ -371,3 +371,33 @@ async def report(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
             "min_reviews_for_yield": DEFAULT_SHADOW.min_reviews_for_yield,
         },
     }
+
+
+@router.post("/auto-gate/apply")
+async def apply_auto_gate(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
+    """Apply the conservative gate to unlabelled episodes.
+
+    Labels a human already made are never touched: the gate fills in what
+    nobody has judged yet, it does not revisit judgements.
+    """
+
+    from src.labeling.auto_gate import apply
+
+    space = workspace()
+    return {"result": apply(space), "workspace": space.summary()}
+
+
+@router.get("/diversity")
+async def diversity(
+    task: str = Query(...),
+    scope: str = Query("approved", pattern="^(approved|reviewed|all)$"),
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    """Coverage, length spread and per-phase failures for one task's corpus."""
+
+    if task not in supported_tasks():
+        raise HTTPException(status_code=404, detail="TASK_NOT_FOUND")
+
+    from src.labeling.diversity import diversity_report
+
+    return diversity_report(workspace(), task=task, scope=scope)
