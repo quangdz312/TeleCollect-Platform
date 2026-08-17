@@ -32,6 +32,7 @@ class ToolContext:
     adapt_observation: Callable[[dict[str, Any]], dict[str, Any]]
     verbose: bool = False
     logger: Callable[[str], None] = print
+    post_success_steps: int = 10
 
 
 @dataclass(frozen=True)
