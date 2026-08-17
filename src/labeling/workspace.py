@@ -264,6 +264,9 @@ class Workspace:
         note: str = "",
         reviewer: str = "unknown",
         blind: bool = True,
+        decision_source: str = "human",
+        gate_version: str | None = None,
+        gate_reason: str = "",
     ) -> dict[str, Any]:
         """Record one verdict. Raises if the episode is not in this workspace."""
 
@@ -290,6 +293,9 @@ class Workspace:
             "blind": blind,
             "scorer_version": score.get("scorer_version", ""),
             "reviewed_at": _now(),
+            "decision_source": decision_source,
+            "gate_version": gate_version,
+            "gate_reason": gate_reason,
         }
         self.labels_path.parent.mkdir(parents=True, exist_ok=True)
         with self.labels_path.open("a", encoding="utf-8") as handle:
@@ -300,24 +306,81 @@ class Workspace:
 
     def summary(self) -> dict[str, Any]:
         scores = self.scores()
+        scores_by_id = {str(item["episode_id"]): item for item in scores}
         labels = self.labels_by_id()
         approved = sum(1 for item in labels.values() if item["human_decision"] == "approved")
+        approved_successes = sum(
+            1
+            for episode_id, item in labels.items()
+            if item["human_decision"] == "approved"
+            and scores_by_id.get(episode_id, {}).get("recorded_success") is True
+        )
+        auto_approved = sum(
+            1 for item in labels.values()
+            if item.get("human_decision") == "approved" and item.get("decision_source") == "auto_gate"
+        )
+        auto_rejected = sum(
+            1 for item in labels.values()
+            if item.get("human_decision") == "rejected" and item.get("decision_source") == "auto_gate"
+        )
+        from .auto_gate import evaluate
+
+        audited = [
+            (record, labels.get(str(record["episode_id"])))
+            for record in scores
+            if evaluate(record).action == "audit"
+        ]
+        audit_pending = sum(1 for _, label in audited if label is None)
+        audit_reviewed = sum(
+            1 for _, label in audited
+            if label is not None and label.get("decision_source", "human") != "auto_gate"
+        )
+        audit_failed = sum(
+            1 for _, label in audited
+            if label is not None
+            and label.get("decision_source", "human") != "auto_gate"
+            and label.get("human_decision") == "rejected"
+        )
         per_task: dict[str, dict[str, int]] = {}
         for record in scores:
             bucket = per_task.setdefault(
-                str(record["task"]), {"total": 0, "reviewed": 0},
+                str(record["task"]), {
+                    "total": 0,
+                    "reviewed": 0,
+                    "pending": 0,
+                    "approved": 0,
+                    "approved_successes": 0,
+                    "rejected": 0,
+                },
             )
             bucket["total"] += 1
-            if record["episode_id"] in labels:
-                bucket["reviewed"] += 1
+            label = labels.get(str(record["episode_id"]))
+            if label is None:
+                bucket["pending"] += 1
+                continue
+            bucket["reviewed"] += 1
+            decision = str(label["human_decision"])
+            bucket[decision] += 1
+            if decision == "approved" and record.get("recorded_success") is True:
+                bucket["approved_successes"] += 1
         return {
             "root": str(self.root),
             "datasets": len(self.datasets()),
             "episodes": len(scores),
             "reviewed": len(labels),
             "approved": approved,
+            "approved_successes": approved_successes,
             "rejected": len(labels) - approved,
             "pending": len(scores) - len(labels),
+            "auto_approved": auto_approved,
+            "auto_rejected": auto_rejected,
+            "human_reviewed": len(labels) - auto_approved - auto_rejected,
+            "audit_pending": audit_pending,
+            "audit_reviewed": audit_reviewed,
+            "audit_failed": audit_failed,
+            "audit_error_rate": (
+                round(audit_failed / audit_reviewed, 4) if audit_reviewed else None
+            ),
             "per_task": per_task,
             "scorer_version": scores[0]["scorer_version"] if scores else None,
         }
