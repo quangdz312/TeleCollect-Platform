@@ -70,3 +70,38 @@ frontend/.devserver*.log
 # Written by `next dev` itself on every run
 frontend/AGENTS.md
 frontend/CLAUDE.md
+
+# Local test and generated artifacts
+/.test-*/
+/.test-*.hdf5
+/.test-*.hdf5.trace.jsonl
+/pytest-cache-files-*/
+/.mvp-audit-temp-*/
+/.report-build/
+.pytest_cache/
+pytest-of-*/
+
+# ML payloads outside the ignored data directory
+*.hdf5
+*.h5
+*.pth
+*.pt
+*.ckpt
+*.trace.jsonl
+
+# Generated review and rollout media
+*.mp4
+*.avi
+*.mkv
+
+# Tool and model caches
+*.tsbuildinfo
+.cache/
+huggingface/
+wandb/
+
+# Personal Codex configuration and automatic logging
+/.codex/hooks.json
+/.codex/config.toml
+/scripts/log_hook.py
+/.ai-log/
