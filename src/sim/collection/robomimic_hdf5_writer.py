@@ -6,12 +6,56 @@ import json
 import os
 import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import h5py
 import numpy as np
+
+ROBOSUITE_ENV_TYPE = 1
+
+
+def normalize_robomimic_env_args(env_args: Mapping[str, Any]) -> dict[str, Any]:
+    """Return RoboMimic environment metadata with the required simulator type.
+
+    Every simulator used by TeleCollect is a RoboSuite environment. RoboMimic
+    dispatches its observation handling from this top-level integer and raises
+    ``KeyError('type')`` before training when it is absent.
+    """
+
+    normalized = deepcopy(dict(env_args))
+    existing = normalized.setdefault("type", ROBOSUITE_ENV_TYPE)
+    if existing != ROBOSUITE_ENV_TYPE:
+        raise ValueError(
+            f"TeleCollect datasets require RoboSuite env type {ROBOSUITE_ENV_TYPE}, got {existing!r}"
+        )
+    try:
+        import robosuite
+        from robosuite.controllers import load_composite_controller_config
+    except ImportError as exc:
+        raise RuntimeError("RoboSuite is required to build rollout-compatible metadata") from exc
+
+    normalized.setdefault("env_version", robosuite.__version__)
+    env_kwargs = deepcopy(dict(normalized.get("env_kwargs", {})))
+    # `stage` is TeleCollect provenance, not a valid RoboSuite constructor kwarg.
+    env_kwargs.pop("stage", None)
+
+    supplied_controller = env_kwargs.get("controller_configs")
+    full_controller = load_composite_controller_config(controller="BASIC")
+    if isinstance(supplied_controller, Mapping):
+        supplied_right = supplied_controller.get("body_parts", {}).get("right", {})
+        if isinstance(supplied_right, Mapping):
+            full_controller["body_parts"]["right"].update(deepcopy(dict(supplied_right)))
+    env_kwargs["controller_configs"] = full_controller
+    env_kwargs.setdefault("use_object_obs", True)
+    env_kwargs.setdefault("use_camera_obs", False)
+    env_kwargs.setdefault("reward_shaping", False)
+    env_kwargs.setdefault("ignore_done", True)
+    env_kwargs.setdefault("hard_reset", False)
+    normalized["env_kwargs"] = env_kwargs
+    return normalized
 
 
 @dataclass
@@ -66,7 +110,9 @@ class RobomimicHDF5Writer:
         self.temp_path = self.output.with_name(f".{self.output.name}.{uuid.uuid4().hex}.tmp")
         self._handle = h5py.File(self.temp_path, "w")
         self._data = self._handle.create_group("data")
-        self._data.attrs["env_args"] = json.dumps(env_args, indent=4)
+        self._data.attrs["env_args"] = json.dumps(
+            normalize_robomimic_env_args(env_args), indent=4,
+        )
         # Additive batch provenance; the core Robomimic schema is unchanged.
         if collection_metadata:
             self._data.attrs.update(dict(collection_metadata))
@@ -142,7 +188,7 @@ class RobomimicHDF5Writer:
         elif self.temp_path.exists():
             self.temp_path.unlink()
 
-    def __enter__(self) -> "RobomimicHDF5Writer":
+    def __enter__(self) -> RobomimicHDF5Writer:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
