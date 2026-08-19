@@ -54,6 +54,9 @@ export interface LatencyStats {
   dropped: number;
   decode?: number;
   decodeP95?: number;
+  decodeDropped?: number;
+  visual?: number;
+  visualP95?: number;
 }
 
 export interface AxisInput {

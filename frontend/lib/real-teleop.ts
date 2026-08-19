@@ -3,7 +3,7 @@
 import { API_ORIGIN, apiUrl } from "./api";
 import type { AxisInput, FrameState, LatencyStats, TeleopEvent } from "./teleop";
 
-const CONTROL_HZ = 30;
+const CONTROL_HZ = 60;
 const RTT_WINDOW = 120;
 
 type ObsMessage = {
@@ -38,6 +38,17 @@ type CreatedSession = {
   ws_url: string;
 };
 
+type CameraName = "front" | "wrist";
+type PendingFrame = { seq: number; jpeg: Blob };
+type DecodeQueue = { decoding: boolean; pending: PendingFrame | null };
+
+function freshDecodeQueues(): Record<CameraName, DecodeQueue> {
+  return {
+    front: { decoding: false, pending: null },
+    wrist: { decoding: false, pending: null },
+  };
+}
+
 function percentile(values: number[], fraction: number): number {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -50,14 +61,21 @@ function wsOrigin() {
   return configured.replace(/^http/, "ws").replace(/\/$/, "");
 }
 
-async function bitmapFromPayload(blob: Blob): Promise<{ camera: string; bitmap: ImageBitmap; decodeMs: number } | null> {
-  if (blob.size < 2) return null;
-  const cameraIndex = new Uint8Array(await blob.slice(0, 1).arrayBuffer())[0];
-  const jpeg = blob.slice(1, undefined, "image/jpeg");
+async function jpegFromPayload(blob: Blob): Promise<{ camera: CameraName; seq: number; jpeg: Blob } | null> {
+  if (blob.size < 6) return null;
+  const header = await blob.slice(0, 5).arrayBuffer();
+  const cameraIndex = new Uint8Array(header)[0];
+  return {
+    camera: cameraIndex === 1 ? "wrist" : "front",
+    seq: new DataView(header).getUint32(1, false),
+    jpeg: blob.slice(5, undefined, "image/jpeg"),
+  };
+}
+
+async function decodeJpeg(jpeg: Blob): Promise<{ bitmap: ImageBitmap; decodeMs: number }> {
   const decodeStartedAt = performance.now();
   const bitmap = await createImageBitmap(jpeg);
   return {
-    camera: cameraIndex === 1 ? "wrist" : "front",
     bitmap,
     decodeMs: performance.now() - decodeStartedAt,
   };
@@ -73,6 +91,10 @@ export class TeleopClient {
   private rttSamples: number[] = [];
   private frameTimes: number[] = [];
   private decodeSamples: number[] = [];
+  private visualSamples: number[] = [];
+  private decodeQueues = freshDecodeQueues();
+  private decodeDropped = 0;
+  private decodeGeneration = 0;
   private latestImages = new Map<string, ImageBitmap>();
   private latestObs: ObsMessage | null = null;
   private latestStats: StatsMessage | null = null;
@@ -137,6 +159,10 @@ export class TeleopClient {
     this.ws?.close();
     this.ws = null;
     this.sessionId = null;
+    this.decodeGeneration += 1;
+    this.decodeQueues = freshDecodeQueues();
+    this.decodeDropped = 0;
+    this.decodeSamples = [];
     this.latestImages.forEach((image) => image.close());
     this.latestImages.clear();
   }
@@ -194,17 +220,55 @@ export class TeleopClient {
       this.handleJson(JSON.parse(data));
       return;
     }
-    const payload = await bitmapFromPayload(data as Blob);
-    if (!payload || !this.latestObs) return;
-    this.latestImages.get(payload.camera)?.close();
-    this.latestImages.set(payload.camera, payload.bitmap);
-    this.decodeSamples.push(payload.decodeMs);
-    if (this.decodeSamples.length > RTT_WINDOW) this.decodeSamples.shift();
-    this.frameTimes.push(performance.now());
-    while (this.frameTimes.length && performance.now() - this.frameTimes[0] > 1000) {
-      this.frameTimes.shift();
+    const generation = this.decodeGeneration;
+    const payload = await jpegFromPayload(data as Blob);
+    if (payload && generation === this.decodeGeneration) {
+      this.enqueueLatestFrame(payload.camera, payload.seq, payload.jpeg);
     }
-    this.emitFrame();
+  }
+
+  private enqueueLatestFrame(camera: CameraName, seq: number, jpeg: Blob) {
+    const queue = this.decodeQueues[camera];
+    if (queue.pending !== null) this.decodeDropped += 1;
+    // Replacing this slot is the key latency guarantee: at most one future
+    // frame per camera can wait behind the frame currently being decoded.
+    queue.pending = { seq, jpeg };
+    if (!queue.decoding) void this.drainDecodeQueue(camera, queue, this.decodeGeneration);
+  }
+
+  private async drainDecodeQueue(camera: CameraName, queue: DecodeQueue, generation: number) {
+    queue.decoding = true;
+    try {
+      while (queue.pending !== null && generation === this.decodeGeneration) {
+        const queued = queue.pending;
+        queue.pending = null;
+        const payload = await decodeJpeg(queued.jpeg);
+        if (generation !== this.decodeGeneration) {
+          payload.bitmap.close();
+          return;
+        }
+        if (!this.latestObs) {
+          payload.bitmap.close();
+          continue;
+        }
+        this.latestImages.get(camera)?.close();
+        this.latestImages.set(camera, payload.bitmap);
+        this.decodeSamples.push(payload.decodeMs);
+        if (this.decodeSamples.length > RTT_WINDOW) this.decodeSamples.shift();
+        const sentAt = this.inputSentAt.get(queued.seq);
+        if (sentAt !== undefined) {
+          this.visualSamples.push(performance.now() - sentAt);
+          if (this.visualSamples.length > RTT_WINDOW) this.visualSamples.shift();
+        }
+        this.frameTimes.push(performance.now());
+        while (this.frameTimes.length && performance.now() - this.frameTimes[0] > 1000) {
+          this.frameTimes.shift();
+        }
+        this.emitFrame();
+      }
+    } finally {
+      queue.decoding = false;
+    }
   }
 
   private handleJson(message: { type: string; [key: string]: unknown }) {
@@ -215,7 +279,8 @@ export class TeleopClient {
       if (sentAt !== undefined) {
         this.rttSamples.push(performance.now() - sentAt);
         if (this.rttSamples.length > RTT_WINDOW) this.rttSamples.shift();
-        this.inputSentAt.delete(obs.seq);
+        // Keep recent timestamps until the corresponding JPEG arrives; the
+        // map is bounded in sendInput(), so this cannot grow indefinitely.
       }
       this.emitFrame();
       this.emitStats();
@@ -297,6 +362,9 @@ export class TeleopClient {
       dropped: stats?.dropped_frames ?? 0,
       decode: percentile(this.decodeSamples, 0.5),
       decodeP95: percentile(this.decodeSamples, 0.95),
+      decodeDropped: this.decodeDropped,
+      visual: percentile(this.visualSamples, 0.5),
+      visualP95: percentile(this.visualSamples, 0.95),
     });
   }
 }

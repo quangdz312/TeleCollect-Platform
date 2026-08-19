@@ -24,12 +24,17 @@ interface LogLine {
   at: string;
 }
 
+type Quaternion = [number, number, number, number];
+type RotationSafety = { twistDeg: number; limited: boolean };
+
 const JOINT_LABELS = ["j1", "j2", "j3", "j4", "j5", "j6", "grip"];
 
 export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const frontRef = useRef<HTMLCanvasElement | null>(null);
   const wristRef = useRef<HTMLCanvasElement | null>(null);
   const clientRef = useRef<TeleopClient | null>(null);
+  const frameRef = useRef<FrameState | null>(null);
+  const rotationBaselineRef = useRef<Quaternion | null>(null);
   const inputRef = useRef(new InputCollector());
   const dragRef = useRef<{ active: boolean; x: number; y: number }>({
     active: false,
@@ -48,6 +53,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [gamepad, setGamepad] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [rotationSafety, setRotationSafety] = useState<RotationSafety>({ twistDeg: 0, limited: false });
 
   const task = useMemo(() => tasks.find((t) => t.id === taskId), [tasks, taskId]);
 
@@ -67,7 +73,13 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   }, []);
 
   const handleHandInput = useCallback((input: AxisInput | null) => {
-    handInputRef.current = input;
+    if (!input) {
+      handInputRef.current = null;
+      return;
+    }
+    const mapped = applyRotationSafety(input, frameRef.current?.ee, rotationBaselineRef);
+    handInputRef.current = mapped.input;
+    setRotationSafety(mapped.safety);
   }, []);
 
   const handleHandGripper = useCallback((closed: boolean) => {
@@ -79,6 +91,8 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     const token = getToken();
     if (!token) return;
     clientRef.current?.disconnect();
+    rotationBaselineRef.current = null;
+    setRotationSafety({ twistDeg: 0, limited: false });
 
     const client = new TeleopClient(token);
     client.onStatus = (next, detail) => {
@@ -88,6 +102,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       if (next === "open") pushLog("Connected to the simulator", "ok");
     };
     client.onFrame = (state, images) => {
+      frameRef.current = state;
       setFrame(state);
       paint(frontRef.current, images.get("front"));
       paint(wristRef.current, images.get("wrist"));
@@ -101,6 +116,9 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();
     clientRef.current = null;
+    frameRef.current = null;
+    rotationBaselineRef.current = null;
+    setRotationSafety({ twistDeg: 0, limited: false });
     setStatus("idle");
     setFrame(null);
   }, []);
@@ -274,7 +292,11 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             <Button
               variant="ghost"
               disabled={!connected}
-              onClick={() => clientRef.current?.reset()}
+              onClick={() => {
+                rotationBaselineRef.current = null;
+                setRotationSafety({ twistDeg: 0, limited: false });
+                clientRef.current?.reset();
+              }}
             >
               New scene
             </Button>
@@ -345,6 +367,13 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               value={stats?.decodeP95 !== undefined ? `${stats.decodeP95.toFixed(1)} ms` : "—"}
               tone={stats?.decodeP95 !== undefined && stats.decodeP95 > 20 ? "warn" : "ok"}
             />
+            <Metric
+              label="Decode frames skipped"
+              value={stats?.decodeDropped !== undefined ? String(stats.decodeDropped) : "—"}
+            />
+            <Metric label="Visual latency" value={stats?.visual !== undefined ? `${stats.visual.toFixed(1)} ms` : "—"} tone={stats?.visual !== undefined && stats.visual > 100 ? "warn" : "ok"} />
+            <Metric label="Visual p95" value={stats?.visualP95 !== undefined ? `${stats.visualP95.toFixed(1)} ms` : "—"} tone={stats?.visualP95 !== undefined && stats.visualP95 > 140 ? "bad" : "ok"} />
+            <Metric label="Gripper twist" value={`${rotationSafety.twistDeg.toFixed(1)}°`} tone={rotationSafety.limited ? "bad" : Math.abs(rotationSafety.twistDeg) > 30 ? "warn" : "ok"} />
           </div>
           <p className="mt-3 text-xs text-ink-400">
             Round trip is measured on the browser clock: the server echoes back the timestamp of
@@ -460,6 +489,49 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       </div>
     </div>
   );
+}
+
+function applyRotationSafety(
+  input: AxisInput,
+  ee: number[] | undefined,
+  baselineRef: React.MutableRefObject<Quaternion | null>,
+): { input: AxisInput; safety: RotationSafety } {
+  const rotation = input.angular[2];
+  if (!ee || ee.length < 7) return { input, safety: { twistDeg: 0, limited: false } };
+  const [qw, qx, qy, qz] = ee.slice(3, 7);
+  const norm = Math.hypot(qw, qx, qy, qz);
+  if (norm < 1e-6) return { input, safety: { twistDeg: 0, limited: false } };
+  const w = qw / norm, x = qx / norm, y = qy / norm, z = qz / norm;
+  const current: Quaternion = [w, x, y, z];
+  if (baselineRef.current === null) baselineRef.current = current;
+  const [bw, bx, by, bz] = baselineRef.current;
+  const relativeW = bw * w + bx * x + by * y + bz * z;
+  const relativeZ = bw * z - bx * y + by * x - bz * w;
+  const twist = wrapRadians(2 * Math.atan2(relativeZ, relativeW));
+  const softLimit = 30 * Math.PI / 180;
+  const hardLimit = 45 * Math.PI / 180;
+  const outward = Math.abs(twist) > 1e-4 && Math.sign(rotation) === Math.sign(twist);
+  let scale = 1;
+  if (outward && Math.abs(twist) >= softLimit) {
+    scale = Math.max(0, Math.min(1, (hardLimit - Math.abs(twist)) / (hardLimit - softLimit)));
+  }
+  const safeRotation = outward ? rotation * scale : rotation;
+  const toolZ: [number, number, number] = [
+    2 * (x * z + w * y),
+    2 * (y * z - w * x),
+    1 - 2 * (x * x + y * y),
+  ];
+  return {
+    input: {
+      ...input,
+      angular: toolZ.map((component) => component * safeRotation) as [number, number, number],
+    },
+    safety: { twistDeg: twist * 180 / Math.PI, limited: outward && scale <= 0.001 },
+  };
+}
+
+function wrapRadians(angle: number) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 function handleEvent(

@@ -18,13 +18,12 @@ Giao thức WebSocket trên `/teleop/ws/{session_id}`:
         JSON   {"type": "recording_started" | "recording_saved" | "recording_discarded", ...}
         JSON   {"type": "stats", ...} / {"type": "pong", ...}
         JSON   {"type": "error", "code": "...", "detail": "..."}
-        BINARY 1 byte chỉ số camera + JPEG thuần
+        BINARY 1 byte camera + uint32 input seq (big-endian) + JPEG
                b"\\x00" = camera chính (preview_camera)
                b"\\x01" = camera phụ   (preview_camera_secondary, vd cổ tay)
 
-`seq` được phản chiếu lại trong `obs` để client đo round-trip latency mà
-không cần đồng bộ đồng hồ hai phía. Frame gửi dạng binary thuần thay vì base64
-trong JSON: base64 phình 33% trên đường nóng mà không thêm thông tin gì.
+`seq` được phản chiếu trong cả `obs` và header frame để client đo round-trip
+và input-to-pixel latency mà không cần đồng bộ đồng hồ hai phía.
 
 Module này KHÔNG chứa logic vật lý. Mọi thao tác chạm MuJoCo đều đẩy sang
 worker thread của `ControlLoop` qua `submit_command`, chạy trong executor để
@@ -41,6 +40,7 @@ Endpoint:
 import asyncio
 import contextlib
 import shutil
+import struct
 import time
 from typing import Any
 
@@ -369,10 +369,10 @@ class _Controller:
     async def frame_pump(self) -> None:
         """Đẩy JPEG mới nhất; không có frame mới thì bỏ qua chu kỳ này.
 
-        Định dạng khung binary: 1 byte chỉ số camera + JPEG thuần.
+        Định dạng khung binary: 1 byte camera + uint32 seq big-endian + JPEG.
 
-            b"\\x00" + jpeg   -> camera chính (preview_camera, độ phân giải cao)
-            b"\\x01" + jpeg   -> camera phụ   (preview_camera_secondary, vd cổ tay)
+            b"\\x00" + seq + jpeg -> camera chính
+            b"\\x01" + seq + jpeg -> camera phụ
 
         Một byte header rẻ hơn nhiều so với bọc JSON + base64 (phình 33% trên
         đường nóng), mà vẫn cho client biết khung hình thuộc camera nào.
@@ -384,12 +384,12 @@ class _Controller:
             await asyncio.sleep(period)
             if loop is None or not loop.is_alive():
                 return
-            _, primary, secondary = loop.take_frames()
+            primary_seq, primary, secondary_seq, secondary = loop.take_frames()
             try:
                 if primary is not None:
-                    await self.ws.send_bytes(b"\x00" + primary)
+                    await self.ws.send_bytes(b"\x00" + struct.pack(">I", primary_seq & 0xFFFFFFFF) + primary)
                 if secondary is not None:
-                    await self.ws.send_bytes(b"\x01" + secondary)
+                    await self.ws.send_bytes(b"\x01" + struct.pack(">I", secondary_seq & 0xFFFFFFFF) + secondary)
             except Exception:
                 self._closing.set()
                 return

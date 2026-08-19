@@ -23,6 +23,7 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapperRef = useRef(new HandCommandMapper());
   const landmarkRef = useRef<NormalizedLandmark[] | undefined>(undefined);
+  const worldLandmarkRef = useRef<NormalizedLandmark[] | undefined>(undefined);
   const activeRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const landmarkerRef = useRef<HandLandmarker | null>(null);
@@ -30,6 +31,7 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
   const mappingSamples = useRef<number[]>([]);
   const intervalSamples = useRef<number[]>([]);
   const previousFrameAt = useRef<number | null>(null);
+  const previousVideoTime = useRef(-1);
   const diagnosticsUpdatedAt = useRef(0);
   const [enabled, setEnabled] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -54,12 +56,14 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
     onInput(null);
     mapperRef.current.reset();
     landmarkRef.current = undefined;
+    worldLandmarkRef.current = undefined;
     setState(null);
     setDiagnostics(null);
     inferenceSamples.current = [];
     mappingSamples.current = [];
     intervalSamples.current = [];
     previousFrameAt.current = null;
+    previousVideoTime.current = -1;
     setStatus("Camera off");
   }, [onInput]);
 
@@ -88,6 +92,13 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
       setStatus("Show one hand, then calibrate");
       const detect = () => {
         if (!video.srcObject || landmarkerRef.current !== landmarker) return;
+        // requestAnimationFrame can run faster than the webcam. Do not run
+        // MediaPipe twice for the same source frame.
+        if (video.currentTime === previousVideoTime.current) {
+          rafRef.current = requestAnimationFrame(detect);
+          return;
+        }
+        previousVideoTime.current = video.currentTime;
         const frameAt = performance.now();
         if (previousFrameAt.current !== null) {
           pushSample(intervalSamples.current, frameAt - previousFrameAt.current);
@@ -97,8 +108,14 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
         const result = landmarker.detectForVideo(video, frameAt);
         pushSample(inferenceSamples.current, performance.now() - inferenceStartedAt);
         landmarkRef.current = result.landmarks[0];
+        worldLandmarkRef.current = result.worldLandmarks[0];
         const mappingStartedAt = performance.now();
-        const next = mapperRef.current.update(landmarkRef.current, activeRef.current);
+        const next = mapperRef.current.update(
+          landmarkRef.current,
+          activeRef.current,
+          frameAt,
+          worldLandmarkRef.current,
+        );
         pushSample(mappingSamples.current, performance.now() - mappingStartedAt);
         setState(next);
         onInput(next.active && next.detected ? next.input : null);
@@ -161,6 +178,9 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
         <span className="font-mono">Tiến/lùi {signed(state?.input.linear[0])}</span>
         <span className="font-mono">Trái/phải {signed(state?.input.linear[1])}</span>
         <span className="font-mono">Lên/xuống {signed(state?.input.linear[2])}</span>
+        <span className="font-mono">Xoay Z {signed(state?.input.angular[2])}</span>
+        <span className="font-mono">{state?.rollVelocityDeg.toFixed(1) ?? "0.0"}°/s</span>
+        <span>{state?.rotationActive ? "ROTATING" : "Rotation idle"}</span>
       </div>
       <div className="rounded-md border border-ink-700/60 bg-ink-850/60 p-2 text-[11px] text-ink-400">
         <div className="mb-1 font-semibold uppercase tracking-wider text-ink-300">Hand latency diagnostics</div>
@@ -172,7 +192,7 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
           <span>Tracking rate</span><span className="text-right font-mono">{diagnostics ? `${diagnostics.cameraFps.toFixed(1)} fps` : "—"}</span>
         </div>
       </div>
-      <p className="text-xs text-ink-400">Xòe đủ 5 ngón: mở gripper. Nắm kín 5 ngón: đóng gripper. Giữ 👍: clutch và đưa tay về tâm; bỏ 👍 để tiếp tục. Mất tay sẽ dừng khẩn cấp.</p>
+      <p className="text-xs text-ink-400">Di chuyển bàn tay để điều khiển XYZ. Xoay cổ tay sang trái/phải để đổi hướng lòng bàn tay và xoay gripper theo trục Z; dừng xoay tay thì gripper dừng. Xòe tay: mở gripper. Nắm tay: đóng gripper. Giữ 👍 để clutch.</p>
     </div>
   );
 }
