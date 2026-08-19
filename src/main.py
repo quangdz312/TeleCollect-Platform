@@ -4,6 +4,9 @@ import logging
 import shutil
 from contextlib import asynccontextmanager
 
+# Imported for its side effect, before anything can create an OpenGL context:
+# it picks the discrete GPU, which is worth ~20x on offscreen rendering.
+import src.sim.gpu as gpu  # noqa: F401  isort:skip
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -39,6 +42,7 @@ async def lifespan(app: FastAPI):
             "(e.g. `apt-get install ffmpeg` or `choco install ffmpeg`) and "
             "restart the app."
         )
+    gpu.log_active_renderer()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     reaper = asyncio.create_task(_reaper_task())
     try:

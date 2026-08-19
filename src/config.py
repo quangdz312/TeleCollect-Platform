@@ -50,8 +50,14 @@ class Settings(BaseSettings):
     rule_square_angle_tolerance_deg: float = Field(default=15.0, ge=0.0)
 
     # Teleop
-    control_hz: int = Field(default=30, ge=1, le=1000)
-    """Tần số vòng điều khiển (Hz) — chu kỳ gửi action và lấy mẫu observation."""
+    control_hz: int = Field(default=60, ge=1, le=1000)
+    """Tần số vòng điều khiển (Hz) — chu kỳ gửi action và lấy mẫu observation.
+
+    Đo trên RTX 3050 (sau khi `src/sim/gpu.py` ép dùng GPU rời): một bước vật lý
+    ở 60 Hz tốn 2.7 ms và render 3 camera 640px tốn 3.4 ms, tổng ~6.1 ms so với
+    ngân sách 16.7 ms. Kiểm `control_hz_actual` trong stats để biết loop có giữ
+    được nhịp không.
+    """
 
     max_concurrent_sessions: int = Field(default=4, ge=1, le=64)
     """Số phiên teleop chạy đồng thời tối đa; mỗi phiên chiếm một instance sim."""
@@ -71,22 +77,42 @@ class Settings(BaseSettings):
     telemetry_hz: int = Field(default=15, ge=1, le=120)
     """Nhịp gửi observation/stats JSON về browser."""
 
-    stream_fps: int = Field(default=15, ge=1, le=120)
-    """Nhịp gửi frame JPEG preview về browser."""
+    stream_fps: int = Field(default=30, ge=1, le=120)
+    """Nhịp camera preview chính; độc lập với nhịp ghi dataset."""
+
+    secondary_stream_fps: int = Field(default=10, ge=1, le=120)
+    """Nhịp camera preview phụ; camera vẫn được recorder ghi đủ mọi tick."""
 
     jpeg_quality: int = Field(default=75, ge=1, le=100)
     """Chất lượng JPEG của stream preview."""
 
-    teleop_cameras: str = "agentview,robot0_eye_in_hand"
-    """Camera ghi vào episode, phân tách bằng dấu phẩy."""
+    teleop_cameras: str = "review_front,birdview,robot0_eye_in_hand"
+    """Camera ghi vào episode, phân tách bằng dấu phẩy.
 
-    preview_camera: str = "frontview"
-    """Camera chính stream về browser."""
+    Cùng ba góc với review playback (`PlaybackConfig`), để người chấm thấy đúng
+    một bố cục ở mọi task và mọi đường thu. `review_front` được cài vào model
+    lúc dựng env (xem `src/sim/review_camera.py`); task nào không cài được thì
+    `RobotEnv` tự lùi về `agentview`.
+    """
 
-    preview_camera_secondary: str = "robot0_eye_in_hand"
-    """Camera phụ stream về browser; để rỗng nếu không dùng."""
+    preview_camera: str = "review_front"
+    """Camera chính stream về browser.
 
-    preview_size: int = Field(default=384, ge=0, le=1024)
+    Không dùng `frontview`: ToolHang đặt camera đó nhìn dọc mặt bàn, che mất cả
+    khung, đế lẫn cờ lê — người điều khiển không thấy thứ mình đang thao tác.
+    """
+
+    preview_camera_secondary: str = "birdview"
+    """Camera phụ thứ nhất stream về browser (khung nhỏ trên bên phải)."""
+
+    preview_camera_tertiary: str = "robot0_eye_in_hand"
+    """Camera phụ thứ hai stream về browser (khung nhỏ dưới bên phải).
+
+    Camera cổ tay là góc quan trọng nhất của ToolHang: task đòi khe hở 1.25 mm,
+    từ camera tĩnh cách nửa mét thì 1 mm chiếm chưa tới một pixel.
+    """
+
+    preview_size: int = Field(default=640, ge=0, le=1024)
     """Độ phân giải camera preview chính; 0 = dùng lại ảnh ghi."""
 
     # Security
