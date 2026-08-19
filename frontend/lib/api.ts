@@ -110,14 +110,84 @@ export interface DatasetExport {
 export interface TrainingRun {
   id: string;
   name: string;
-  export_id: string | null;
+  dataset_id?: string;
+  export_id?: string | null;
   created_at: string;
   status: RunStatus;
-  config: Record<string, unknown>;
-  metrics: Record<string, any>;
+  config: Record<string, any>;
+  metrics?: Record<string, any>;
   output_dir: string;
-  error: string;
+  epoch?: number;
+  train_loss?: number | null;
+  validation_loss?: number | null;
+  checkpoints?: TrainingCheckpoint[];
+  error: string | null;
+  started_at?: string | null;
   finished_at: string | null;
+}
+
+export interface TrainingCheckpoint {
+  id: string;
+  filename: string;
+  epoch: number;
+  validation_loss: number | null;
+  size_bytes: number;
+  created_at: string;
+  is_best_validation: boolean;
+  is_latest: boolean;
+}
+
+export interface TrainingRequest {
+  dataset_id: string;
+  name: string;
+  policy: "bc" | "bc-rnn";
+  epochs: number;
+  batch_size: number;
+  num_workers: number;
+  device: "auto" | "cpu" | "cuda";
+  learning_rate: number;
+  seed: number;
+  save_every_n_epochs: number | null;
+  sequence_length: number;
+  rnn_hidden_dim: number;
+  rnn_layers: number;
+  normalize_observations: boolean;
+  observation_profile: "minimal" | "all";
+  rollout_enabled: boolean;
+  rollout_every_n_epochs: number;
+  rollout_episodes: number;
+  rollout_horizon: number;
+}
+
+export interface EvaluationEpisode {
+  seed: number;
+  success: boolean;
+  steps: number;
+  video: string | null;
+}
+
+export interface EvaluationRun {
+  id: string;
+  training_run_id: string;
+  checkpoint_id: string;
+  task_name: string;
+  status: RunStatus;
+  num_episodes: number;
+  success_rate: number | null;
+  mean_episode_length: number | null;
+  episodes: EvaluationEpisode[];
+  created_at: string;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export interface EvaluationRequest {
+  training_run_id: string;
+  checkpoint_id: string;
+  num_rollouts: number;
+  horizon: number | null;
+  seed: number;
+  record_videos: number;
 }
 
 export interface EvalRun {
@@ -590,15 +660,28 @@ export const api = {
     reason: "backend stores dataset zips locally in this core build",
   }),
 
-  runs: async (): Promise<TrainingRun[]> => [],
-  run: async (id: string): Promise<TrainingRun> => {
-    throw new ApiError(404, `Training endpoint is not implemented in the backend core build (${id}).`);
-  },
-  runLog: async (_id: string) => "",
+  runs: () => request<TrainingRun[]>("/training/jobs"),
+  run: (id: string) => request<TrainingRun>(`/training/jobs/${id}`),
+  runLog: (id: string) => request<string>(`/training/jobs/${id}/log`),
   runHistory: async (_id: string): Promise<Record<string, number>[]> => [],
-  createRun: async (_body: Record<string, unknown>): Promise<TrainingRun> => {
-    throw new ApiError(501, "Training endpoint is not implemented in the backend core build.");
+  createRun: (body: TrainingRequest) =>
+    request<TrainingRun>("/training/jobs", { method: "POST", body: JSON.stringify(body) }),
+  cancelRun: (id: string) =>
+    request<TrainingRun>(`/training/jobs/${id}/cancel`, { method: "POST" }),
+  evaluations: (trainingRunId?: string) => {
+    const query = trainingRunId
+      ? `?training_run_id=${encodeURIComponent(trainingRunId)}`
+      : "";
+    return request<EvaluationRun[]>(`/training/evaluations${query}`);
   },
+  createEvaluation: (trainingRunId: string, body: EvaluationRequest) =>
+    request<EvaluationRun>(`/training/jobs/${trainingRunId}/evaluations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelEvaluation: (id: string) =>
+    request<EvaluationRun>(`/training/evaluations/${id}/cancel`, { method: "POST" }),
+  evaluationLog: (id: string) => request<string>(`/training/evaluations/${id}/log`),
   evals: async (_training_run_id?: string): Promise<EvalRun[]> => [],
   createEval: async (_body: Record<string, unknown>): Promise<EvalRun> => {
     throw new ApiError(501, "Evaluation endpoint is not implemented in the backend core build.");

@@ -27,16 +27,22 @@ const INITIAL_FORM: TrainingRequest = {
   dataset_id: "",
   name: "bc-v1",
   policy: "bc",
-  epochs: 100,
-  batch_size: 64,
+  epochs: 200,
+  batch_size: 32,
   num_workers: 0,
   device: "auto",
   learning_rate: 0.0001,
   seed: 1,
   save_every_n_epochs: 20,
-  sequence_length: 10,
+  sequence_length: 50,
   rnn_hidden_dim: 400,
   rnn_layers: 2,
+  normalize_observations: true,
+  observation_profile: "minimal",
+  rollout_enabled: true,
+  rollout_every_n_epochs: 20,
+  rollout_episodes: 5,
+  rollout_horizon: 500,
 };
 
 const RUN_PREFERENCES_KEY = "training-run-preferences-v1";
@@ -391,7 +397,35 @@ export default function TrainingPage() {
                     <NumberField label="RNN layers" value={form.rnn_layers} min={1} onChange={(rnn_layers) => setForm({ ...form, rnn_layers })} />
                   </>
                 )}
+                <Field label="Observation profile">
+                  <Select value={form.observation_profile} onChange={(event) => setForm({ ...form, observation_profile: event.target.value as TrainingRequest["observation_profile"] })}>
+                    <option value="minimal">Minimal task state</option>
+                    <option value="all">All dataset observations</option>
+                  </Select>
+                </Field>
+                <Field label="Normalize observations">
+                  <Select value={form.normalize_observations ? "yes" : "no"} onChange={(event) => setForm({ ...form, normalize_observations: event.target.value === "yes" })}>
+                    <option value="yes">Enabled</option>
+                    <option value="no">Disabled (keeps validation loss)</option>
+                  </Select>
+                </Field>
+                <Field label="Training rollouts">
+                  <Select value={form.rollout_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, rollout_enabled: event.target.value === "yes" })}>
+                    <option value="yes">Enabled</option>
+                    <option value="no">Disabled</option>
+                  </Select>
+                </Field>
+                {form.rollout_enabled && (
+                  <>
+                    <NumberField label="Rollout every N epochs" value={form.rollout_every_n_epochs} min={1} onChange={(rollout_every_n_epochs) => setForm({ ...form, rollout_every_n_epochs })} />
+                    <NumberField label="Rollouts per check" value={form.rollout_episodes} min={1} onChange={(rollout_episodes) => setForm({ ...form, rollout_episodes })} />
+                    <NumberField label="Training rollout horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} />
+                  </>
+                )}
               </div>
+              {form.normalize_observations && (
+                <div className="mt-3"><Alert tone="info">RoboMimic không hỗ trợ normalization cùng validation split. Run này sẽ chọn checkpoint bằng simulator rollout success thay cho validation loss.</Alert></div>
+              )}
               <div className="mt-4 flex items-center gap-3">
                 <Button variant="primary" disabled={busy || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
                   {busy ? "Starting…" : "Start training"}

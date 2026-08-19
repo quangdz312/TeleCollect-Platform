@@ -9,7 +9,7 @@ thức đó được mô tả trong `src/api/teleop.py`.
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.models.enums import (
     DatasetStatus,
@@ -397,23 +397,110 @@ class ScriptedLabelRequest(BaseModel):
     blind: bool = True
 
 
+class TrainingJobRequest(BaseModel):
+    """Cấu hình một lần chạy RoboMimic BC hoặc BC-RNN.
+
+    Dataset và checkpoint luôn được tham chiếu bằng ID, không nhận đường dẫn từ
+    client. Backend sẽ tự resolve chúng bên trong các thư mục được quản lý.
+    """
+
+    dataset_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    policy: Literal["bc", "bc-rnn"] = "bc"
+    epochs: int = Field(default=200, ge=1, le=10_000)
+    batch_size: int = Field(default=32, ge=1, le=4096)
+    num_workers: int = Field(default=0, ge=0, le=64)
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    learning_rate: float = Field(default=1e-4, gt=0.0, le=1.0)
+    seed: int = Field(default=1, ge=0, le=2_147_483_647)
+    save_every_n_epochs: int | None = Field(default=None, ge=1, le=10_000)
+    sequence_length: int = Field(default=50, ge=1, le=1024)
+    rnn_hidden_dim: int = Field(default=400, ge=1, le=8192)
+    rnn_layers: int = Field(default=2, ge=1, le=32)
+    normalize_observations: bool = True
+    observation_profile: Literal["minimal", "all"] = "minimal"
+    rollout_enabled: bool = True
+    rollout_every_n_epochs: int = Field(default=20, ge=1, le=10_000)
+    rollout_episodes: int = Field(default=5, ge=1, le=200)
+    rollout_horizon: int = Field(default=500, ge=1, le=20_000)
+
+
+class TrainingCheckpointResponse(BaseModel):
+    """Checkpoint do backend phát hiện trong đúng thư mục của training job."""
+
+    id: str
+    filename: str
+    epoch: int = Field(..., ge=0)
+    validation_loss: float | None = Field(default=None, ge=0.0)
+    size_bytes: int = Field(..., ge=0)
+    created_at: datetime
+    is_best_validation: bool = False
+    is_latest: bool = False
+
+
 class TrainingJobResponse(BaseModel):
-    """Trạng thái một job huấn luyện behavior cloning."""
+    """Trạng thái và kết quả có thể khôi phục của một training job."""
 
     id: str
     dataset_id: str
+    name: str
     status: JobStatus
-    epoch: int = 0
-    train_loss: float | None = None
+    config: TrainingJobRequest
+    output_dir: str
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    epoch: int = Field(default=0, ge=0)
+    train_loss: float | None = Field(default=None, ge=0.0)
+    validation_loss: float | None = Field(default=None, ge=0.0)
+    error: str | None = None
+    checkpoints: list[TrainingCheckpointResponse] = Field(default_factory=list)
+
+
+class EvaluationJobRequest(BaseModel):
+    """Cấu hình rollout một checkpoint trong simulator ở chế độ headless."""
+
+    training_run_id: str = Field(..., min_length=1, max_length=64)
+    checkpoint_id: str = Field(..., min_length=1, max_length=255)
+    num_rollouts: int = Field(default=20, ge=1, le=200)
+    horizon: int | None = Field(default=None, ge=1, le=20_000)
+    seed: int = Field(default=5000, ge=0, le=2_147_483_647)
+    record_videos: int = Field(default=3, ge=0, le=20)
+
+    @model_validator(mode="after")
+    def video_count_fits_rollouts(self) -> "EvaluationJobRequest":
+        if self.record_videos > self.num_rollouts:
+            raise ValueError("record_videos không được lớn hơn num_rollouts")
+        return self
+
+
+class EvaluationEpisodeResponse(BaseModel):
+    seed: int
+    success: bool
+    steps: int = Field(..., ge=0)
+    video: str | None = None
 
 
 class EvalResultResponse(BaseModel):
-    """Kết quả đánh giá policy trong sim — chỉ số nghiệm thu của dự án."""
+    """Trạng thái và kết quả rollout policy trong simulator."""
 
-    policy_id: str
+    id: str
+    training_run_id: str
+    checkpoint_id: str
     task_name: str
-    num_episodes: int
-    success_rate: float = Field(..., ge=0.0, le=1.0)
+    status: JobStatus
+    num_episodes: int = Field(..., ge=1)
+    success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    mean_episode_length: float | None = Field(default=None, ge=0.0)
+    episodes: list[EvaluationEpisodeResponse] = Field(default_factory=list)
+    created_at: datetime
+    finished_at: datetime | None = None
+    error: str | None = None
 
 
 class PolicyResponse(BaseModel):

@@ -641,7 +641,7 @@ export function runLogFor(run: TrainingRun): string {
     if (row.train_l1 === undefined) continue;
     lines.push(`[step ${String(row.step).padStart(6)}] train_l1=${row.train_l1.toFixed(4)}`);
   }
-  if (run.status === "failed") lines.push("", run.error);
+  if (run.status === "failed") lines.push("", run.error ?? "Training failed");
   else if (liveRunStatus(run) === "succeeded") {
     lines.push(`[done] best val_l1=${Number(run.metrics?.best_val_l1 ?? 0).toFixed(4)}`);
   }

@@ -196,7 +196,15 @@ class TrainingJobManager:
             "--sequence-length", str(config["sequence_length"]),
             "--rnn-hidden-dim", str(config["rnn_hidden_dim"]),
             "--rnn-layers", str(config["rnn_layers"]),
+            "--observation-profile", str(config["observation_profile"]),
+            "--rollout-every-n-epochs", str(config["rollout_every_n_epochs"]),
+            "--rollout-episodes", str(config["rollout_episodes"]),
+            "--rollout-horizon", str(config["rollout_horizon"]),
         ]
+        if config.get("normalize_observations"):
+            command.append("--normalize-observations")
+        if config.get("rollout_enabled"):
+            command.append("--rollout-enabled")
         if config.get("save_every_n_epochs") is not None:
             command.extend(["--save-every-n-epochs", str(config["save_every_n_epochs"])])
         return command

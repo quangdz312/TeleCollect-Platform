@@ -117,3 +117,43 @@ def test_training_dry_run_accepts_bc_rnn_policy(tmp_path: Path) -> None:
     assert plan.train_demos == 1
     assert plan.valid_demos == 1
     assert plan.validation_enabled
+
+
+def test_normalized_minimal_plan_uses_rollout_instead_of_validation(tmp_path: Path) -> None:
+    source = tmp_path / "raw.hdf5"
+    output = tmp_path / "export.hdf5"
+    _source(source, count=2)
+    with h5py.File(source, "a") as handle:
+        for demo in handle["data"].values():
+            length = len(demo["actions"])
+            for group_name in ("obs", "next_obs"):
+                group = demo[group_name]
+                group.create_dataset("object", data=np.zeros((length, 14), dtype=np.float32))
+                group.create_dataset("robot0_eef_quat", data=np.zeros((length, 4), dtype=np.float32))
+                group.create_dataset("robot0_gripper_qpos", data=np.zeros((length, 2), dtype=np.float32))
+    build_robomimic_hdf5(output, _episodes(source, count=2))
+
+    plan, result = inspect_training_dataset(
+        output,
+        output_dir=tmp_path / "runs",
+        name="normalized-square",
+        epochs=2,
+        batch_size=2,
+        num_workers=0,
+        device="cpu",
+        policy="bc-rnn",
+        normalize_observations=True,
+        observation_profile="minimal",
+        rollout_enabled=True,
+    )
+
+    assert result.valid
+    assert plan.observation_keys == (
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+    )
+    assert plan.normalize_observations is True
+    assert plan.validation_enabled is False
+    assert plan.rollout_enabled is True
