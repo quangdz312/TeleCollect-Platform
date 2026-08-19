@@ -6,6 +6,7 @@ import pytest
 from src.labeling.refine import (
     DEFAULT_POLYORDER,
     DEFAULT_WINDOW,
+    MAX_SAFE_DISPLACEMENT_M,
     MIN_WINDOW,
     jerk_rms,
     refine_trajectory,
@@ -102,3 +103,77 @@ def test_defaults_match_the_published_recipe():
     # project records at.
     assert DEFAULT_WINDOW == 15
     assert DEFAULT_POLYORDER == 3
+
+
+def test_window_is_sized_in_seconds_not_frames():
+    # Scripted records at 20 Hz and teleoperation at 60 Hz. A fixed frame count
+    # would smooth three times as much of one as of the other.
+    from src.labeling.refine import DEFAULT_WINDOW_SECONDS, window_for_rate
+
+    assert window_for_rate(20) == DEFAULT_WINDOW
+    assert window_for_rate(60) == 45
+    for hz in (20, 30, 60):
+        assert window_for_rate(hz) / hz == pytest.approx(DEFAULT_WINDOW_SECONDS, abs=0.03)
+
+
+def test_window_is_always_odd_and_holds_a_cubic():
+    from src.labeling.refine import window_for_rate
+
+    for hz in (1, 5, 20, 60, 240):
+        window = window_for_rate(hz)
+        assert window % 2 == 1
+        assert window >= MIN_WINDOW
+
+
+def test_si_jerk_is_comparable_across_control_rates():
+    # The same physical motion sampled at two rates must report the same jerk in
+    # m/s^2, even though the per-frame figure differs by the square of the ratio.
+    from src.labeling.refine import jerk_rms_si
+
+    seconds = np.linspace(0, 2, 20 * 2)
+    slow = np.stack([np.sin(seconds), np.zeros_like(seconds), np.zeros_like(seconds)], axis=1)
+    seconds_fast = np.linspace(0, 2, 60 * 2)
+    fast = np.stack(
+        [np.sin(seconds_fast), np.zeros_like(seconds_fast), np.zeros_like(seconds_fast)], axis=1,
+    )
+
+    assert jerk_rms_si(slow, 20) == pytest.approx(jerk_rms_si(fast, 60), rel=0.05)
+    # The raw per-frame numbers differ by roughly the square of the rate ratio,
+    # which is exactly the distortion the SI conversion undoes.
+    assert jerk_rms(slow) / jerk_rms(fast) == pytest.approx((60 / 20) ** 2, rel=0.1)
+
+
+def test_displacement_beyond_contact_tolerance_is_flagged_unsafe():
+    from src.labeling.refine import MAX_SAFE_DISPLACEMENT_M
+    from src.labeling.checks import DEFAULT_CHECKS
+
+    # The bound is the contact tolerance itself, not a number picked nearby.
+    assert MAX_SAFE_DISPLACEMENT_M == DEFAULT_CHECKS.together_tolerance_m
+
+    rng = np.random.default_rng(1)
+    rough = np.cumsum(rng.normal(scale=0.02, size=(200, 3)), axis=0)
+    result = refine_trajectory(rough, control_hz=60)
+
+    assert result.applied
+    assert result.max_displacement_m > MAX_SAFE_DISPLACEMENT_M
+    assert not result.safe_to_rescore
+
+
+def test_refinement_moves_frames_past_the_contact_tolerance(episodes):
+    # Recorded because it is the reason refinement cannot quietly replace the
+    # recording. Every reference episode -- scripted included, at 0.0045-0.0085 m
+    # -- lands near or above the 0.006 m drift that separates "still carrying
+    # the object" from "lost it". Rescoring a smoothed path would be scoring a
+    # trajectory the simulator never ran.
+    displacements = {
+        episode.task: refine_trajectory(
+            episode.eef_position, control_hz=episode.control_hz,
+        ).max_displacement_m
+        for episode in episodes.values()
+    }
+
+    assert displacements, "no reference episodes loaded"
+    assert max(displacements.values()) > MAX_SAFE_DISPLACEMENT_M
+    # Still far below the grasp radius, so this is a scoring-fidelity limit
+    # rather than a sign the smoothing is destroying the demonstration.
+    assert max(displacements.values()) < 0.02
