@@ -1,9 +1,4 @@
-from src.labeling.auto_gate import (
-    IDLE_AFTER_TRIM_AUTO_APPROVE_LIMIT,
-    MAX_AUTO_APPROVE_PENALTY,
-    apply,
-    evaluate,
-)
+from src.labeling.auto_gate import apply, evaluate
 
 
 def _record(**overrides):
@@ -37,39 +32,26 @@ def test_unavailable_check_stays_in_review():
     assert evaluate(_record(auto_flags=flags)).action == "review"
 
 
-def test_medium_and_poor_stay_in_review_even_when_successful():
-    assert evaluate(_record(requested_quality="medium")).action == "review"
-    assert evaluate(_record(requested_quality="poor")).action == "review"
+def test_requested_quality_does_not_decide_anything():
+    # The quality label is an input to generation, not a finding about the
+    # episode. Asking for a rougher run and then holding that against the result
+    # would make the gate answer a question it was never asked.
+    for quality in ("clean", "good", "medium", "poor"):
+        assert evaluate(_record(requested_quality=quality)).action in {"approve", "audit"}
 
 
-def test_large_soft_penalty_stays_in_review():
-    flags = {
-        "failed_checks": [], "unavailable_checks": [],
-        "worst_penalty_value": MAX_AUTO_APPROVE_PENALTY + 0.01,
-    }
-    assert evaluate(_record(auto_flags=flags)).action == "review"
-
-
-def test_idle_after_trim_has_a_separate_conservative_limit():
-    flags = {
-        "failed_checks": [],
-        "unavailable_checks": [],
-        "worst_penalty": "idle_after_trim",
-        "worst_penalty_value": 0.20,
-    }
-    assert evaluate(_record(auto_flags=flags)).action in {"approve", "audit"}
-    flags["worst_penalty_value"] = IDLE_AFTER_TRIM_AUTO_APPROVE_LIMIT + 0.01
-    assert evaluate(_record(auto_flags=flags)).action == "review"
-
-
-def test_same_value_for_jerkiness_remains_in_review():
-    flags = {
-        "failed_checks": [],
-        "unavailable_checks": [],
-        "worst_penalty": "jerkiness",
-        "worst_penalty_value": 0.20,
-    }
-    assert evaluate(_record(auto_flags=flags)).action == "review"
+def test_soft_penalties_do_not_gate():
+    # Penalties describe how the scripted policy was written, no published
+    # threshold exists for them, and action-only scores of this kind are not
+    # known to predict policy performance. They are reported, never gated on.
+    for name in ("idle_after_trim", "jerkiness", "wandering_path", "saturation"):
+        flags = {
+            "failed_checks": [],
+            "unavailable_checks": [],
+            "worst_penalty": name,
+            "worst_penalty_value": 0.95,
+        }
+        assert evaluate(_record(auto_flags=flags)).action in {"approve", "audit"}
 
 
 def test_strict_pass_is_approved_or_sampled_for_audit():
@@ -90,6 +72,48 @@ def test_toolhang_requires_both_stages_and_done_terminal_phase():
         },
     )
     assert evaluate(complete).action in {"approve", "audit"}
+
+
+def _toolhang(**provenance):
+    base = {
+        "terminal_phase": "done",
+        "sampled_variation": {
+            "stage1_env_predicate": True,
+            "stage2_tool_on_frame": True,
+        },
+    }
+    base.update(provenance)
+    return _record(task="tool_hang", provenance=base)
+
+
+def test_toolhang_retry_goes_to_review():
+    assert evaluate(_toolhang(retry_count=0)).action in {"approve", "audit"}
+    assert evaluate(_toolhang(retry_count=1)).action == "review"
+
+
+def test_repeated_seed_is_rejected_without_touching_the_first_one():
+    class Space:
+        def __init__(self):
+            self.appended = []
+
+        def labels_by_id(self):
+            return {}
+
+        def scores(self):
+            return [
+                {**_record(episode_id="lift::0"), "provenance": {"environment_seed": 4}},
+                {**_record(episode_id="lift::1"), "provenance": {"environment_seed": 4}},
+            ]
+
+        def append_label(self, episode_id, **kwargs):
+            self.appended.append((episode_id, kwargs))
+
+    space = Space()
+    counts = apply(space)
+
+    assert counts["duplicates"] == 1
+    rejected = [item for item in space.appended if item[1]["decision"] == "rejected"]
+    assert [item[0] for item in rejected] == ["lift::1"]
 
 
 def test_apply_never_overwrites_existing_human_label():

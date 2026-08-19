@@ -7,12 +7,21 @@ penalty = clip((x - x_lo) / (x_hi - x_lo), 0, 1)
 ```
 
 ``x_lo`` is "not worth worrying about yet", ``x_hi`` is "definitely a problem".
-The starting values come from ``auto-labeling.md`` and are meant to be adjusted
-once the real distribution is visible.
 
-Penalties never approve anything. Because the score multiplies the hard checks
-and then subtracts only the worst penalty, a tuned threshold can at most push an
-episode down into the human review queue.
+**Where the band edges come from.** Two of them were measured: the gripper
+toggle counts are per-task observations, and the saturation band was widened
+from 0.02-0.15 to 0.35-0.75 after measuring what scripted operators actually
+produce. The rest -- jerk, path ratio, length z-score, idle -- were carried over
+from a planning note that is not in this repository and have never been
+calibrated against data. Treat them as placeholders, not as findings.
+
+No published threshold exists for any of these quantities; the literature
+defines how to compute smoothness and path-efficiency measures but not where to
+cut them, because the cut depends on the robot, the controller and the task.
+
+Penalties therefore no longer gate anything: ``auto_gate`` reads the hard checks
+and the simulator predicate, not these values. They stay because they are worth
+reporting -- as export filters, and as the signal a refinement pass acts on.
 """
 
 from __future__ import annotations

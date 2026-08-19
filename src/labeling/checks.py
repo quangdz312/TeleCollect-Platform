@@ -34,12 +34,26 @@ GRASP_RADIUS_M: Mapping[str, float] = MappingProxyType({
 })
 DEFAULT_GRASP_RADIUS_M = 0.06
 
+#: Tasks whose robosuite success predicate requires the gripper to be clear of
+#: the object at the end. Lift is excluded on purpose: its predicate is a height
+#: test, and holding the cube up satisfies it. ToolHang is excluded because its
+#: own two-stage predicate is the authority there.
+RELEASE_REQUIRED_TASKS: frozenset[str] = frozenset({"can", "square"})
+
 
 @dataclass(frozen=True)
 class CheckConfig:
     #: Fallback grasp radius for tasks not in :data:`GRASP_RADIUS_M` (m).
     grasp_radius_m: float = DEFAULT_GRASP_RADIUS_M
     #: How far the object must rise above its resting height to count as lifted (m).
+    #:
+    #: ``Lift._check_success`` reads ``cube_height > table_height + 0.04``, but
+    #: that margin is measured from the *table surface* while this check is
+    #: measured from the object's *resting height*, which already sits half a
+    #: cube above the table. On the reference Lift episode the table is at 0.800
+    #: and the cube rests at 0.819, so robosuite's 0.840 is a rise of 0.021 in
+    #: these terms. 0.02 is that number, not an independent guess -- copying
+    #: 0.04 across would demand twice the lift the simulator asks for.
     lift_threshold_m: float = 0.02
     #: How far off the table the object must be for a frame to count as carried (m).
     #: Deliberately smaller than the lift threshold: the carry starts the moment
@@ -60,6 +74,10 @@ class CheckConfig:
     #: episodes, so the band sits above that and below a genuine carry-height
     #: drop.
     drop_fall_m: float = 0.15
+    #: How far the gripper must end up from the object on the tasks that require
+    #: a release (m). Derived from robosuite's own ``r_reach < 0.6`` term:
+    #: ``1 - tanh(10 * d) < 0.6`` solves to ``d > 0.0424``.
+    release_distance_m: float = 0.0424
 
 
 DEFAULT_CHECKS = CheckConfig()
@@ -321,6 +339,50 @@ def e_no_drop(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> C
     )
 
 
+def e_released(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> CheckResult:
+    """The hand actually let go at the end, on the tasks whose success requires it.
+
+    ``PickPlace._check_success`` and ``NutAssembly._check_success`` both AND
+    their placement test with ``r_reach < 0.6``, where ``r_reach = 1 -
+    tanh(10 * d)``. Solving that back gives ``d > 0.0424 m``: the gripper must
+    have moved clear of the object, not still be holding it in position. Lift
+    has no such term -- holding the cube up *is* the task -- and ToolHang's own
+    two-stage predicate already covers it, so both are not evaluable here.
+    """
+
+    if episode.task not in RELEASE_REQUIRED_TASKS:
+        # Not applicable is not the same as not evaluable. Returning None here
+        # would land this check in ``unavailable_checks``, where the gate reads
+        # it as missing evidence and sends a perfectly verified episode to
+        # review. There is nothing to verify, so the check passes.
+        return CheckResult(
+            "E_released", 1, {"reason": f"{episode.task} success does not require release"},
+        )
+    if episode.length == 0:
+        return CheckResult("E_released", 0, {"reason": "empty episode"})
+
+    # Take the widest separation reached after the last frame the hand was
+    # holding, not the separation on the final frame. A scripted episode ends on
+    # a step budget, not on the retreat finishing, so the last frame can catch
+    # the hand mid-withdrawal: the reference Can episode ends at 0.0429 m while
+    # still moving away, 0.0005 m past the threshold. What matters is that the
+    # hand cleared the object, not where the recording happened to stop.
+    holding = _holding(episode, config)
+    distances = np.linalg.norm(episode.gripper_to_object, axis=1)
+    held = np.flatnonzero(holding)
+    after_release = distances[held[-1] :] if held.size else distances
+    distance = float(np.max(after_release))
+    return CheckResult(
+        "E_released",
+        1 if distance > config.release_distance_m else 0,
+        {
+            "max_distance_after_release_m": distance,
+            "final_distance_m": float(distances[-1]),
+            "release_distance_threshold_m": config.release_distance_m,
+        },
+    )
+
+
 def hard_checks(
     episode: EpisodeArrays,
     config: CheckConfig = DEFAULT_CHECKS,
@@ -330,4 +392,5 @@ def hard_checks(
         e_success(episode),
         e_skill(episode, config),
         e_no_drop(episode, config),
+        e_released(episode, config),
     ]
