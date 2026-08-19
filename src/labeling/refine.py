@@ -13,6 +13,25 @@ still replay successfully.
 
 Nothing here mutates a recording. It returns a new array and the measurements
 that go with it, so the caller decides what to keep.
+
+**Why the whole trajectory, when roughness is not spread evenly?** It is a fair
+question -- per-frame jerk in the reference teleoperated episodes puts 31x to
+312x the median in its worst 1% of frames -- and smoothing only those frames was
+tried. It does not work, for two reasons that showed up immediately:
+
+* Splicing filtered frames into unfiltered ones puts a step at every seam, and a
+  step is jerk. Swapping the worst 10% of frames on a 1102-frame recording made
+  the episode *seven times rougher* than leaving it alone. Feathering the
+  handover across the filter window fixes that, but only by widening the mask
+  until it covers 58-82% of the episode, at which point it is the uniform pass
+  with extra machinery.
+* It saves nothing anyway. The frame that moves furthest is the roughest frame,
+  which is inside the mask under every setting, so ``max_displacement_m`` came
+  out identical to five decimal places at every dilation from 0 to 22.
+
+The uniform pass stays. What actually limits the damage is not smoothing less of
+the episode but knowing when the result stops being safe to score, which is what
+:attr:`RefinementResult.safe_to_rescore` reports.
 """
 
 from __future__ import annotations

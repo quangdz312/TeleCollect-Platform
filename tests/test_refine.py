@@ -8,8 +8,10 @@ from src.labeling.refine import (
     DEFAULT_WINDOW,
     MAX_SAFE_DISPLACEMENT_M,
     MIN_WINDOW,
+    _odd_window,
     jerk_rms,
     refine_trajectory,
+    window_for_rate,
 )
 
 DATASETS = sorted(glob.glob("data/review/datasets/*.hdf5"))
@@ -177,3 +179,75 @@ def test_refinement_moves_frames_past_the_contact_tolerance(episodes):
     # Still far below the grasp radius, so this is a scoring-fidelity limit
     # rather than a sign the smoothing is destroying the demonstration.
     assert max(displacements.values()) < 0.02
+
+
+TELEOP_DIRS = sorted(glob.glob("data/episodes/*/"))
+
+
+@pytest.fixture(scope="module")
+def teleop_paths():
+    """End-effector paths from the teleoperated recordings, at 60 Hz."""
+    import pyarrow.parquet as pq
+
+    paths = []
+    for directory in TELEOP_DIRS:
+        table = pq.read_table(directory + "actions.parquet", columns=["ee_pose"])
+        rows = [row for row in table["ee_pose"].to_pylist() if row]
+        if len(rows) < 100:
+            continue
+        path = np.asarray(rows, dtype=float)[:, :3]
+        # An operator who connected but never moved has nothing to smooth.
+        if jerk_rms(path) > 1e-6:
+            paths.append(path)
+    if not paths:
+        pytest.skip("no teleoperated recordings on this machine")
+    return paths
+
+
+def test_splicing_filtered_frames_into_unfiltered_ones_adds_jerk(teleop_paths):
+    # Documents why refinement is a uniform pass rather than a targeted one.
+    #
+    # Roughness does concentrate: on these recordings the 99th percentile of
+    # per-frame jerk runs 31x to 312x the median, so smoothing only the worst
+    # frames looks like the obvious saving. It is not. Filtered frames spliced
+    # into unfiltered ones leave a step at every seam, and a step is the
+    # quantity being removed.
+    #
+    # Checked on teleoperation rather than scripted collection because that is
+    # where it bites: the same splice on 20 Hz scripted data lands within 3% of
+    # the recording, so a scripted-only experiment would have missed it.
+    from scipy.signal import savgol_filter
+
+    window = window_for_rate(60)
+    for path in teleop_paths:
+        filtered = savgol_filter(path, window, DEFAULT_POLYORDER, axis=0)
+        second = path[2:] - 2 * path[1:-1] + path[:-2]
+        per_frame = np.linalg.norm(second, axis=1)
+        rough = np.concatenate(
+            ([False], per_frame > np.percentile(per_frame, 90), [False]),
+        )
+
+        spliced = path.copy()
+        spliced[rough] = filtered[rough]
+
+        assert jerk_rms(filtered) < jerk_rms(path)
+        assert jerk_rms(spliced) > jerk_rms(path) * 2
+
+
+def test_teleoperation_is_rougher_than_scripted_in_physical_units(
+    episodes, teleop_paths,
+):
+    # The comparison that has to be made in m/s^2. On the raw per-frame figure
+    # teleoperation reads 4.8x smoother than scripted collection purely because
+    # it records at 60 Hz against 20 Hz.
+    from src.labeling.refine import jerk_rms_si
+
+    scripted = [
+        jerk_rms_si(episode.eef_position, episode.control_hz)
+        for episode in episodes.values()
+    ]
+    teleop = [jerk_rms_si(path, 60) for path in teleop_paths]
+
+    assert max(teleop) > max(scripted)
+    # And it is far more variable, which is what human input looks like.
+    assert max(teleop) / min(teleop) > max(scripted) / min(scripted)
