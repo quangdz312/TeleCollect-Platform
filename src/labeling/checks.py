@@ -78,6 +78,17 @@ class CheckConfig:
     #: a release (m). Derived from robosuite's own ``r_reach < 0.6`` term:
     #: ``1 - tanh(10 * d) < 0.6`` solves to ``d > 0.0424``.
     release_distance_m: float = 0.0424
+    #: Largest end-effector movement between two consecutive frames that is
+    #: physically possible (m/s, converted per frame using the episode's own
+    #: control rate).
+    #:
+    #: This is the Panda's rated maximum Cartesian speed, not a percentile of
+    #: what happened to be collected: a step above it did not come from the arm
+    #: moving, it came from a dropped frame, a reset spliced into the middle of
+    #: a trajectory, or a corrupted record. The reference corpus peaks at
+    #: 0.359 m/s, so the bound sits far outside normal collection and only fires
+    #: on genuinely broken data.
+    max_eef_speed_mps: float = 2.0
 
 
 DEFAULT_CHECKS = CheckConfig()
@@ -153,7 +164,7 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
-def e_integrity(episode: EpisodeArrays) -> CheckResult:
+def e_integrity(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> CheckResult:
     """Frame counts line up, actions are well formed, nothing is NaN."""
 
     problems: list[str] = []
@@ -183,7 +194,28 @@ def e_integrity(episode: EpisodeArrays) -> CheckResult:
         problems.append(
             f"num_samples attribute {episode.num_samples_attr} does not match {length}",
         )
-    return CheckResult("E_integrity", 0 if problems else 1, {"problems": problems})
+
+    # A step the arm could not physically have taken is a record problem, not a
+    # motion problem: a dropped frame, a reset spliced mid-trajectory, or a
+    # corrupted write. Checking it here rather than as a penalty keeps it where
+    # the other "is this record trustworthy" questions live.
+    fastest = 0.0
+    if episode.eef_position.shape[0] > 1 and np.isfinite(episode.eef_position).all():
+        step_limit = config.max_eef_speed_mps / max(episode.control_hz, 1e-6)
+        steps = np.linalg.norm(np.diff(episode.eef_position, axis=0), axis=1)
+        fastest = float(np.max(steps))
+        if fastest > step_limit:
+            problems.append(
+                f"end effector moved {fastest:.4f} m in one frame, "
+                f"above the {step_limit:.4f} m the arm can travel at "
+                f"{episode.control_hz:g} Hz",
+            )
+
+    return CheckResult(
+        "E_integrity",
+        0 if problems else 1,
+        {"problems": problems, "fastest_eef_step_m": fastest},
+    )
 
 
 def e_success(episode: EpisodeArrays) -> CheckResult:
@@ -388,7 +420,7 @@ def hard_checks(
     config: CheckConfig = DEFAULT_CHECKS,
 ) -> list[CheckResult]:
     return [
-        e_integrity(episode),
+        e_integrity(episode, config),
         e_success(episode),
         e_skill(episode, config),
         e_no_drop(episode, config),
