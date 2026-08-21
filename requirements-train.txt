@@ -1,4 +1,4 @@
-# Huấn luyện behavior cloning (src/training/) — chỉ cài trên máy/GPU runner.
+﻿# Huấn luyện behavior cloning (src/training/) — chỉ cài trên máy/GPU runner.
 # Tách khỏi requirements.txt vì torch nặng vài GB; CI chỉ lint + test API nên
 # không cần, và image runtime cũng không cần để phục vụ teleop.
 #

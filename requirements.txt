@@ -1,4 +1,4 @@
-# Runtime backend — đủ để chạy API, teleop và xử lý dataset.
+﻿# Runtime backend — đủ để chạy API, teleop và xử lý dataset.
 # Torch nằm ở requirements-train.txt: nặng, CI chỉ chạy test API nên không cần.
 
 # Core
