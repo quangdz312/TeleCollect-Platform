@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
@@ -11,7 +11,7 @@ import numpy as np
 from src.sim.perturbations.variations import LiftVariation
 
 
-class LiftPhase(str, Enum):
+class LiftPhase(StrEnum):
     APPROACH_CUBE = "approach_cube"
     ALIGN_CUBE = "align_cube"
     DESCEND = "descend"
