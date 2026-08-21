@@ -135,3 +135,20 @@ def test_apply_never_overwrites_existing_human_label():
     assert counts["rejected"] == 1
     assert [item[0] for item in space.appended] == ["failed::0"]
     assert space.appended[0][1]["decision_source"] == "auto_gate"
+
+
+def test_review_api_auto_label_matches_auto_gate_verdict():
+    from src.api.labeling import _public
+
+    approved = _public(_record(), include_score=False)
+    rejected = _public(_record(recorded_success=False), include_score=False)
+    medium = _public(_record(requested_quality="medium"), include_score=False)
+
+    expected = "accept" if evaluate(_record()).action == "approve" else "review"
+    assert approved["auto_label"] == expected
+    assert rejected["auto_label"] == "reject"
+    # `requested_quality` is the perturbation level asked for at collection
+    # time, not a judgement on what came back. An episode that succeeded and
+    # passed every check is verified whatever noise it was collected under, so
+    # the gate reads the evidence and ignores the request.
+    assert medium["auto_label"] == expected

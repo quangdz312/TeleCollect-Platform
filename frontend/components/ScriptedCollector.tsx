@@ -16,6 +16,7 @@ export function ScriptedCollector() {
   // empty value into 0 and makes direct replacement awkward in some browsers.
   const [episodeCount, setEpisodeCount] = useState("5");
   const [seed, setSeed] = useState(0);
+  const [batchId, setBatchId] = useState("lift-scripted-v1.2");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -64,7 +65,10 @@ export function ScriptedCollector() {
       return;
     }
     try {
-      setJob(await labeling.startRun({ task, quality, episodes: parsedEpisodes, seed }));
+      setJob(await labeling.startRun({
+        task, quality, episodes: parsedEpisodes, seed,
+        collection_batch_id: batchId,
+      }));
     } catch (problem) {
       setError((problem as Error).message);
     }
@@ -82,13 +86,20 @@ export function ScriptedCollector() {
         <Stat label="Pending" value={config?.workspace.pending ?? 0} tone="warn" />
       </div>
       <Card title="Thu tự động" subtitle="Sinh episode scripted để chuyển sang hàng đợi review.">
-        <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_140px_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_140px_140px_auto] md:items-end">
           <Field label="Task">
             <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
               {config?.tasks.map((item) => (
                 <option key={item.task} value={item.task}>{item.task} · {item.tool_label ?? item.tool}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="Collection batch" hint="Dùng lại cùng ID cho clean/good/medium của một dataset">
+            <Input
+              value={batchId}
+              disabled={running}
+              onChange={(event) => setBatchId(event.target.value)}
+            />
           </Field>
           <Field label="Quality">
             <Select value={quality} disabled={running} onChange={(event) => setQuality(event.target.value)}>
@@ -119,7 +130,7 @@ export function ScriptedCollector() {
           </Field>
           <Button
             variant="primary"
-            disabled={running || !config || !/^\d+$/.test(episodeCount)}
+            disabled={running || !config || !/^\d+$/.test(episodeCount) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(batchId)}
             onClick={startRun}
           >
             {running ? `Đang chạy ${Math.round((job?.progress ?? 0) * 100)}%` : "Bắt đầu thu"}

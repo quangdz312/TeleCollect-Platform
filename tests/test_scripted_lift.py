@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.sim.operators.scripted_lift import LiftPhase, ScriptedLiftOperator
+from src.sim.operators.scripted_lift import LiftOperatorConfig, LiftPhase, ScriptedLiftOperator
 
 
 class _FakeLiftEnv:
@@ -62,3 +62,99 @@ def test_lift_fails_safely_without_cube_orientation() -> None:
     assert operator.phase == LiftPhase.FAILED
     assert operator.failure_reason == "missing observation key: cube_quat"
     assert action[6] == operator.config.open_gripper
+
+
+def test_lift_settles_before_closing_gripper() -> None:
+    operator = ScriptedLiftOperator(
+        _FakeLiftEnv(), LiftOperatorConfig(settle_duration=3),
+    )
+    observation = _observation(cube_yaw=0.0)
+    cube = observation["cube_pos"]
+    observation["robot0_eef_pos"] = cube + [0.0, 0.0, operator.config.grasp_height_offset]
+    operator.phase = LiftPhase.DESCEND
+
+    action = operator.act(observation)
+    assert operator.phase == LiftPhase.SETTLE_BEFORE_GRASP
+    assert action[6] == operator.config.open_gripper
+
+    for _ in range(2):
+        action = operator.act(observation)
+        assert operator.phase == LiftPhase.SETTLE_BEFORE_GRASP
+        assert action[6] == operator.config.open_gripper
+    operator.act(observation)
+    assert operator.phase == LiftPhase.GRASP
+
+
+def test_lift_descend_uses_strict_pregrasp_threshold() -> None:
+    operator = ScriptedLiftOperator(_FakeLiftEnv())
+    observation = _observation(cube_yaw=0.0)
+    cube = observation["cube_pos"]
+    # This passed the old 15 mm DESCEND threshold but must not enter SETTLE.
+    observation["robot0_eef_pos"] = cube + [0.010, 0.0, operator.config.grasp_height_offset]
+    operator.phase = LiftPhase.DESCEND
+
+    action = operator.act(observation)
+
+    assert operator.phase == LiftPhase.DESCEND
+    assert action[0] < 0.0
+    assert action[2] == pytest.approx(0.0)
+    assert action[6] == operator.config.open_gripper
+
+
+def test_lift_corrects_small_settle_error_without_lifting() -> None:
+    operator = ScriptedLiftOperator(_FakeLiftEnv())
+    observation = _observation(cube_yaw=0.0)
+    cube = observation["cube_pos"]
+    observation["robot0_eef_pos"] = cube + [0.007, 0.0, operator.config.grasp_height_offset]
+    operator.phase = LiftPhase.SETTLE_BEFORE_GRASP
+    operator._settle_cube_position = cube.copy()
+
+    action = operator.act(observation)
+
+    assert operator.phase == LiftPhase.SETTLE_BEFORE_GRASP
+    assert operator.debug_info["pregrasp_realigns"] == 0
+    assert action[0] < 0.0
+    assert action[2] == pytest.approx(0.0)
+    assert action[6] == operator.config.open_gripper
+
+
+def test_lift_realigns_if_cube_moves_during_settle() -> None:
+    operator = ScriptedLiftOperator(_FakeLiftEnv())
+    observation = _observation(cube_yaw=0.0)
+    cube = observation["cube_pos"]
+    observation["robot0_eef_pos"] = cube + [0.0, 0.0, operator.config.grasp_height_offset]
+    operator.phase = LiftPhase.DESCEND
+    operator.act(observation)
+
+    moved = {key: value.copy() for key, value in observation.items()}
+    moved["cube_pos"][0] += operator.config.settle_cube_drift * 2
+    action = operator.act(moved)
+
+    assert operator.phase == LiftPhase.RECOVER_ALIGN
+    assert operator.debug_info["pregrasp_realigns"] == 1
+    assert operator.debug_info["recovery_demonstration"] is True
+    assert action[6] == operator.config.open_gripper
+
+
+def test_lift_realigns_to_unbiased_cube_after_perturbed_approach() -> None:
+    from src.sim.perturbations.variations import EventSchedule, LiftVariation
+
+    operator = ScriptedLiftOperator(_FakeLiftEnv())
+    operator.set_variation(LiftVariation(
+        quality="good", noise_scale=0.25,
+        landmark_position_bias=(0.0, 0.0, 0.0),
+        landmark_orientation_bias=(0.0, 0.0, 0.0),
+        arm_gain=(1.0,) * 6, arm_bias=(0.0,) * 6,
+        schedule=EventSchedule(), retry_cap=1,
+        fault_type="none", fault_phase="", fault_magnitude=0.0,
+        grasp_xyz_offset=(0.012, 0.0, 0.0), regrasp_enabled=True,
+    ))
+    observation = _observation(cube_yaw=0.0)
+    cube = observation["cube_pos"]
+    observation["robot0_eef_pos"] = cube + [0.012, 0.0, operator.config.grasp_height_offset]
+    operator.phase = LiftPhase.DESCEND
+    operator.act(observation)
+    operator.act(observation)
+
+    assert operator.phase == LiftPhase.RECOVER_ALIGN
+    assert operator.debug_info["recovery_demonstration"] is True

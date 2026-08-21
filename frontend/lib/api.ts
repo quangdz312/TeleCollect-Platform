@@ -696,6 +696,7 @@ export const api = {
     tasks: string[];
     include_failures: boolean;
     overwrite: boolean;
+    collection_batch_id?: string;
   }) =>
     toExport(
       await request<BackendDataset>("/datasets", {
@@ -706,6 +707,7 @@ export const api = {
           task_names: body.tasks,
           include_failures: body.include_failures,
           overwrite: body.overwrite,
+          collection_batch_id: body.collection_batch_id || null,
         }),
       }),
     ),

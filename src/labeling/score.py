@@ -39,6 +39,7 @@ from .penalties import (
 from .trim import DEFAULT_TRIM, TrimConfig, TrimSuggestion, suggest_trim
 
 SCORER_NAME = "telecollect-autolabel"
+RELATIVE_COHORT_VERSION = "task+collection_batch_id-v1"
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class ScorerConfig:
                     for name, value in vars(self.penalties).items()
                 },
                 "trim": asdict(self.trim),
+                "relative_cohort": RELATIVE_COHORT_VERSION,
             },
             sort_keys=True,
         )
@@ -80,6 +82,20 @@ class CorpusStats:
     @property
     def counts(self) -> dict[str, int]:
         return {task: stats.count for task, stats in self.tasks.items()}
+
+
+def relative_cohort(episode: EpisodeArrays) -> str:
+    """Group relative penalties by task and compatible collection generation.
+
+    Length, jerk and path distributions changed intentionally when Lift added
+    settle/recovery phases. Comparing that controller with legacy trajectories
+    makes every valid new episode look anomalous. Batch-less files retain one
+    shared ``legacy`` cohort for backward compatibility.
+    """
+
+    batch = episode.provenance.get("collection_batch_id")
+    batch_id = str(batch) if batch else "legacy"
+    return f"{episode.task}::{batch_id}"
 
 
 @dataclass(frozen=True)
@@ -212,18 +228,26 @@ def score_episodes(
         trims.append(trim)
         raws.append(raw_penalty_features(episode, trim=trim, trim_config=config.trim))
 
-    grouped: dict[str, list[RawPenaltyFeatures]] = {}
+    grouped: dict[str, tuple[str, list[RawPenaltyFeatures]]] = {}
     for episode, raw in zip(episodes, raws):
-        grouped.setdefault(episode.task, []).append(raw)
+        cohort = relative_cohort(episode)
+        if cohort not in grouped:
+            grouped[cohort] = (episode.task, [])
+        grouped[cohort][1].append(raw)
     stats = CorpusStats(
-        tasks={task: build_task_stats(task, items) for task, items in grouped.items()},
+        tasks={
+            cohort: build_task_stats(task, items)
+            for cohort, (task, items) in grouped.items()
+        },
     )
 
     version = config.version()
     scored: list[EpisodeScore] = []
     for episode, raw, trim in zip(episodes, raws, trims):
         checks = hard_checks(episode, config.checks)
-        penalty_results = penalties(raw, stats.tasks[episode.task], config.penalties)
+        penalty_results = penalties(
+            raw, stats.tasks[relative_cohort(episode)], config.penalties,
+        )
         value = combine(checks, penalty_results)
         scored.append(
             EpisodeScore(

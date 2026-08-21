@@ -214,6 +214,7 @@ def collect(
     yaw_extra: float = 0.0,
     video_dir: str | Path | None = None,
     quality: str = "clean",
+    collection_batch_id: str = "",
 ) -> dict[str, Any]:
     """Collect ToolHang episodes, successes and failures alike.
 
@@ -240,6 +241,7 @@ def collect(
         base_seed=seed,
         stream_code=NOISE_STREAM_CODE,
         coverage="stage1+stage2",
+        collection_batch_id=collection_batch_id,
     )
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)

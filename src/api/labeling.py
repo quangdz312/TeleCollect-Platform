@@ -29,7 +29,6 @@ from fastapi.responses import FileResponse
 from src.models.db import User
 from src.models.enums import UserRole
 from src.models.schemas import ScriptedLabelRequest, ScriptedRunRequest
-from src.services.auto_label import classify_scripted
 from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
 
 if TYPE_CHECKING:
@@ -110,18 +109,16 @@ def _public(record: dict[str, Any], *, include_score: bool) -> dict[str, Any]:
     public = dict(record) if include_score else {
         key: value for key, value in record.items() if key not in WITHHELD_WHEN_BLIND
     }
-    recommendation = classify_scripted(
-        record.get("gate_decision"),
-        record.get("recorded_success"),
-        record.get("auto_flags"),
-        record.get("task"),
-        record.get("provenance"),
-    )
-    public["auto_label"] = recommendation.label
-    public["auto_label_reason"] = recommendation.reason
     from src.labeling.auto_gate import AUTO_GATE_VERSION, evaluate
 
     gate = evaluate(record)
+    public["auto_label"] = {
+        "approve": "accept",
+        "reject": "reject",
+        "review": "review",
+        "audit": "review",
+    }[gate.action]
+    public["auto_label_reason"] = gate.reason
     public["gate_action"] = gate.action
     public["audit_required"] = gate.action == "audit"
     public["auto_gate_version"] = AUTO_GATE_VERSION
@@ -151,8 +148,12 @@ async def config(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
 
 
 @router.get("/overview")
-async def overview(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
-    return workspace().summary()
+async def overview(
+    collection_batch_id: str | None = None,
+    task: str | None = None,
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    return workspace().summary(collection_batch_id=collection_batch_id, task=task)
 
 
 @router.post("/auto-gate/apply")
@@ -194,7 +195,10 @@ async def start_run(
     from src.labeling.jobs import submit_collection
 
     seed = (
-        space.next_free_seed(request.task, request.quality)
+        space.next_free_seed(
+            request.task, request.quality,
+            collection_batch_id=request.collection_batch_id,
+        )
         if request.seed is None
         else request.seed
     )
@@ -207,6 +211,7 @@ async def start_run(
             seed=seed,
             horizon=request.horizon,
             overwrite=request.overwrite,
+            collection_batch_id=request.collection_batch_id,
         )
     except FileExistsError as error:
         raise HTTPException(409, str(error)) from error
@@ -244,6 +249,7 @@ async def get_run(
 async def list_episodes(
     task: str | None = None,
     quality: str | None = None,
+    collection_batch_id: str | None = None,
     status: str = Query(default="all", pattern="^(all|pending|reviewed)$"),
     include_score: bool = False,
     limit: int = Query(default=500, ge=1, le=5000),
@@ -254,16 +260,22 @@ async def list_episodes(
     videos = {path.name for path in space.videos_dir.glob("*.mp4")}
 
     items = []
+    matching = []
     for record in space.scores():
         if task is not None and record["task"] != task:
             continue
         if quality is not None and record["requested_quality"] != quality:
+            continue
+        if collection_batch_id is not None and (
+            space._collection_batch(record) != collection_batch_id
+        ):
             continue
         label = labels.get(record["episode_id"])
         if status == "pending" and label is not None:
             continue
         if status == "reviewed" and label is None:
             continue
+        matching.append(record)
         item = _public(dict(record), include_score=include_score)
         item["label"] = label
         item["video_ready"] = space.video_path(record["episode_id"]).name in videos
@@ -271,7 +283,7 @@ async def list_episodes(
         if len(items) >= limit:
             break
 
-    return {"episodes": items, "count": len(items), "total": len(space.scores())}
+    return {"episodes": items, "count": len(items), "total": len(matching)}
 
 
 @router.get("/episodes/detail")

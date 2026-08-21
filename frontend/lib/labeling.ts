@@ -49,6 +49,18 @@ export interface WorkspaceSummary {
     approved_successes: number;
     rejected: number;
   }>;
+  per_quality: Record<string, {
+    total: number;
+    reviewed: number;
+    pending: number;
+    approved: number;
+    approved_successes: number;
+    rejected: number;
+    recovery: number;
+  }>;
+  collection_batch_id: string | null;
+  task_filter: string | null;
+  available_batches: string[];
   scorer_version: string | null;
 }
 
@@ -199,18 +211,27 @@ function post<T>(path: string, payload?: unknown): Promise<T> {
 
 export const labeling = {
   config: () => request<LabelingConfig>("/config"),
+  overview: (params?: { collectionBatchId?: string; task?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.collectionBatchId) query.set("collection_batch_id", params.collectionBatchId);
+    if (params?.task) query.set("task", params.task);
+    const suffix = query.size ? `?${query}` : "";
+    return request<WorkspaceSummary>(`/overview${suffix}`);
+  },
 
-  startRun: (payload: { task: string; quality: string; episodes: number; seed: number }) =>
+  startRun: (payload: { task: string; quality: string; episodes: number; seed: number; collection_batch_id: string }) =>
     post<CollectionJob>("/runs", payload),
 
   run: (jobId: string) => request<CollectionJob>(`/runs/${jobId}`),
 
-  episodes: (params: { task?: string; status: string; includeScore: boolean }) => {
+  episodes: (params: { task?: string; quality?: string; collectionBatchId?: string; status: string; includeScore: boolean }) => {
     const query = new URLSearchParams({
       status: params.status,
       include_score: String(params.includeScore),
     });
     if (params.task) query.set("task", params.task);
+    if (params.quality) query.set("quality", params.quality);
+    if (params.collectionBatchId) query.set("collection_batch_id", params.collectionBatchId);
     return request<{ episodes: Episode[]; count: number; total: number }>(`/episodes?${query}`);
   },
 

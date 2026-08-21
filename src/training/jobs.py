@@ -26,8 +26,9 @@ _EPOCH_BLOCK = re.compile(
     r"(?P<kind>Train|Validation) Epoch (?P<epoch>\d+)\s*\n(?P<body>\{.*?\})",
     re.DOTALL,
 )
-_CHECKPOINT_NAME = re.compile(
-    r"model_epoch_(?P<epoch>\d+)(?:_best_validation_(?P<loss>[0-9.eE+-]+))?\.pth$"
+_CHECKPOINT_EPOCH = re.compile(r"^model_epoch_(?P<epoch>\d+)(?=_|\.pth$)")
+_CHECKPOINT_VALIDATION = re.compile(
+    r"_best_validation_(?P<loss>[0-9.eE+-]+)(?=_|\.pth$)"
 )
 ACCELERATOR_LOCK = threading.Lock()
 
@@ -65,9 +66,13 @@ def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[
         if not path.is_file() or path.name == "last_bak.pth":
             continue
         relative = path.relative_to(output_dir).as_posix()
-        match = _CHECKPOINT_NAME.fullmatch(path.name)
-        loss = float(match.group("loss")) if match and match.group("loss") else None
-        epoch = int(match.group("epoch")) if match else current_epoch
+        epoch_match = _CHECKPOINT_EPOCH.search(path.name)
+        validation_match = _CHECKPOINT_VALIDATION.search(path.name)
+        loss = float(validation_match.group("loss")) if validation_match else None
+        # ``last.pth`` has no epoch in its filename and represents the current
+        # run state. Model checkpoints must retain the epoch encoded at the
+        # start of their filename even when RoboMimic appends rollout tags.
+        epoch = int(epoch_match.group("epoch")) if epoch_match else current_epoch
         stat = path.stat()
         found.append({
             "id": hashlib.sha256(relative.encode()).hexdigest()[:20],
@@ -80,7 +85,11 @@ def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[
             "is_latest": False,
         })
     if found:
-        max(found, key=lambda item: (item["created_at"], item["filename"]))["is_latest"] = True
+        latest = next(
+            (item for item in found if Path(item["filename"]).name == "last.pth"),
+            max(found, key=lambda item: (item["created_at"], item["filename"])),
+        )
+        latest["is_latest"] = True
         with_loss = [item for item in found if item["validation_loss"] is not None]
         if with_loss:
             min(with_loss, key=lambda item: item["validation_loss"])["is_best_validation"] = True
@@ -197,14 +206,16 @@ class TrainingJobManager:
             "--rnn-hidden-dim", str(config["rnn_hidden_dim"]),
             "--rnn-layers", str(config["rnn_layers"]),
             "--observation-profile", str(config["observation_profile"]),
+            (
+                "--normalize-observations"
+                if config.get("normalize_observations")
+                else "--no-normalize-observations"
+            ),
+            "--rollout-enabled" if config.get("rollout_enabled") else "--no-rollout-enabled",
             "--rollout-every-n-epochs", str(config["rollout_every_n_epochs"]),
             "--rollout-episodes", str(config["rollout_episodes"]),
             "--rollout-horizon", str(config["rollout_horizon"]),
         ]
-        if config.get("normalize_observations"):
-            command.append("--normalize-observations")
-        if config.get("rollout_enabled"):
-            command.append("--rollout-enabled")
         if config.get("save_every_n_epochs") is not None:
             command.extend(["--save-every-n-epochs", str(config["save_every_n_epochs"])])
         return command

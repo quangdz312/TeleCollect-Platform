@@ -233,7 +233,7 @@ def load_scripted_rule_episode(
     with h5py.File(source, "r") as handle:
         demo = handle["data"][demo_key]
         recorded_success = bool(demo.attrs.get("success", False))
-        provenance = _provenance(demo)
+        provenance = _provenance(handle["data"], demo)
         if "states" not in demo:
             return RuleEpisode(
                 episode_id,

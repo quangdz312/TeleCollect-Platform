@@ -35,6 +35,7 @@ export default function DatasetsPage() {
   const [taskFilter, setTaskFilter] = useState("");
   const [includeFailures, setIncludeFailures] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
+  const [batchId, setBatchId] = useState("lift-scripted-v1.2");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -80,6 +81,7 @@ export default function DatasetsPage() {
         tasks: taskFilter ? [taskFilter] : [],
         include_failures: includeFailures,
         overwrite,
+        collection_batch_id: batchId,
       });
       setInfo(`Building ${created.name}… The page will update when the HDF5 is ready.`);
       await load();
@@ -127,9 +129,12 @@ export default function DatasetsPage() {
               : undefined
           }
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Field label="Name" hint="Becomes the directory and the DVC-tracked version">
               <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <Field label="Collection batch" hint="Chỉ lấy episode thuộc batch này">
+              <Input value={batchId} onChange={(e) => setBatchId(e.target.value)} />
             </Field>
             <Field label="Format">
               <Select value={format} onChange={(e) => setFormat(e.target.value)}>
@@ -167,7 +172,7 @@ export default function DatasetsPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button variant="primary" disabled={busy || !taskFilter} onClick={createExport}>
+            <Button variant="primary" disabled={busy || !taskFilter || !batchId} onClick={createExport}>
               {busy ? "Exporting…" : "Export dataset"}
             </Button>
             {dvc && (

@@ -55,6 +55,24 @@ def test_perception_noise_is_scaled_by_phase() -> None:
     np.testing.assert_allclose(target, early * 0.20)
 
 
+def test_lift_settle_phase_is_noise_free() -> None:
+    instance = runtime("lift", "medium")
+    observation = {"object": np.array([0.1, 0.2, 0.3])}
+    planned = np.array([0.1, -0.1, 0.1, 0.0, 0.0, 0.0, -1.0])
+
+    assert instance.policy_observation(
+        observation, phase="settle_before_grasp",
+    ) is observation
+    np.testing.assert_array_equal(
+        instance.apply_action(planned, 1000, phase="settle_before_grasp"), planned,
+    )
+    for phase in ("recover_align", "recover_descend"):
+        assert instance.policy_observation(observation, phase=phase) is observation
+        np.testing.assert_array_equal(
+            instance.apply_action(planned, 1001, phase=phase), planned,
+        )
+
+
 def test_controlled_fault_is_deterministic_and_single() -> None:
     first = runtime("square", "poor", seed=31).variation
     second = runtime("square", "poor", seed=31).variation
