@@ -18,7 +18,31 @@ type HandDiagnostics = {
   cameraFps: number;
 };
 
-export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput | null) => void; onGripper: (closed: boolean) => void }) {
+/** What the camera pane exposes so its buttons can live outside it. */
+export type HandControls = {
+  starting: boolean;
+  enabled: boolean;
+  detected: boolean;
+  calibrated: boolean;
+  active: boolean;
+  toggleCamera: () => void;
+  calibrate: () => void;
+  toggleActive: () => void;
+};
+
+export function HandControl({
+  onInput,
+  onGripper,
+  compact = false,
+  onControls,
+}: {
+  onInput: (input: AxisInput | null) => void;
+  onGripper: (closed: boolean) => void;
+  /** Fills its container and drops the readouts, for the camera column. */
+  compact?: boolean;
+  /** Receives the camera's controls so the parent can render them elsewhere. */
+  onControls?: (controls: HandControls) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapperRef = useRef(new HandCommandMapper());
@@ -144,11 +168,50 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
 
   useEffect(() => () => stop(), [stop]);
 
-  const calibrate = () => {
+  const calibrate = useCallback(() => {
     if (!landmarkRef.current) { setStatus("No hand detected"); return; }
     mapperRef.current.calibrate(landmarkRef.current);
     setStatus("Calibrated — hold Activate to move");
-  };
+  }, []);
+
+  const toggleActive = useCallback(() => {
+    const next = !activeRef.current;
+    activeRef.current = next;
+    setActive(next);
+    if (!next) onInput(null);
+  }, [onInput]);
+
+  // The buttons render in the right-hand column with the rest of the session
+  // controls, so the state they need is published rather than drawn here.
+  useEffect(() => {
+    onControls?.({
+      starting,
+      enabled,
+      detected: Boolean(state?.detected),
+      calibrated: Boolean(state?.calibrated),
+      active,
+      toggleCamera: enabled ? stop : () => void start(),
+      calibrate,
+      toggleActive,
+    });
+  }, [onControls, starting, enabled, state?.detected, state?.calibrated, active, stop, start, calibrate, toggleActive]);
+
+  if (compact) {
+    return (
+      <div className="relative h-full w-full bg-black">
+        <video ref={videoRef} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
+        <canvas ref={canvasRef} width={640} height={480} className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100" />
+        <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-300">
+          hand
+        </span>
+        {!enabled && (
+          <div className="absolute inset-0 grid place-items-center px-2 text-center text-[11px] text-ink-400">
+            {status}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -163,12 +226,7 @@ export function HandControl({ onInput, onGripper }: { onInput: (input: AxisInput
         <Button
           variant={active ? "danger" : "success"}
           disabled={!enabled || !state?.calibrated}
-          onClick={() => {
-            const next = !activeRef.current;
-            activeRef.current = next;
-            setActive(next);
-            if (!next) onInput(null);
-          }}
+          onClick={toggleActive}
         >{active ? "Stop hand control" : "Activate hand control"}</Button>
       </div>
       <div className="grid grid-cols-3 gap-2 text-xs text-ink-400">

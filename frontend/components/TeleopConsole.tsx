@@ -12,7 +12,7 @@ import {
 import { TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
-import { HandControl } from "@/components/HandControl";
+import { HandControl, type HandControls } from "@/components/HandControl";
 import type { AxisInput } from "@/lib/teleop";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
@@ -55,6 +55,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const [gamepad, setGamepad] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [rotationSafety, setRotationSafety] = useState<RotationSafety>({ twistDeg: 0, limited: false });
+  const [handControls, setHandControls] = useState<HandControls | null>(null);
 
   const task = useMemo(() => tasks.find((t) => t.id === taskId), [tasks, taskId]);
 
@@ -232,13 +233,21 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             </>
           }
         >
-          {/* Sized to whatever vertical space is left rather than to a fixed
-              number of pixels: `flex-1 min-h-0` takes the remainder of the card
-              and the square aspect derives the width from it.  That keeps the
-              view as large as it can be while the transport buttons under it
-              stay on screen, at any window height, with no scrolling. */}
-          <div className="flex flex-col xl:h-[calc(100dvh-11.5rem)]">
-          <div className="relative mx-auto aspect-square min-h-0 w-auto flex-1 overflow-hidden rounded-lg border border-ink-700 bg-black">
+          <div className="flex flex-col">
+          {/* Three panes, same layout and same rendered size as the scripted
+              review: the main review angle on the left, overhead, wrist and the
+              hand camera stacked to its right. A square main pane beside a
+              third-width column makes the row 4:3, and splitting it 3:1 sizes
+              every pane from the row alone.
+
+              `w-full` with no height cap is exactly what review's
+              `<video className="w-full">` does: the row takes the column's
+              width and derives its height from the ratio. Sizing the panes in
+              pixels instead makes them stop growing with the window, and
+              deriving them from `100dvh` cannot work at all -- the viewport
+              does not know how much of the card the header above took. */}
+          <div className="flex aspect-[4/3] w-full gap-2">
+          <div className="relative h-full flex-[3] overflow-hidden rounded-lg border border-ink-700 bg-black">
             <canvas
               ref={frontRef}
               width={256}
@@ -254,21 +263,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               )}
               style={{ imageRendering: "auto" }}
             />
-            {/* Overhead and wrist ride as picture-in-picture so the main review
-                angle keeps the full square. Both are recorded either way; these
-                two panes only decide what the operator can see while driving. */}
-            <canvas
-              ref={topRef}
-              width={128}
-              height={128}
-              className="absolute bottom-3 left-3 h-32 w-32 rounded-md border border-ink-600 bg-black shadow-lg"
-            />
-            <canvas
-              ref={wristRef}
-              width={128}
-              height={128}
-              className="absolute bottom-3 right-3 h-32 w-32 rounded-md border border-ink-600 bg-black shadow-lg"
-            />
             {frame?.success && (
               <div className="absolute left-3 top-3 rounded-md bg-ok-600/90 px-2.5 py-1 text-xs font-semibold text-white">
                 Task complete
@@ -281,58 +275,28 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             )}
           </div>
 
-          <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              variant={recording ? "danger" : "success"}
-              disabled={!connected}
-              onClick={() =>
-                recording
-                  ? clientRef.current?.stopRecording(true)
-                  : clientRef.current?.startRecording()
-              }
-            >
-              {recording ? "Stop & save" : "Start recording"}
-            </Button>
-            <Button
-              variant="subtle"
-              disabled={!connected || !recording}
-              onClick={() => clientRef.current?.stopRecording(false)}
-            >
-              Discard take
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!connected}
-              onClick={() => {
-                rotationBaselineRef.current = null;
-                setRotationSafety({ twistDeg: 0, limited: false });
-                clientRef.current?.reset();
-              }}
-            >
-              New scene
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!connected}
-              onClick={() => {
-                inputRef.current.setGripper(!gripperClosed);
-              }}
-            >
-              {gripperClosed ? "Open gripper" : "Close gripper"}
-            </Button>
-            {lastSaved && (
-              <Link
-                href={`/review/${lastSaved}`}
-                className="ml-auto text-xs text-accent-400 hover:underline"
-              >
-                Review the take just saved →
-              </Link>
-            )}
+            {/* `basis-0 min-h-0` makes the three panes split the column's
+                height evenly instead of each demanding its own square size,
+                which would grow the row past the card. */}
+            <div className="flex h-full min-h-0 flex-1 flex-col gap-2">
+              <SidePane label="overhead" canvasRef={topRef} connected={connected} />
+              <SidePane label="wrist" canvasRef={wristRef} connected={connected} />
+              {/* The webcam sits with the simulator views because the operator
+                  watches it the same way: to see what the hand is doing while
+                  the arm follows. `HandControl` owns the camera and the model. */}
+              <div className="min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-ink-700">
+                <HandControl
+                  onInput={handleHandInput}
+                  onGripper={handleHandGripper}
+                  onControls={setHandControls}
+                  compact
+                />
+              </div>
+            </div>
           </div>
 
           <p className="mt-2 shrink-0 text-xs text-ink-400">
-            Recording starts from a fresh randomised scene. Drag on the view to move in the
-            table plane, scroll to change height, or use the keyboard/gamepad.
+            Drag to move in the table plane, scroll for height, or use the keyboard/gamepad.
           </p>
           </div>
         </Card>
@@ -436,6 +400,92 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
           )}
         </Card>
 
+        {/* Every button the operator presses during a take, in one place: the
+            recording transport and the hand camera's own controls. The camera
+            pane itself stays in the view column and publishes these through
+            `onControls`, so the panes there hold nothing but picture. */}
+        <Card title="Session controls">
+          <div className="space-y-2">
+            <Button
+              className="w-full"
+              variant={recording ? "danger" : "success"}
+              disabled={!connected}
+              onClick={() =>
+                recording
+                  ? clientRef.current?.stopRecording(true)
+                  : clientRef.current?.startRecording()
+              }
+            >
+              {recording ? "Stop & save" : "Start recording"}
+            </Button>
+            <Button
+              className="w-full"
+              variant="subtle"
+              disabled={!connected || !recording}
+              onClick={() => clientRef.current?.stopRecording(false)}
+            >
+              Discard take
+            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="ghost"
+                disabled={!connected}
+                onClick={() => {
+                  rotationBaselineRef.current = null;
+                  setRotationSafety({ twistDeg: 0, limited: false });
+                  clientRef.current?.reset();
+                }}
+              >
+                New scene
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!connected}
+                onClick={() => inputRef.current.setGripper(!gripperClosed)}
+              >
+                {gripperClosed ? "Open gripper" : "Close gripper"}
+              </Button>
+            </div>
+            {lastSaved && (
+              <Link
+                href={`/review/${lastSaved}`}
+                className="block text-center text-xs text-accent-400 hover:underline"
+              >
+                Review the take just saved →
+              </Link>
+            )}
+          </div>
+
+          <div className="mt-4 border-t border-ink-700/60 pt-3">
+            <p className="mb-2 text-[11px] uppercase tracking-wider text-ink-400">
+              Hand camera
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <Button
+                variant="subtle"
+                disabled={!handControls || handControls.starting}
+                onClick={() => handControls?.toggleCamera()}
+              >
+                {handControls?.starting ? "…" : handControls?.enabled ? "Stop" : "Start"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!handControls?.enabled || !handControls?.detected}
+                onClick={() => handControls?.calibrate()}
+              >
+                Calibrate
+              </Button>
+              <Button
+                variant={handControls?.active ? "danger" : "success"}
+                disabled={!handControls?.enabled || !handControls?.calibrated}
+                onClick={() => handControls?.toggleActive()}
+              >
+                {handControls?.active ? "Stop" : "Activate"}
+              </Button>
+            </div>
+          </div>
+        </Card>
+
         <Card
           title="Controls"
           subtitle={gamepad ? `Gamepad: ${gamepad}` : "No gamepad detected"}
@@ -462,13 +512,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               </ul>
             </div>
           )}
-        </Card>
-
-        <Card title="Hand camera control" subtitle="Relative RGB depth via palm size">
-          <HandControl
-            onInput={handleHandInput}
-            onGripper={handleHandGripper}
-          />
         </Card>
 
         <Card title="Session log">
@@ -588,6 +631,30 @@ function handleEvent(
       }
       break;
   }
+}
+
+function SidePane({
+  label,
+  canvasRef,
+  connected,
+}: {
+  label: string;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  connected: boolean;
+}) {
+  return (
+    <div className="relative min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-ink-700 bg-black">
+      <canvas
+        ref={canvasRef}
+        width={128}
+        height={128}
+        className={cx("block h-full w-full", connected ? "" : "opacity-30")}
+      />
+      <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-300">
+        {label}
+      </span>
+    </div>
+  );
 }
 
 function paint(canvas: HTMLCanvasElement | null, bitmap: ImageBitmap | undefined) {
