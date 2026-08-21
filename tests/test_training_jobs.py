@@ -54,8 +54,11 @@ def test_discover_checkpoints_marks_best_and_latest(tmp_path: Path) -> None:
     models.mkdir(parents=True)
     first = models / "model_epoch_5_best_validation_0.08.pth"
     best = models / "model_epoch_9_best_validation_0.03.pth"
-    latest = models / "model_epoch_10.pth"
-    for index, path in enumerate((first, best, latest), start=1):
+    rollout = models / "model_epoch_7_dataset-id_success_0.8.pth"
+    combined = models / "model_epoch_6_best_validation_0.04_dataset-id_success_1.0.pth"
+    final = models / "model_epoch_10.pth"
+    latest = tmp_path / "run" / "last.pth"
+    for index, path in enumerate((first, best, rollout, combined, final, latest), start=1):
         path.write_bytes(b"x" * index)
         timestamp = 1_700_000_000 + index
         path.touch()
@@ -64,10 +67,49 @@ def test_discover_checkpoints_marks_best_and_latest(tmp_path: Path) -> None:
 
     checkpoints = discover_checkpoints(tmp_path, current_epoch=10)
 
-    assert len(checkpoints) == 3
+    assert len(checkpoints) == 6
     assert next(item for item in checkpoints if item["is_best_validation"])["epoch"] == 9
     assert next(item for item in checkpoints if item["is_latest"])["epoch"] == 10
-    assert len({item["id"] for item in checkpoints}) == 3
+    assert next(item for item in checkpoints if "dataset-id_success_0.8" in item["filename"])["epoch"] == 7
+    combined_item = next(
+        item for item in checkpoints if "best_validation_0.04_dataset-id" in item["filename"]
+    )
+    assert combined_item["epoch"] == 6
+    assert combined_item["validation_loss"] == 0.04
+    assert len({item["id"] for item in checkpoints}) == 6
+
+
+@pytest.mark.parametrize(
+    ("normalize", "rollout", "expected_normalize", "expected_rollout"),
+    [
+        (True, True, "--normalize-observations", "--rollout-enabled"),
+        (False, False, "--no-normalize-observations", "--no-rollout-enabled"),
+    ],
+)
+def test_training_command_passes_explicit_boolean_flags(
+    tmp_path: Path,
+    normalize: bool,
+    rollout: bool,
+    expected_normalize: str,
+    expected_rollout: str,
+) -> None:
+    manager = TrainingJobManager(tmp_path / "jobs")
+    request = _request(
+        normalize_observations=normalize,
+        rollout_enabled=rollout,
+    )
+    record = {
+        "dataset_path": str(tmp_path / "dataset.hdf5"),
+        "output_dir": str(tmp_path / "output"),
+        "config": request.model_dump(mode="json"),
+    }
+
+    command = manager._command(record)
+
+    normalize_flags = [value for value in command if "normalize-observations" in value]
+    rollout_flags = [value for value in command if "rollout-enabled" in value]
+    assert normalize_flags == [expected_normalize]
+    assert rollout_flags == [expected_rollout]
 
 
 def test_job_runs_subprocess_and_persists_state(tmp_path: Path) -> None:
