@@ -15,6 +15,9 @@ class LiftPhase(str, Enum):
     APPROACH_CUBE = "approach_cube"
     ALIGN_CUBE = "align_cube"
     DESCEND = "descend"
+    SETTLE_BEFORE_GRASP = "settle_before_grasp"
+    RECOVER_ALIGN = "recover_align"
+    RECOVER_DESCEND = "recover_descend"
     GRASP = "grasp"
     LIFT = "lift"
     HOLD = "hold"
@@ -41,12 +44,23 @@ class LiftOperatorConfig:
     open_gripper: float = -1.0
     closed_gripper: float = 1.0
     grasp_check_duration: int = 20
+    final_position_gain: float = 4.0
+    pregrasp_xy_tolerance: float = 0.006
+    pregrasp_z_tolerance: float = 0.006
+    pregrasp_yaw_tolerance: float = 0.05
+    settle_duration: int = 5
+    settle_position_delta: float = 0.002
+    settle_cube_drift: float = 0.003
+    settle_realign_xy_error: float = 0.010
+    settle_realign_z_error: float = 0.010
+    settle_realign_yaw_error: float = 0.12
+    settle_correction_timeout: int = 15
 
 
 class ScriptedLiftOperator:
     """Grasp and lift the cube without consulting reward or task success."""
 
-    VERSION = "1.1"
+    VERSION = "1.3"
 
     def __init__(self, env: Any, config: LiftOperatorConfig | None = None) -> None:
         self.config = config or LiftOperatorConfig()
@@ -66,6 +80,11 @@ class ScriptedLiftOperator:
         self._desired_grasp_quaternion: np.ndarray | None = None
         self._lift_target_position: np.ndarray | None = None
         self._regrasp_attempts = 0
+        self._pregrasp_realigns = 0
+        self._recovery_active = False
+        self._settle_cube_position: np.ndarray | None = None
+        self._previous_settle_eef: np.ndarray | None = None
+        self._stable_settle_steps = 0
         self.failure_reason: str | None = None
         self.failure_stage: str | None = None
         self._last_target_position: np.ndarray | None = None
@@ -90,6 +109,9 @@ class ScriptedLiftOperator:
             "failure_reason": self.failure_reason,
             "failure_stage": self.failure_stage,
             "regrasp_attempts": self._regrasp_attempts,
+            "pregrasp_realigns": self._pregrasp_realigns,
+            "recovery_demonstration": self._recovery_active,
+            "stable_settle_steps": self._stable_settle_steps,
             "last_target_position": (
                 None if self._last_target_position is None else self._last_target_position.tolist()
             ),
@@ -115,6 +137,20 @@ class ScriptedLiftOperator:
             np.linalg.norm(current[:2] - target[:2]) <= self.config.xy_tolerance
             and abs(float(current[2] - target[2])) <= self.config.z_tolerance
         )
+
+    def _pregrasp_reached(self, current: np.ndarray, target: np.ndarray) -> bool:
+        return bool(
+            np.linalg.norm(current[:2] - target[:2]) <= self.config.pregrasp_xy_tolerance
+            and abs(float(current[2] - target[2])) <= self.config.pregrasp_z_tolerance
+        )
+
+    def _begin_pregrasp_realign(self) -> None:
+        self._pregrasp_realigns += 1
+        self._recovery_active = True
+        self._settle_cube_position = None
+        self._previous_settle_eef = None
+        self._stable_settle_steps = 0
+        self._transition(LiftPhase.RECOVER_ALIGN)
 
     @staticmethod
     def _normalize_quaternion(quaternion: np.ndarray) -> np.ndarray:
@@ -157,7 +193,11 @@ class ScriptedLiftOperator:
         return min(candidates, key=abs)
 
     def _grasp_yaw_error(self, observation: dict[str, Any]) -> float:
-        yaw_bias = 0.0 if self._variation is None else self._variation.grasp_yaw_bias
+        yaw_bias = (
+            0.0
+            if self._variation is None or self._recovery_active
+            else self._variation.grasp_yaw_bias
+        )
         for key in ("robot0_eef_quat", "cube_quat"):
             if key not in observation:
                 raise ValueError(f"missing observation key: {key}")
@@ -190,9 +230,11 @@ class ScriptedLiftOperator:
         target: np.ndarray,
         gripper: float,
         yaw_error: float = 0.0,
+        position_gain: float | None = None,
     ) -> np.ndarray:
         action = np.zeros(7, dtype=np.float64)
-        action[:3] = self.config.position_gain * (target - current)
+        gain = self.config.position_gain if position_gain is None else position_gain
+        action[:3] = gain * (target - current)
         action[5] = self.config.orientation_gain * yaw_error
         action[6] = gripper
         return np.clip(action, self._low, self._high)
@@ -225,9 +267,18 @@ class ScriptedLiftOperator:
         grasp_offset = np.asarray(
             (0.0, 0.0, 0.0) if semantic is None else semantic.grasp_xyz_offset,
         )
+        if self._recovery_active:
+            grasp_offset = np.zeros(3, dtype=np.float64)
         close_timing = 0 if semantic is None else semantic.gripper_close_timing_offset
         yaw_error = 0.0
-        if self.phase in {LiftPhase.APPROACH_CUBE, LiftPhase.ALIGN_CUBE, LiftPhase.DESCEND}:
+        if self.phase in {
+            LiftPhase.APPROACH_CUBE,
+            LiftPhase.ALIGN_CUBE,
+            LiftPhase.DESCEND,
+            LiftPhase.SETTLE_BEFORE_GRASP,
+            LiftPhase.RECOVER_ALIGN,
+            LiftPhase.RECOVER_DESCEND,
+        }:
             try:
                 yaw_error = self._grasp_yaw_error(observation)
             except ValueError as exc:
@@ -249,13 +300,80 @@ class ScriptedLiftOperator:
             target = cube + grasp_offset + [0.0, 0.0, c.align_height]
             if self._reached(eef, target) and yaw_reached:
                 self._transition(LiftPhase.DESCEND)
+        elif self.phase == LiftPhase.RECOVER_ALIGN:
+            target = cube + [0.0, 0.0, c.align_height]
+            if self._pregrasp_reached(eef, target) and (
+                abs(yaw_error) <= c.pregrasp_yaw_tolerance
+            ):
+                self._transition(LiftPhase.RECOVER_DESCEND)
         elif self.phase == LiftPhase.DESCEND:
             target = cube + grasp_offset + [0.0, 0.0, c.grasp_height_offset]
-            if self._reached(eef, target) and yaw_reached:
-                self._grasp_cube_position = cube.copy()
-                self._transition(LiftPhase.GRASP)
-                if close_timing < 0:
-                    gripper = c.closed_gripper
+            if self._pregrasp_reached(eef, target) and (
+                abs(yaw_error) <= c.pregrasp_yaw_tolerance
+            ):
+                self._settle_cube_position = cube.copy()
+                self._previous_settle_eef = None
+                self._stable_settle_steps = 0
+                self._transition(LiftPhase.SETTLE_BEFORE_GRASP)
+        elif self.phase == LiftPhase.RECOVER_DESCEND:
+            target = cube + [0.0, 0.0, c.grasp_height_offset]
+            if self._pregrasp_reached(eef, target) and (
+                abs(yaw_error) <= c.pregrasp_yaw_tolerance
+            ):
+                self._settle_cube_position = cube.copy()
+                self._previous_settle_eef = None
+                self._stable_settle_steps = 0
+                self._transition(LiftPhase.SETTLE_BEFORE_GRASP)
+        elif self.phase == LiftPhase.SETTLE_BEFORE_GRASP:
+            # Validate against the current, unbiased cube pose. Perturbed
+            # approaches therefore become successful correction trajectories
+            # instead of teaching the policy to close from a bad pose.
+            target = cube + [0.0, 0.0, c.grasp_height_offset]
+            cube_drift = (
+                0.0
+                if self._settle_cube_position is None
+                else float(np.linalg.norm(cube[:2] - self._settle_cube_position[:2]))
+            )
+            eef_delta = (
+                0.0
+                if self._previous_settle_eef is None
+                else float(np.linalg.norm(eef - self._previous_settle_eef))
+            )
+            aligned = self._pregrasp_reached(eef, target)
+            precisely_oriented = abs(yaw_error) <= c.pregrasp_yaw_tolerance
+            xy_error = float(np.linalg.norm(eef[:2] - target[:2]))
+            z_error = abs(float(eef[2] - target[2]))
+            severe_misalignment = (
+                xy_error > c.settle_realign_xy_error
+                or z_error > c.settle_realign_z_error
+                or abs(yaw_error) > c.settle_realign_yaw_error
+            )
+            correction_timed_out = (
+                self.phase_steps > c.settle_correction_timeout
+                and (not aligned or not precisely_oriented)
+            )
+            if (
+                cube_drift > c.settle_cube_drift
+                or severe_misalignment
+                or correction_timed_out
+            ):
+                self._begin_pregrasp_realign()
+                target = cube + [0.0, 0.0, c.align_height]
+            elif not aligned or not precisely_oriented:
+                # Small residual errors are corrected at the grasp height.
+                # Lifting back to ALIGN here creates the redundant up/down
+                # motion that polluted every clean demonstration in v1.2.
+                self._previous_settle_eef = eef.copy()
+                self._stable_settle_steps = 0
+            else:
+                self._previous_settle_eef = eef.copy()
+                if eef_delta <= c.settle_position_delta:
+                    self._stable_settle_steps += 1
+                else:
+                    self._stable_settle_steps = 0
+                if self._stable_settle_steps >= c.settle_duration:
+                    self._grasp_cube_position = cube.copy()
+                    self._transition(LiftPhase.GRASP)
         elif self.phase == LiftPhase.GRASP:
             target = eef.copy()
             if self.phase_steps >= c.grasp_duration:
@@ -287,6 +405,7 @@ class ScriptedLiftOperator:
                         self._grasp_cube_position = None
                         self._desired_grasp_quaternion = None
                         self._lift_target_position = None
+                        self._recovery_active = True
                         self._transition(LiftPhase.APPROACH_CUBE)
                         target = eef.copy()
                         gripper = c.open_gripper
@@ -310,8 +429,30 @@ class ScriptedLiftOperator:
         active_yaw_error = (
             yaw_error
             if phase_at_start
-            in {LiftPhase.APPROACH_CUBE, LiftPhase.ALIGN_CUBE, LiftPhase.DESCEND}
+            in {
+                LiftPhase.APPROACH_CUBE,
+                LiftPhase.ALIGN_CUBE,
+                LiftPhase.DESCEND,
+                LiftPhase.SETTLE_BEFORE_GRASP,
+                LiftPhase.RECOVER_ALIGN,
+                LiftPhase.RECOVER_DESCEND,
+            }
             else 0.0
         )
         self._last_yaw_error = active_yaw_error
-        return self._move(eef, np.asarray(target), gripper, active_yaw_error)
+        position_gain = (
+            c.final_position_gain
+            if phase_at_start in {
+                LiftPhase.DESCEND,
+                LiftPhase.SETTLE_BEFORE_GRASP,
+                LiftPhase.RECOVER_DESCEND,
+            }
+            else None
+        )
+        return self._move(
+            eef,
+            np.asarray(target),
+            gripper,
+            active_yaw_error,
+            position_gain,
+        )
