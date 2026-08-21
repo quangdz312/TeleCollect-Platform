@@ -3,9 +3,14 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 from scripts.evaluate_robomimic import (
+    _environment_fingerprint,
     _install_egl_probe_fallback,
+    _prepare_state_bank,
     _rollout_with_success_tail,
+    _should_keep_video,
 )
 from src.models.enums import JobStatus
 from src.models.schemas import EvaluationJobRequest
@@ -130,6 +135,36 @@ def test_evaluation_request_rejects_more_videos_than_rollouts() -> None:
     raise AssertionError("invalid evaluation request was accepted")
 
 
+def test_video_retention_keeps_requested_prefix_and_failures() -> None:
+    assert _should_keep_video(index=0, requested_videos=3, success=True)
+    assert _should_keep_video(index=8, requested_videos=3, success=False)
+    assert not _should_keep_video(index=8, requested_videos=3, success=True)
+
+
+def test_environment_fingerprint_ignores_render_settings() -> None:
+    class _Env:
+        def __init__(self, *, offscreen: bool, control_freq: int = 20):
+            self.offscreen = offscreen
+            self.control_freq = control_freq
+
+        def serialize(self):
+            return {
+                "env_name": "Lift",
+                "env_kwargs": {
+                    "has_offscreen_renderer": self.offscreen,
+                    "camera_names": ["agentview"],
+                    "control_freq": self.control_freq,
+                },
+            }
+
+    assert _environment_fingerprint(_Env(offscreen=False)) == _environment_fingerprint(
+        _Env(offscreen=True)
+    )
+    assert _environment_fingerprint(_Env(offscreen=False)) != _environment_fingerprint(
+        _Env(offscreen=False, control_freq=10)
+    )
+
+
 def test_manager_rejects_checkpoint_not_owned_by_training_job(tmp_path: Path) -> None:
     manager = EvaluationJobManager(
         tmp_path / "training",
@@ -158,7 +193,7 @@ class _PolicyStub:
         pass
 
     def __call__(self, *, ob):
-        return ob
+        return [float(ob["step"])]
 
 
 class _RolloutEnvStub:
@@ -167,6 +202,8 @@ class _RolloutEnvStub:
     def __init__(self, success_at: int | None) -> None:
         self.success_at = success_at
         self.steps = 0
+        self.seed = None
+        self.rng = None
 
     def reset(self):
         self.steps = 0
@@ -186,6 +223,80 @@ class _RolloutEnvStub:
         return {"task": self.success_at is not None and self.steps >= self.success_at}
 
 
+def test_rollout_resynchronizes_controller_after_restoring_state() -> None:
+    calls: list[str] = []
+
+    class _Array:
+        def __init__(self, values):
+            self.values = list(values)
+
+        def __setitem__(self, _key, value):
+            self.values = [value for _ in self.values]
+
+        def __array__(self, dtype=None):
+            return np.asarray(self.values, dtype=dtype)
+
+    class _Sim:
+        def __init__(self):
+            self.model = type(
+                "Model", (), {"opt": type("Opt", (), {"disableflags": 0})()}
+            )()
+            self.data = type(
+                "Data",
+                (),
+                {
+                    "qpos": np.asarray([1.0, 2.0, 3.0]),
+                    "ctrl": _Array([4.0]),
+                    "qacc_warmstart": _Array([5.0]),
+                    "qfrc_applied": _Array([6.0]),
+                    "xfrc_applied": _Array([7.0]),
+                },
+            )()
+
+        def forward(self):
+            calls.append("forward")
+
+    sim = _Sim()
+
+    class _PartController:
+        qpos_index = [0, 2]
+        pass
+
+        def update_initial_joints(self, joints):
+            calls.append(f"initial_joints:{np.asarray(joints).tolist()}")
+
+    class _CompositeController:
+        part_controllers = {"right": _PartController()}
+
+        def update_state(self):
+            calls.append("update_state")
+
+        def reset(self):
+            calls.append("reset")
+
+    env = _RolloutEnvStub(success_at=1)
+    env.sim = sim
+    _PartController.sim = sim
+    env.robots = [type("Robot", (), {"composite_controller": _CompositeController()})()]
+
+    _rollout_with_success_tail(
+        policy=_PolicyStub(),
+        env=env,
+        horizon=1,
+        success_tail_steps=0,
+        video_writer=None,
+        video_skip=1,
+        camera_names=[],
+        initial_state_vector=[0],
+    )
+
+    assert calls == ["forward", "update_state", "initial_joints:[1.0, 3.0]", "reset"]
+    assert sim.data.ctrl.values == [0]
+    assert sim.data.qacc_warmstart.values == [0]
+    assert sim.data.qfrc_applied.values == [0]
+    assert sim.data.xfrc_applied.values == [0]
+
+
 def test_rollout_records_tail_after_first_success() -> None:
     env = _RolloutEnvStub(success_at=2)
 
@@ -197,11 +308,18 @@ def test_rollout_records_tail_after_first_success() -> None:
         video_writer=None,
         video_skip=1,
         camera_names=["agentview"],
+        episode_seed=5000,
     )
 
     assert stats["Success_Rate"] == 1.0
     assert stats["Horizon"] == 5
     assert env.steps == 5
+    assert env.seed == 5000
+    assert len(stats["initial_state_hash"]) == 64
+    assert len(stats["action_hash"]) == 64
+    assert stats["first_action"] == [0.0]
+    assert stats["action_prefix"] == [[0.0], [1.0], [2.0], [3.0], [4.0]]
+    assert len(stats["state_prefix_hashes"]) == 5
 
 
 def test_unsuccessful_rollout_still_stops_at_horizon() -> None:
@@ -220,3 +338,65 @@ def test_unsuccessful_rollout_still_stops_at_horizon() -> None:
     assert stats["Success_Rate"] == 0.0
     assert stats["Horizon"] == 4
     assert env.steps == 4
+
+
+def test_same_seed_reproduces_initial_and_action_fingerprints() -> None:
+    first = _rollout_with_success_tail(
+        policy=_PolicyStub(), env=_RolloutEnvStub(success_at=2), horizon=10,
+        success_tail_steps=3, video_writer=None, video_skip=1,
+        camera_names=["agentview"], episode_seed=5000,
+    )
+    second = _rollout_with_success_tail(
+        policy=_PolicyStub(), env=_RolloutEnvStub(success_at=2), horizon=10,
+        success_tail_steps=3, video_writer=None, video_skip=1,
+        camera_names=["agentview"], episode_seed=5000,
+    )
+
+    assert first == second
+
+
+def test_seeding_mutates_shared_environment_rng_in_place() -> None:
+    class _Sampler:
+        pass
+
+    env = _RolloutEnvStub(success_at=None)
+    env.rng = np.random.default_rng(99)
+    sampler = _Sampler()
+    sampler.rng = env.rng
+    original_rng = env.rng
+
+    from scripts.evaluate_robomimic import _seed_episode
+
+    _seed_episode(5000, env)
+    first = sampler.rng.uniform()
+    _seed_episode(5000, env)
+    second = sampler.rng.uniform()
+
+    assert env.rng is original_rng
+    assert sampler.rng is original_rng
+    assert first == second
+
+
+def test_state_bank_reloads_the_same_saved_states(tmp_path: Path) -> None:
+    class _BankEnv(_RolloutEnvStub):
+        def serialize(self):
+            return {"env_name": "Lift", "version": 1}
+
+        def reset(self):
+            self.steps = int(self.rng.integers(1, 1_000_000))
+            return {"step": self.steps}
+
+        def get_state(self):
+            return {"states": [self.steps]}
+
+    path = tmp_path / "lift_states.npz"
+    env = _BankEnv(success_at=None)
+    env.rng = np.random.default_rng(0)
+    created = _prepare_state_bank(path, env, [5000, 5001], "Lift")
+
+    env.rng = np.random.default_rng(999)
+    loaded = _prepare_state_bank(path, env, [5000, 5001], "Lift")
+
+    assert np.array_equal(created[5000], loaded[5000])
+    assert np.array_equal(created[5001], loaded[5001])
+    assert not np.array_equal(loaded[5000], loaded[5001])

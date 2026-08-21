@@ -114,6 +114,14 @@ class EvaluationJobManager:
     def _command(self, record: dict[str, Any]) -> list[str]:
         directory = self._job_dir(record["training_run_id"], record["id"])
         config = record["config"]
+        start_seed = int(config["seed"])
+        end_seed = start_seed + int(config["num_rollouts"]) - 1
+        state_bank = (
+            self.training_root
+            / record["training_run_id"]
+            / "evaluation_state_banks"
+            / f"seeds_{start_seed}_{end_seed}.npz"
+        ).resolve()
         command = [
             self.python_executable,
             str(self.evaluation_script),
@@ -123,6 +131,7 @@ class EvaluationJobManager:
             "--n-rollouts", str(config["num_rollouts"]),
             "--seed", str(config["seed"]),
             "--record-videos", str(config["record_videos"]),
+            "--state-bank", str(state_bank),
         ]
         if config.get("horizon") is not None:
             command.extend(["--horizon", str(config["horizon"])])
