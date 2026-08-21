@@ -107,6 +107,15 @@ def test_object_layout_slices_stay_within_the_frame_pose():
     assert layout["orientation"] == (3, 7)
 
 
+def test_native_object_layout_reads_the_frame_pose_from_44_columns():
+    from src.labeling.features import _object_layout
+
+    layout = _object_layout("tool_hang", 44)
+    assert layout is not None
+    assert layout["position"] == (21, 24)
+    assert layout["orientation"] == (24, 28)
+
+
 # --- episode summary and provenance ----------------------------------------
 
 
@@ -232,13 +241,15 @@ def test_failure_kind_never_leaves_a_failure_unnamed(outcome, expected):
     assert _failure_kind(outcome) == expected
 
 
-def test_run_collection_rejects_non_clean_tool_hang_quality(tmp_path):
+def test_run_collection_accepts_non_clean_tool_hang_quality():
     from src.sim import scripted_generation
 
-    with pytest.raises(ValueError):
-        scripted_generation.run_collection(
-            "tool_hang", episodes=1, seed=0, quality="good", output=tmp_path / "out.hdf5",
-        )
+    result = scripted_generation.run_collection(
+        "tool_hang", episodes=1, seed=0, quality="good", dry_run=True,
+    )
+    assert result.quality == "good"
+    assert result.provenance.noise_scale == 0.20
+    assert result.provenance.profile_version == "toolhang-candidate-v1"
 
 
 # --- opt-in integration -----------------------------------------------------
@@ -263,9 +274,10 @@ def test_collect_runs_one_episode(tmp_path):
     assert len(lines) == 1
     with h5py.File(output, "r") as handle:
         demo = handle["data"]["demo_0"]
-        # The trace is 1:1 with the control steps, and `object` now carries both
-        # the frame pose and the tool pose.
-        assert demo["obs"]["object"].shape[1] == 14
+        # The trace is 1:1 with the control steps, and `object` is RoboSuite's
+        # native ToolHang object-state so RoboMimic rollout uses the same input.
+        assert demo["obs"]["object"].shape[1] == 44
+        assert demo["next_obs"]["object"].shape[1] == 44
         assert len(json.loads(lines[0])["trace"]) == demo.attrs["num_samples"]
 
 

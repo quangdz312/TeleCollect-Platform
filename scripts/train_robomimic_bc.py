@@ -21,9 +21,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("data/training"))
     parser.add_argument("--name", default="telecollect_bc")
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--save-every-n-epochs", type=int)
+    parser.add_argument("--sequence-length", type=int, default=50)
+    parser.add_argument("--rnn-hidden-dim", type=int, default=400)
+    parser.add_argument("--rnn-layers", type=int, default=2)
+    parser.add_argument(
+        "--normalize-observations", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument("--observation-profile", choices=("minimal", "all"), default="minimal")
+    parser.add_argument("--rollout-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--rollout-every-n-epochs", type=int, default=20)
+    parser.add_argument("--rollout-episodes", type=int, default=5)
+    parser.add_argument("--rollout-horizon", type=int, default=500)
     parser.add_argument(
         "--policy",
         choices=("bc", "bc-rnn"),
@@ -52,6 +66,18 @@ def main() -> int:
             num_workers=args.num_workers,
             device=args.device,
             policy=args.policy,
+            learning_rate=args.learning_rate,
+            seed=args.seed,
+            save_every_n_epochs=args.save_every_n_epochs,
+            sequence_length=args.sequence_length,
+            rnn_hidden_dim=args.rnn_hidden_dim,
+            rnn_layers=args.rnn_layers,
+            normalize_observations=args.normalize_observations,
+            observation_profile=args.observation_profile,
+            rollout_enabled=args.rollout_enabled,
+            rollout_every_n_epochs=args.rollout_every_n_epochs,
+            rollout_episodes=args.rollout_episodes,
+            rollout_horizon=args.rollout_horizon,
         )
     except (OSError, KeyError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc

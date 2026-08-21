@@ -39,6 +39,47 @@ def _split_names(
     return train, valid
 
 
+#: Soft-penalty ceiling for the ``clean`` slice. This is a filter, not a gate:
+#: an episode above it stays in the file and in every other mask, it is simply
+#: absent from the one slice that asks for low roughness. No published threshold
+#: exists for these penalties, so the value is a starting point for whoever
+#: trains rather than a claim about quality.
+CLEAN_SLICE_MAX_PENALTY = 0.15
+
+
+def _quality_masks(episodes: Sequence[dict[str, object]]) -> dict[str, list[bytes]]:
+    """Name the slices a training run can ask for, without removing anything.
+
+    RoboMimic reads ``mask/<name>`` to select demos, so a corpus can carry
+    several overlapping views of itself instead of being pruned down to one.
+    That matters here because "good demonstration" is not a property of an
+    episode on its own -- a rough trajectory that hurts single-task behaviour
+    cloning can be exactly what a robustness run wants -- and pruning at export
+    time makes that choice for someone who is not in the room.
+    """
+
+    masks: dict[str, list[bytes]] = {"all": [], "verified": [], "clean": []}
+    for index, item in enumerate(episodes):
+        name = f"demo_{index}".encode()
+        masks["all"].append(name)
+
+        flags = item.get("auto_flags")
+        if not isinstance(flags, dict):
+            # No flags means nobody scored this episode, which is not the same
+            # as an episode that scored clean. Treating a missing record as a
+            # pass is how a check ends up asserting more than it verified.
+            continue
+        if not flags.get("failed_checks") and not flags.get("unavailable_checks"):
+            masks["verified"].append(name)
+            try:
+                penalty = float(flags.get("worst_penalty_value", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                penalty = 0.0
+            if penalty <= CLEAN_SLICE_MAX_PENALTY:
+                masks["clean"].append(name)
+    return masks
+
+
 def build_robomimic_hdf5(
     output: Path,
     episodes: Sequence[dict[str, object]],
@@ -91,6 +132,9 @@ def build_robomimic_hdf5(
             mask.create_dataset("valid", data=np.asarray(valid, dtype=string_dtype))
             mask.attrs["split_method"] = "sha256_episode_id"
             mask.attrs["validation_ratio"] = validation_ratio
+            for name, members in _quality_masks(episodes).items():
+                mask.create_dataset(name, data=np.asarray(members, dtype=string_dtype))
+            mask.attrs["clean_max_penalty"] = CLEAN_SLICE_MAX_PENALTY
         validation = validate_training_dataset(temporary)
         if not validation.valid:
             raise ValueError("RoboMimic export không hợp lệ: " + "; ".join(validation.errors))

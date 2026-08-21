@@ -11,3 +11,6 @@
 
 torch>=2.5.0
 torchvision>=0.20.0
+# RoboMimic 0.5 was released on GitHub but was not uploaded to PyPI
+# (PyPI currently stops at 0.3.0). Pin the official release tag directly.
+robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5

@@ -131,6 +131,50 @@ class _Command:
     error: Exception | None = None
 
 
+class _PreviewEncoder:
+    """Encode latest-only để JPEG không chặn thread sở hữu MuJoCo.
+
+    Mỗi camera chỉ giữ một raw frame chờ encode. Frame preview cũ được phép
+    bỏ; đường recorder hoàn toàn tách biệt và vẫn không bỏ mẫu dataset.
+    """
+
+    def __init__(self, publish: Callable[[str, int, bytes], None], quality: int) -> None:
+        self._publish = publish
+        self._quality = quality
+        self._condition = threading.Condition()
+        self._pending: dict[str, tuple[int, bytes, Any]] = {}
+        self._stopping = False
+        self._thread = threading.Thread(target=self._run, name="telecollect-preview-encoder", daemon=True)
+        self._thread.start()
+
+    def submit(self, camera: str, seq: int, frame: bytes, renderer: Any) -> bool:
+        with self._condition:
+            replaced = camera in self._pending
+            self._pending[camera] = (seq, bytes(frame), renderer)
+            self._condition.notify()
+            return replaced
+
+    def close(self) -> None:
+        with self._condition:
+            self._stopping = True
+            self._condition.notify_all()
+        self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._pending and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+                camera, (seq, frame, renderer) = self._pending.popitem()
+            try:
+                self._publish(camera, seq, renderer.encode_jpeg(frame, quality=self._quality))
+            except Exception:
+                # Preview failure must not stop physics or corrupt recording.
+                continue
+
+
 class ControlLoop:
     """Vòng điều khiển của một phiên.
 
@@ -174,6 +218,7 @@ class ControlLoop:
         self._input_timeout_s = settings.command_timeout_ms / 1000.0
         self._jpeg_quality = settings.jpeg_quality
         self._stream_period = 1.0 / settings.stream_fps
+        self._secondary_stream_period = 1.0 / settings.secondary_stream_fps
         self._preview_camera = settings.preview_camera
         self._preview_camera_secondary = settings.preview_camera_secondary
         self._preview_camera_tertiary = settings.preview_camera_tertiary
@@ -205,6 +250,8 @@ class ControlLoop:
         self._frame_secondary: bytes | None = None
         self._frame_tertiary: bytes | None = None
         self._frame_seq = 0
+        self._frame_secondary_seq = 0
+        self._frame_tertiary_seq = 0
         self._session_state = "idle"
         self._episode_id: str | None = None
         self._seed: int | None = None
@@ -226,6 +273,8 @@ class ControlLoop:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_stream_at = 0.0
+        self._last_secondary_stream_at = 0.0
+        self._preview_encoder: _PreviewEncoder | None = None
         self._ready = threading.Event()
         self._init_error: Exception | None = None
 
@@ -325,19 +374,21 @@ class ControlLoop:
             seq = self._frame_seq
         return None if frame is None else (seq, frame)
 
-    def take_frames(self) -> tuple[int, bytes | None, bytes | None, bytes | None]:
+    def take_frames(self) -> tuple[int, bytes | None, int, bytes | None, int, bytes | None]:
         """Lấy cả ba camera preview trong một lần khoá.
 
-        Lấy chung một lần để ba khung hình trên browser thuộc cùng một tick —
-        ba lời gọi riêng có thể rơi vào ba tick khác nhau và khiến ảnh cổ tay
-        lệch pha với ảnh tổng thể.
+        Mỗi camera có seq riêng vì camera chính chạy ở FPS khác hai camera phụ.
+        Hai camera phụ (tổng quan trên cao + cổ tay) chung một nhịp vì cùng lấy
+        thẳng từ ảnh đã render cho dataset.
         """
         with self._state_lock:
             primary, self._frame = self._frame, None
             secondary, self._frame_secondary = self._frame_secondary, None
             tertiary, self._frame_tertiary = self._frame_tertiary, None
-            seq = self._frame_seq
-        return seq, primary, secondary, tertiary
+            primary_seq = self._frame_seq
+            secondary_seq = self._frame_secondary_seq
+            tertiary_seq = self._frame_tertiary_seq
+        return primary_seq, primary, secondary_seq, secondary, tertiary_seq, tertiary
 
     def session_state(self) -> str:
         with self._state_lock:
@@ -378,6 +429,7 @@ class ControlLoop:
         try:
             if self._env_factory is not None:
                 self.env = self._env_factory()
+            self._preview_encoder = _PreviewEncoder(self._publish_encoded_frame, self._jpeg_quality)
         except Exception as exc:
             self._init_error = exc
             self._ready.set()
@@ -404,6 +456,9 @@ class ControlLoop:
                     deadline = now
         finally:
             self._shutdown_recorder()
+            if self._preview_encoder is not None:
+                self._preview_encoder.close()
+                self._preview_encoder = None
             # Đóng env ở đây chứ không ở SessionManager: giải phóng context
             # OpenGL cũng phải diễn ra trên thread đã tạo ra nó.
             if self._owns_env and self.env is not None:
@@ -508,23 +563,27 @@ class ControlLoop:
             )
 
     def _maybe_publish_frame(self, obs: Any, seq: int, tick_start: float) -> None:
-        """Encode JPEG theo nhịp `stream_fps`, không phải mỗi tick.
+        """Render khi đến hạn rồi giao raw frame cho latest-only encoder.
 
         `obs.images` đã có sẵn từ `env.step()` (xem `RobotEnv._observation`),
-        nên ở đây chỉ encode — không render lại, không đụng vào render context
-        ngoài luồng.
+        OpenGL vẫn ở owner thread; phần CPU encode JPEG chạy ngoài control loop.
         """
-        if tick_start - self._last_stream_at < self._stream_period:
+        primary_due = tick_start - self._last_stream_at >= self._stream_period
+        secondary_due = tick_start - self._last_secondary_stream_at >= self._secondary_stream_period
+        if not primary_due and not secondary_due:
             return
 
         try:
             # Renderer xem trực tiếp (độ phân giải cao) nếu phiên có bật; nếu
             # không thì tái dùng chính ảnh đã render cho dataset — không render
             # lại lần nữa chỉ để hiển thị.
-            frame = self.env.render_preview() if hasattr(self.env, "render_preview") else None
-            if frame is not None:
+            frame = None
+            renderer = None
+            if primary_due:
+                frame = self.env.render_preview() if hasattr(self.env, "render_preview") else None
+            if primary_due and frame is not None:
                 renderer = self.env._preview_renderer
-            else:
+            elif primary_due:
                 # Không có renderer xem riêng: dùng lại ảnh đã render cho
                 # dataset. `preview_camera` có thể là camera KHÔNG ghi (vd
                 # `frontview`), nên lùi về camera ghi đầu tiên thay vì bỏ hẳn
@@ -535,35 +594,56 @@ class ControlLoop:
                 if frame is None:
                     return
                 renderer = self.env._renderer
-            jpeg = renderer.encode_jpeg(frame, quality=self._jpeg_quality)
-
-            # Hai camera phụ (tổng quan trên cao + cổ tay) lấy thẳng ảnh đã
-            # render cho dataset — khung nhỏ nên không cần độ phân giải cao, và
-            # không tốn thêm lần render nào mỗi tick.
-            def side(name: str) -> bytes | None:
-                if not name:
-                    return None
-                raw = obs.images.get(name)
-                if raw is None:
-                    return None
-                return self.env._renderer.encode_jpeg(raw, quality=self._jpeg_quality)
-
-            jpeg_secondary = side(self._preview_camera_secondary)
-            jpeg_tertiary = side(self._preview_camera_tertiary)
+            # Hai camera phụ lấy thẳng ảnh đã render cho dataset — khung nhỏ
+            # nên không cần độ phân giải riêng, và không tốn thêm lần render
+            # nào mỗi tick.
+            secondary = tertiary = None
+            if secondary_due:
+                if self._preview_camera_secondary:
+                    secondary = obs.images.get(self._preview_camera_secondary)
+                if self._preview_camera_tertiary:
+                    tertiary = obs.images.get(self._preview_camera_tertiary)
         except Exception as exc:
             self._set_error("RENDER_FAILED", str(exc))
             return
 
-        self._last_stream_at = tick_start
-        with self._state_lock:
-            if self._frame is not None:
-                # Client chưa kịp lấy frame trước — bỏ nó, giữ frame mới nhất.
+        encoder = self._preview_encoder
+        if encoder is None:
+            return
+        if primary_due and frame is not None and renderer is not None:
+            self._last_stream_at = tick_start
+            if encoder.submit("primary", seq, frame, renderer):
                 with self._stats_lock:
                     self._dropped_frames += 1
-            self._frame = jpeg
-            self._frame_secondary = jpeg_secondary
-            self._frame_tertiary = jpeg_tertiary
-            self._frame_seq = seq
+        if secondary_due and (secondary is not None or tertiary is not None):
+            self._last_secondary_stream_at = tick_start
+            for camera, raw in (("secondary", secondary), ("tertiary", tertiary)):
+                if raw is None:
+                    continue
+                if encoder.submit(camera, seq, raw, self.env._renderer):
+                    with self._stats_lock:
+                        self._dropped_frames += 1
+
+    def _publish_encoded_frame(self, camera: str, seq: int, jpeg: bytes) -> None:
+        with self._state_lock:
+            if camera == "primary":
+                if self._frame is not None:
+                    with self._stats_lock:
+                        self._dropped_frames += 1
+                self._frame = jpeg
+                self._frame_seq = seq
+            elif camera == "tertiary":
+                if self._frame_tertiary is not None:
+                    with self._stats_lock:
+                        self._dropped_frames += 1
+                self._frame_tertiary = jpeg
+                self._frame_tertiary_seq = seq
+            else:
+                if self._frame_secondary is not None:
+                    with self._stats_lock:
+                        self._dropped_frames += 1
+                self._frame_secondary = jpeg
+                self._frame_secondary_seq = seq
 
     # ----- command handlers (chỉ chạy trên worker thread) -----
 

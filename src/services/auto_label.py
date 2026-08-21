@@ -17,29 +17,48 @@ class AutoLabelResult:
     reason: str
 
 
+#: An auto-pass that the gate sampled for human audit is still an auto-pass. The
+#: distinction matters to the audit bookkeeping, not to a reviewer reading the
+#: queue, so both collapse to "accept" here.
+_GATE_TO_LABEL: dict[str, AutoLabel] = {
+    "approve": "accept",
+    "audit": "accept",
+    "review": "review",
+    "reject": "reject",
+}
+
+
 def classify_scripted(
     gate_decision: str | None,
     recorded_success: bool | None,
     auto_flags: dict | None = None,
     task: str | None = None,
+    provenance: dict | None = None,
 ) -> AutoLabelResult:
-    if recorded_success is False or gate_decision in {"rejected", "auto_reject"}:
+    """Advisory label for the review queue, delegating to the real gate.
+
+    This used to carry a second, older rule set that could disagree with
+    ``auto_gate`` -- the queue showed one verdict while the gate would have
+    written another. There is one set of rules now; this wrapper only adapts the
+    record shape and folds ``audit`` back into ``accept``.
+
+    ``gate_decision`` is kept for callers that already resolved a verdict
+    upstream, and still short-circuits an explicit rejection.
+    """
+
+    from src.labeling.auto_gate import evaluate
+
+    if gate_decision in {"rejected", "auto_reject"}:
         return AutoLabelResult("reject", "Hard failure or failed task predicate")
-    # ToolHang keeps a human in the loop on anything that is not an outright
-    # failure: its quality rules are still the Stage-1 ones, so an accept here
-    # would be asserting more than the checks actually verified.
-    if task == "tool_hang":
-        return AutoLabelResult("review", "ToolHang accepts are pending a full quality rule")
-    if gate_decision in {"approved", "suggest_pass"} and recorded_success is not False:
-        return AutoLabelResult("accept", "All available scripted checks passed")
-    if recorded_success is True and auto_flags is not None:
-        failed_checks = auto_flags.get("failed_checks", [])
-        unavailable_checks = auto_flags.get("unavailable_checks", [])
-        if not failed_checks and not unavailable_checks:
-            if task in {"lift", "lift_cube"} and not auto_flags.get("grasp_quality"):
-                return AutoLabelResult("review", "Successful task but grasp quality is not evaluated")
-            return AutoLabelResult("accept", "Task succeeded and all hard checks passed")
-    return AutoLabelResult("review", "Evidence is incomplete or requires human review")
+
+    verdict = evaluate({
+        "recorded_success": recorded_success,
+        "auto_flags": auto_flags or {},
+        "task": task or "",
+        "provenance": provenance or {},
+        "episode_id": "",
+    })
+    return AutoLabelResult(_GATE_TO_LABEL[verdict.action], verdict.reason)
 
 
 def classify_teleop_metadata(metadata: dict) -> AutoLabelResult:

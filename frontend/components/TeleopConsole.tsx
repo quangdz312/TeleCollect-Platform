@@ -5,24 +5,27 @@ import Link from "next/link";
 import {
   InputCollector,
   KEY_HELP,
-  type AxisInput,
   type FrameState,
   type LatencyStats,
   type TeleopEvent,
 } from "@/lib/teleop";
-import { CONTROL_HZ, TeleopClient } from "@/lib/real-teleop";
+import { TeleopClient } from "@/lib/real-teleop";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
 import { HandControl } from "@/components/HandControl";
+import type { AxisInput } from "@/lib/teleop";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
 
 interface LogLine {
-  id: string;
+  id: number;
   text: string;
   tone: "info" | "ok" | "bad";
   at: string;
 }
+
+type Quaternion = [number, number, number, number];
+type RotationSafety = { twistDeg: number; limited: boolean };
 
 const JOINT_LABELS = ["j1", "j2", "j3", "j4", "j5", "j6", "grip"];
 
@@ -31,15 +34,15 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const topRef = useRef<HTMLCanvasElement | null>(null);
   const wristRef = useRef<HTMLCanvasElement | null>(null);
   const clientRef = useRef<TeleopClient | null>(null);
+  const frameRef = useRef<FrameState | null>(null);
+  const rotationBaselineRef = useRef<Quaternion | null>(null);
   const inputRef = useRef(new InputCollector());
   const dragRef = useRef<{ active: boolean; x: number; y: number }>({
     active: false,
     x: 0,
     y: 0,
   });
-  // Set while the hand camera is tracking, null the rest of the time. The
-  // send loop below reads it instead of the keyboard/pointer collector, so
-  // the two input paths never fight over the same tick.
+  const logId = useRef(0);
   const handInputRef = useRef<AxisInput | null>(null);
 
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "pick_place");
@@ -51,14 +54,16 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [gamepad, setGamepad] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [rotationSafety, setRotationSafety] = useState<RotationSafety>({ twistDeg: 0, limited: false });
 
   const task = useMemo(() => tasks.find((t) => t.id === taskId), [tasks, taskId]);
 
   const pushLog = useCallback((text: string, tone: LogLine["tone"] = "info") => {
+    logId.current += 1;
     setLogs((previous) =>
       [
         {
-          id: crypto.randomUUID(),
+          id: logId.current,
           text,
           tone,
           at: new Date().toLocaleTimeString(),
@@ -68,11 +73,14 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     );
   }, []);
 
-  // -- hand camera -----------------------------------------------------
-  // `HandControl` owns the camera, the landmark model and the gesture
-  // mapping; these two callbacks are the whole interface to it.
   const handleHandInput = useCallback((input: AxisInput | null) => {
-    handInputRef.current = input;
+    if (!input) {
+      handInputRef.current = null;
+      return;
+    }
+    const mapped = applyRotationSafety(input, frameRef.current?.ee, rotationBaselineRef);
+    handInputRef.current = mapped.input;
+    setRotationSafety(mapped.safety);
   }, []);
 
   const handleHandGripper = useCallback((closed: boolean) => {
@@ -84,6 +92,8 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     const token = getToken();
     if (!token) return;
     clientRef.current?.disconnect();
+    rotationBaselineRef.current = null;
+    setRotationSafety({ twistDeg: 0, limited: false });
 
     const client = new TeleopClient(token);
     client.onStatus = (next, detail) => {
@@ -93,6 +103,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       if (next === "open") pushLog("Connected to the simulator", "ok");
     };
     client.onFrame = (state, images) => {
+      frameRef.current = state;
       setFrame(state);
       paint(frontRef.current, images.get("front"));
       paint(topRef.current, images.get("top"));
@@ -107,6 +118,9 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();
     clientRef.current = null;
+    frameRef.current = null;
+    rotationBaselineRef.current = null;
+    setRotationSafety({ twistDeg: 0, limited: false });
     setStatus("idle");
     setFrame(null);
   }, []);
@@ -135,8 +149,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     let raf = 0;
     const pump = () => {
       const client = clientRef.current;
-      // The hand camera takes over while it is tracking; the keyboard and
-      // pointer collector drives the arm the rest of the time.
       if (client) client.input = handInputRef.current ?? collector.sample();
       const pads = navigator.getGamepads?.() ?? [];
       const pad = Array.from(pads).find((p) => p && p.connected);
@@ -178,7 +190,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const recording = frame?.recording ?? false;
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-5">
         <Card
           title={
@@ -220,59 +232,107 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             </>
           }
         >
-          <div className="flex flex-col">
-          {/* Three panes, same layout and same rendered size as the scripted
-              review: the main review angle on the left, overhead and wrist
-              stacked to its right. A square main pane beside a half-width
-              column makes the row 3:2, and splitting it 2:1 sizes every pane
-              from the row alone.
+          {/* Sized to whatever vertical space is left rather than to a fixed
+              number of pixels: `flex-1 min-h-0` takes the remainder of the card
+              and the square aspect derives the width from it.  That keeps the
+              view as large as it can be while the transport buttons under it
+              stay on screen, at any window height, with no scrolling. */}
+          <div className="flex flex-col xl:h-[calc(100dvh-11.5rem)]">
+          <div className="relative mx-auto aspect-square min-h-0 w-auto flex-1 overflow-hidden rounded-lg border border-ink-700 bg-black">
+            <canvas
+              ref={frontRef}
+              width={256}
+              height={256}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onWheel={onWheel}
+              className={cx(
+                "block h-full w-full touch-none select-none",
+                connected ? "cursor-grab active:cursor-grabbing" : "opacity-30",
+              )}
+              style={{ imageRendering: "auto" }}
+            />
+            {/* Overhead and wrist ride as picture-in-picture so the main review
+                angle keeps the full square. Both are recorded either way; these
+                two panes only decide what the operator can see while driving. */}
+            <canvas
+              ref={topRef}
+              width={128}
+              height={128}
+              className="absolute bottom-3 left-3 h-32 w-32 rounded-md border border-ink-600 bg-black shadow-lg"
+            />
+            <canvas
+              ref={wristRef}
+              width={128}
+              height={128}
+              className="absolute bottom-3 right-3 h-32 w-32 rounded-md border border-ink-600 bg-black shadow-lg"
+            />
+            {frame?.success && (
+              <div className="absolute left-3 top-3 rounded-md bg-ok-600/90 px-2.5 py-1 text-xs font-semibold text-white">
+                Task complete
+              </div>
+            )}
+            {!connected && (
+              <div className="absolute inset-0 grid place-items-center text-sm text-ink-400">
+                {status === "connecting" ? "Connecting…" : "Not connected"}
+              </div>
+            )}
+          </div>
 
-              `w-full` with no height cap is exactly what review's
-              `<video className="w-full">` does: the row takes the column's
-              width and derives its height from the 3:2 ratio. Nothing sits
-              under the panes any more — the transport buttons now live in the
-              right column — so there is no vertical budget left to reserve
-              and no reason to clamp the width down to fit one. */}
-          <div className="flex aspect-[3/2] w-full gap-2">
-            <div className="relative h-full flex-[2] overflow-hidden rounded-lg border border-ink-700 bg-black">
-              <canvas
-                ref={frontRef}
-                width={256}
-                height={256}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
-                onWheel={onWheel}
-                className={cx(
-                  "block h-full w-full touch-none select-none",
-                  connected ? "cursor-grab active:cursor-grabbing" : "opacity-30",
-                )}
-                style={{ imageRendering: "auto" }}
-              />
-              {frame?.success && (
-                <div className="absolute left-3 top-3 rounded-md bg-ok-600/90 px-2.5 py-1 text-xs font-semibold text-white">
-                  Task complete
-                </div>
-              )}
-              {!connected && (
-                <div className="absolute inset-0 grid place-items-center text-sm text-ink-400">
-                  {status === "connecting" ? "Connecting…" : "Not connected"}
-                </div>
-              )}
-            </div>
-            {/* `basis-0 min-h-0` makes the two panes split the column's height
-                evenly instead of each demanding its own square size, which
-                would grow the row past the card and push the transport buttons
-                off screen. */}
-            <div className="flex h-full min-h-0 flex-1 flex-col gap-2">
-              <SidePane label="overhead" canvasRef={topRef} connected={connected} />
-              <SidePane label="wrist" canvasRef={wristRef} connected={connected} />
-            </div>
+          <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              variant={recording ? "danger" : "success"}
+              disabled={!connected}
+              onClick={() =>
+                recording
+                  ? clientRef.current?.stopRecording(true)
+                  : clientRef.current?.startRecording()
+              }
+            >
+              {recording ? "Stop & save" : "Start recording"}
+            </Button>
+            <Button
+              variant="subtle"
+              disabled={!connected || !recording}
+              onClick={() => clientRef.current?.stopRecording(false)}
+            >
+              Discard take
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!connected}
+              onClick={() => {
+                rotationBaselineRef.current = null;
+                setRotationSafety({ twistDeg: 0, limited: false });
+                clientRef.current?.reset();
+              }}
+            >
+              New scene
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!connected}
+              onClick={() => {
+                inputRef.current.setGripper(!gripperClosed);
+              }}
+            >
+              {gripperClosed ? "Open gripper" : "Close gripper"}
+            </Button>
+            {lastSaved && (
+              <Link
+                href={`/review/${lastSaved}`}
+                className="ml-auto text-xs text-accent-400 hover:underline"
+              >
+                Review the take just saved →
+              </Link>
+            )}
           </div>
 
           <p className="mt-2 shrink-0 text-xs text-ink-400">
-            Drag to move in the table plane, scroll for height, or use the keyboard/gamepad.
+            Recording starts from a fresh randomised scene. Drag on the view to move in the
+            table plane, scroll to change height, or use the keyboard/gamepad.
           </p>
           </div>
         </Card>
@@ -296,18 +356,35 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             <Metric
               label="Tick interval"
               value={stats ? `${stats.tick.toFixed(1)} ms` : "—"}
-              tone={stats && Math.abs(stats.tick - 1000 / CONTROL_HZ) > 5 ? "warn" : "ok"}
+              tone={stats && Math.abs(stats.tick - 33.3) > 8 ? "warn" : "ok"}
             />
             <Metric
               label="Server work"
               value={stats ? `${stats.work.toFixed(1)} ms` : "—"}
-              tone={stats && stats.work > 0.85 * (1000 / CONTROL_HZ) ? "warn" : "ok"}
+              tone={stats && stats.work > 28 ? "warn" : "ok"}
             />
             <Metric
               label="Frames dropped"
               value={stats ? String(stats.dropped) : "—"}
               tone={stats && stats.dropped > 0 ? "warn" : "ok"}
             />
+            <Metric
+              label="JPEG decode"
+              value={stats?.decode !== undefined ? `${stats.decode.toFixed(1)} ms` : "—"}
+              tone={stats?.decode !== undefined && stats.decode > 12 ? "warn" : "ok"}
+            />
+            <Metric
+              label="Decode p95"
+              value={stats?.decodeP95 !== undefined ? `${stats.decodeP95.toFixed(1)} ms` : "—"}
+              tone={stats?.decodeP95 !== undefined && stats.decodeP95 > 20 ? "warn" : "ok"}
+            />
+            <Metric
+              label="Decode frames skipped"
+              value={stats?.decodeDropped !== undefined ? String(stats.decodeDropped) : "—"}
+            />
+            <Metric label="Visual latency" value={stats?.visual !== undefined ? `${stats.visual.toFixed(1)} ms` : "—"} tone={stats?.visual !== undefined && stats.visual > 100 ? "warn" : "ok"} />
+            <Metric label="Visual p95" value={stats?.visualP95 !== undefined ? `${stats.visualP95.toFixed(1)} ms` : "—"} tone={stats?.visualP95 !== undefined && stats.visualP95 > 140 ? "bad" : "ok"} />
+            <Metric label="Gripper twist" value={`${rotationSafety.twistDeg.toFixed(1)}°`} tone={rotationSafety.limited ? "bad" : Math.abs(rotationSafety.twistDeg) > 30 ? "warn" : "ok"} />
           </div>
           <p className="mt-3 text-xs text-ink-400">
             Round trip is measured on the browser clock: the server echoes back the timestamp of
@@ -319,64 +396,6 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       </div>
 
       <div className="space-y-5">
-        {/* Transport lives here, the way review puts Accept / Reject /
-            Refresh video in its "Verdict" card. Out from under the panes,
-            nothing below them competes for their height. */}
-        <Card title="Transport">
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={recording ? "danger" : "success"}
-                disabled={!connected}
-                onClick={() =>
-                  recording
-                    ? clientRef.current?.stopRecording(true)
-                    : clientRef.current?.startRecording()
-                }
-              >
-                {recording ? "Stop & save" : "Start recording"}
-              </Button>
-              <Button
-                variant="subtle"
-                disabled={!connected || !recording}
-                onClick={() => clientRef.current?.stopRecording(false)}
-              >
-                Discard take
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="ghost"
-                disabled={!connected}
-                onClick={() => clientRef.current?.reset()}
-              >
-                New scene
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!connected}
-                onClick={() => {
-                  inputRef.current.setGripper(!gripperClosed);
-                }}
-              >
-                {gripperClosed ? "Open gripper" : "Close gripper"}
-              </Button>
-            </div>
-            {lastSaved && (
-              <Link
-                href={`/review/${lastSaved}`}
-                className="block text-xs text-accent-400 hover:underline"
-              >
-                Review the take just saved →
-              </Link>
-            )}
-          </div>
-        </Card>
-
-        <Card title="Hand camera control" subtitle="Relative RGB depth via palm size">
-          <HandControl onInput={handleHandInput} onGripper={handleHandGripper} />
-        </Card>
-
         <Card title="Robot state">
           {frame ? (
             <div className="space-y-3">
@@ -445,6 +464,13 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
           )}
         </Card>
 
+        <Card title="Hand camera control" subtitle="Relative RGB depth via palm size">
+          <HandControl
+            onInput={handleHandInput}
+            onGripper={handleHandGripper}
+          />
+        </Card>
+
         <Card title="Session log">
           {logs.length === 0 ? (
             <Empty>Nothing yet.</Empty>
@@ -474,6 +500,49 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
       </div>
     </div>
   );
+}
+
+function applyRotationSafety(
+  input: AxisInput,
+  ee: number[] | undefined,
+  baselineRef: React.MutableRefObject<Quaternion | null>,
+): { input: AxisInput; safety: RotationSafety } {
+  const rotation = input.angular[2];
+  if (!ee || ee.length < 7) return { input, safety: { twistDeg: 0, limited: false } };
+  const [qw, qx, qy, qz] = ee.slice(3, 7);
+  const norm = Math.hypot(qw, qx, qy, qz);
+  if (norm < 1e-6) return { input, safety: { twistDeg: 0, limited: false } };
+  const w = qw / norm, x = qx / norm, y = qy / norm, z = qz / norm;
+  const current: Quaternion = [w, x, y, z];
+  if (baselineRef.current === null) baselineRef.current = current;
+  const [bw, bx, by, bz] = baselineRef.current;
+  const relativeW = bw * w + bx * x + by * y + bz * z;
+  const relativeZ = bw * z - bx * y + by * x - bz * w;
+  const twist = wrapRadians(2 * Math.atan2(relativeZ, relativeW));
+  const softLimit = 30 * Math.PI / 180;
+  const hardLimit = 45 * Math.PI / 180;
+  const outward = Math.abs(twist) > 1e-4 && Math.sign(rotation) === Math.sign(twist);
+  let scale = 1;
+  if (outward && Math.abs(twist) >= softLimit) {
+    scale = Math.max(0, Math.min(1, (hardLimit - Math.abs(twist)) / (hardLimit - softLimit)));
+  }
+  const safeRotation = outward ? rotation * scale : rotation;
+  const toolZ: [number, number, number] = [
+    2 * (x * z + w * y),
+    2 * (y * z - w * x),
+    1 - 2 * (x * x + y * y),
+  ];
+  return {
+    input: {
+      ...input,
+      angular: toolZ.map((component) => component * safeRotation) as [number, number, number],
+    },
+    safety: { twistDeg: twist * 180 / Math.PI, limited: outward && scale <= 0.001 },
+  };
+}
+
+function wrapRadians(angle: number) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 function handleEvent(
@@ -519,30 +588,6 @@ function handleEvent(
       }
       break;
   }
-}
-
-function SidePane({
-  label,
-  canvasRef,
-  connected,
-}: {
-  label: string;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  connected: boolean;
-}) {
-  return (
-    <div className="relative min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-ink-700 bg-black">
-      <canvas
-        ref={canvasRef}
-        width={128}
-        height={128}
-        className={cx("block h-full w-full", connected ? "" : "opacity-30")}
-      />
-      <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-300">
-        {label}
-      </span>
-    </div>
-  );
 }
 
 function paint(canvas: HTMLCanvasElement | null, bitmap: ImageBitmap | undefined) {

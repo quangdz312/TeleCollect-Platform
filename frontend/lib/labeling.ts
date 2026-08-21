@@ -31,9 +31,24 @@ export interface WorkspaceSummary {
   episodes: number;
   reviewed: number;
   approved: number;
+  approved_successes: number;
   rejected: number;
   pending: number;
-  per_task: Record<string, { total: number; reviewed: number }>;
+  auto_approved: number;
+  auto_rejected: number;
+  human_reviewed: number;
+  audit_pending: number;
+  audit_reviewed: number;
+  audit_failed: number;
+  audit_error_rate: number | null;
+  per_task: Record<string, {
+    total: number;
+    reviewed: number;
+    pending: number;
+    approved: number;
+    approved_successes: number;
+    rejected: number;
+  }>;
   scorer_version: string | null;
 }
 
@@ -71,6 +86,9 @@ export interface LabelRecord {
   note: string;
   reviewer: string;
   reviewed_at: string;
+  decision_source?: "human" | "auto_gate";
+  gate_version?: string | null;
+  gate_reason?: string;
 }
 
 /** Điểm máy chỉ có mặt khi client xin — mặc định server giữ lại để chấm mù. */
@@ -102,6 +120,10 @@ export interface Episode {
   auto_flags?: AutoFlags;
   auto_label: AutoLabel;
   auto_label_reason: string;
+  gate_action: "approve" | "reject" | "review" | "audit";
+  audit_required: boolean;
+  auto_gate_version: string;
+  auto_gate_reason: string;
 }
 
 export interface ShadowReport {
@@ -219,6 +241,15 @@ export const labeling = {
   }) => post<{ label: LabelRecord; workspace: WorkspaceSummary }>("/labels", payload),
 
   report: () => request<ShadowReport>("/report"),
+
+  applyAutoGate: () => post<{
+    result: {
+      approved: number; rejected: number; audit: number; review: number; skipped: number;
+      auto_approve_enabled: boolean; disabled_tasks: string[];
+      audit_error_rates: Record<string, number>;
+    };
+    workspace: WorkspaceSummary;
+  }>("/auto-gate/apply"),
 
   diversity: (task: string, scope: DiversityScope) => {
     const query = new URLSearchParams({ task, scope });

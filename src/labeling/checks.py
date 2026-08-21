@@ -34,12 +34,26 @@ GRASP_RADIUS_M: Mapping[str, float] = MappingProxyType({
 })
 DEFAULT_GRASP_RADIUS_M = 0.06
 
+#: Tasks whose robosuite success predicate requires the gripper to be clear of
+#: the object at the end. Lift is excluded on purpose: its predicate is a height
+#: test, and holding the cube up satisfies it. ToolHang is excluded because its
+#: own two-stage predicate is the authority there.
+RELEASE_REQUIRED_TASKS: frozenset[str] = frozenset({"can", "square"})
+
 
 @dataclass(frozen=True)
 class CheckConfig:
     #: Fallback grasp radius for tasks not in :data:`GRASP_RADIUS_M` (m).
     grasp_radius_m: float = DEFAULT_GRASP_RADIUS_M
     #: How far the object must rise above its resting height to count as lifted (m).
+    #:
+    #: ``Lift._check_success`` reads ``cube_height > table_height + 0.04``, but
+    #: that margin is measured from the *table surface* while this check is
+    #: measured from the object's *resting height*, which already sits half a
+    #: cube above the table. On the reference Lift episode the table is at 0.800
+    #: and the cube rests at 0.819, so robosuite's 0.840 is a rise of 0.021 in
+    #: these terms. 0.02 is that number, not an independent guess -- copying
+    #: 0.04 across would demand twice the lift the simulator asks for.
     lift_threshold_m: float = 0.02
     #: How far off the table the object must be for a frame to count as carried (m).
     #: Deliberately smaller than the lift threshold: the carry starts the moment
@@ -60,6 +74,21 @@ class CheckConfig:
     #: episodes, so the band sits above that and below a genuine carry-height
     #: drop.
     drop_fall_m: float = 0.15
+    #: How far the gripper must end up from the object on the tasks that require
+    #: a release (m). Derived from robosuite's own ``r_reach < 0.6`` term:
+    #: ``1 - tanh(10 * d) < 0.6`` solves to ``d > 0.0424``.
+    release_distance_m: float = 0.0424
+    #: Largest end-effector movement between two consecutive frames that is
+    #: physically possible (m/s, converted per frame using the episode's own
+    #: control rate).
+    #:
+    #: This is the Panda's rated maximum Cartesian speed, not a percentile of
+    #: what happened to be collected: a step above it did not come from the arm
+    #: moving, it came from a dropped frame, a reset spliced into the middle of
+    #: a trajectory, or a corrupted record. The reference corpus peaks at
+    #: 0.359 m/s, so the bound sits far outside normal collection and only fires
+    #: on genuinely broken data.
+    max_eef_speed_mps: float = 2.0
 
 
 DEFAULT_CHECKS = CheckConfig()
@@ -135,7 +164,7 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
-def e_integrity(episode: EpisodeArrays) -> CheckResult:
+def e_integrity(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> CheckResult:
     """Frame counts line up, actions are well formed, nothing is NaN."""
 
     problems: list[str] = []
@@ -165,7 +194,28 @@ def e_integrity(episode: EpisodeArrays) -> CheckResult:
         problems.append(
             f"num_samples attribute {episode.num_samples_attr} does not match {length}",
         )
-    return CheckResult("E_integrity", 0 if problems else 1, {"problems": problems})
+
+    # A step the arm could not physically have taken is a record problem, not a
+    # motion problem: a dropped frame, a reset spliced mid-trajectory, or a
+    # corrupted write. Checking it here rather than as a penalty keeps it where
+    # the other "is this record trustworthy" questions live.
+    fastest = 0.0
+    if episode.eef_position.shape[0] > 1 and np.isfinite(episode.eef_position).all():
+        step_limit = config.max_eef_speed_mps / max(episode.control_hz, 1e-6)
+        steps = np.linalg.norm(np.diff(episode.eef_position, axis=0), axis=1)
+        fastest = float(np.max(steps))
+        if fastest > step_limit:
+            problems.append(
+                f"end effector moved {fastest:.4f} m in one frame, "
+                f"above the {step_limit:.4f} m the arm can travel at "
+                f"{episode.control_hz:g} Hz",
+            )
+
+    return CheckResult(
+        "E_integrity",
+        0 if problems else 1,
+        {"problems": problems, "fastest_eef_step_m": fastest},
+    )
 
 
 def e_success(episode: EpisodeArrays) -> CheckResult:
@@ -321,13 +371,58 @@ def e_no_drop(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> C
     )
 
 
+def e_released(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> CheckResult:
+    """The hand actually let go at the end, on the tasks whose success requires it.
+
+    ``PickPlace._check_success`` and ``NutAssembly._check_success`` both AND
+    their placement test with ``r_reach < 0.6``, where ``r_reach = 1 -
+    tanh(10 * d)``. Solving that back gives ``d > 0.0424 m``: the gripper must
+    have moved clear of the object, not still be holding it in position. Lift
+    has no such term -- holding the cube up *is* the task -- and ToolHang's own
+    two-stage predicate already covers it, so both are not evaluable here.
+    """
+
+    if episode.task not in RELEASE_REQUIRED_TASKS:
+        # Not applicable is not the same as not evaluable. Returning None here
+        # would land this check in ``unavailable_checks``, where the gate reads
+        # it as missing evidence and sends a perfectly verified episode to
+        # review. There is nothing to verify, so the check passes.
+        return CheckResult(
+            "E_released", 1, {"reason": f"{episode.task} success does not require release"},
+        )
+    if episode.length == 0:
+        return CheckResult("E_released", 0, {"reason": "empty episode"})
+
+    # Take the widest separation reached after the last frame the hand was
+    # holding, not the separation on the final frame. A scripted episode ends on
+    # a step budget, not on the retreat finishing, so the last frame can catch
+    # the hand mid-withdrawal: the reference Can episode ends at 0.0429 m while
+    # still moving away, 0.0005 m past the threshold. What matters is that the
+    # hand cleared the object, not where the recording happened to stop.
+    holding = _holding(episode, config)
+    distances = np.linalg.norm(episode.gripper_to_object, axis=1)
+    held = np.flatnonzero(holding)
+    after_release = distances[held[-1] :] if held.size else distances
+    distance = float(np.max(after_release))
+    return CheckResult(
+        "E_released",
+        1 if distance > config.release_distance_m else 0,
+        {
+            "max_distance_after_release_m": distance,
+            "final_distance_m": float(distances[-1]),
+            "release_distance_threshold_m": config.release_distance_m,
+        },
+    )
+
+
 def hard_checks(
     episode: EpisodeArrays,
     config: CheckConfig = DEFAULT_CHECKS,
 ) -> list[CheckResult]:
     return [
-        e_integrity(episode),
+        e_integrity(episode, config),
         e_success(episode),
         e_skill(episode, config),
         e_no_drop(episode, config),
+        e_released(episode, config),
     ]

@@ -10,18 +10,20 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import mujoco
 import numpy as np
 
 from src.sim.collection.robomimic_hdf5_writer import EpisodeData, RobomimicHDF5Writer
-from src.sim.perturbations.collection import DatasetProvenance, EpisodeProvenance
-from src.sim.skillgen.compat import grip_site_id
+from src.sim.perturbations.collection import (
+    EpisodeProvenance,
+    build_runtime,
+    dataset_provenance,
+)
+from src.sim.perturbations.profiles import NOISE_STREAM_CODE, resolve_profile
 from src.sim.tool_hang import (
-    TOOLHANG_PROFILE,
-    TOOLHANG_TASK_CODE,
     TOOLHANG_TOOL_NAME,
     make_tool_hang_environment,
     tool_hang_stage1_success,
@@ -29,6 +31,19 @@ from src.sim.tool_hang import (
 )
 
 TOOL_NAME = TOOLHANG_TOOL_NAME
+TOOLHANG_OBJECT_STATE_DIM = 44
+
+_ROBOMIMIC_OBSERVATION_KEYS = (
+    "robot0_eef_pos",
+    "robot0_eef_quat",
+    "robot0_eef_quat_site",
+    "robot0_gripper_qpos",
+    "robot0_gripper_qvel",
+    "robot0_joint_pos",
+    "robot0_joint_pos_cos",
+    "robot0_joint_pos_sin",
+    "robot0_joint_vel",
+)
 
 
 @contextmanager
@@ -68,40 +83,29 @@ def environment(
 
 
 def _observation(env: Any, state: np.ndarray) -> dict[str, np.ndarray]:
+    """Rebuild RoboSuite's native low-dimensional observation for ``state``.
+
+    Collection calls this only after the scripted solver has completed and its
+    states and actions have been frozen. It therefore cannot participate in or
+    alter Stage 1 / Stage 2 action selection. Using RoboSuite's own
+    ``object-state`` keeps training inputs identical to those produced by
+    RoboMimic's rollout wrapper.
+    """
+
     env.sim.set_state_from_flattened(state)
     env.sim.forward()
-    data = env.sim.data
-    robot = env.robots[0]
-    joint_ids = np.asarray(robot._ref_joint_pos_indexes, dtype=int)
-    gripper_ids = np.asarray(robot._ref_gripper_joint_pos_indexes["right"], dtype=int)
-    eef_id = grip_site_id(env.sim.model)
-    eef_quat = np.zeros(4, dtype=np.float64)
-    mujoco.mju_mat2Quat(eef_quat, data.site_xmat[eef_id])
-    frame_id = env.sim.model.body_name2id("frame_root")
-    tool_id = env.sim.model.body_name2id("tool_root")
-    joint_pos = np.asarray(data.qpos[joint_ids]).copy()
-    # Both stages' objects, frame first: stage 1 manipulates the hook frame and
-    # stage 2 the wrench, so a frame-only `object` leaves half the task
-    # unobservable. Frame first keeps src/labeling/features.py's tool_hang
-    # position/orientation slices (0:3, 3:7) valid.
-    obj = np.concatenate((
-        np.asarray(data.body_xpos[frame_id]).copy(),
-        np.asarray(data.xquat[frame_id]).copy(),
-        np.asarray(data.body_xpos[tool_id]).copy(),
-        np.asarray(data.xquat[tool_id]).copy(),
-    ))
-    return {
-        "robot0_eef_pos": np.asarray(data.site_xpos[eef_id]).copy(),
-        "robot0_eef_quat": eef_quat,
-        "robot0_eef_quat_site": eef_quat.copy(),
-        "robot0_gripper_qpos": np.asarray(data.qpos[gripper_ids]).copy(),
-        "robot0_gripper_qvel": np.asarray(data.qvel[gripper_ids]).copy(),
-        "robot0_joint_pos": joint_pos,
-        "robot0_joint_pos_cos": np.cos(joint_pos),
-        "robot0_joint_pos_sin": np.sin(joint_pos),
-        "robot0_joint_vel": np.asarray(data.qvel[joint_ids]).copy(),
-        "object": obj,
+    raw = env._get_observations(force_update=True)
+    object_state = np.asarray(raw["object-state"])
+    if object_state.shape != (TOOLHANG_OBJECT_STATE_DIM,):
+        raise ValueError(
+            "RoboSuite ToolHang object-state schema changed: "
+            f"expected ({TOOLHANG_OBJECT_STATE_DIM},), got {object_state.shape}"
+        )
+    observation = {
+        key: np.asarray(raw[key]).copy() for key in _ROBOMIMIC_OBSERVATION_KEYS
     }
+    observation["object"] = object_state.copy()
+    return observation
 
 
 class _CaptureViewer:
@@ -125,6 +129,7 @@ def _run_episode(
     *,
     max_attempts: int,
     recorder: Any = None,
+    runtime: Any = None,
 ) -> dict[str, Any]:
     """Run stage 1 and, if it succeeded, stage 2. Returns the episode's outcome."""
 
@@ -134,6 +139,8 @@ def _run_episode(
     viewer = None if recorder is None else _CaptureViewer(recorder)
     skill = Stage1(
         env, viewer=viewer, max_attempts=max_attempts, max_steps=6000, collect=True,
+        action_transform=None if runtime is None else runtime.apply_action,
+        action_reset=None if runtime is None else runtime.reset_episode,
     )
     result = skill.run(seed)
     # Gate on the simulator's own predicate, never on the skill's geometric
@@ -206,6 +213,7 @@ def collect(
     tool_extra: float = 0.0,
     yaw_extra: float = 0.0,
     video_dir: str | Path | None = None,
+    quality: str = "clean",
 ) -> dict[str, Any]:
     """Collect ToolHang episodes, successes and failures alike.
 
@@ -226,20 +234,12 @@ def collect(
         "yaw_extra": float(yaw_extra),
         "max_attempts": int(max_attempts),
     }
-    provenance = DatasetProvenance(
-        task="tool_hang",
-        tool_name=TOOL_NAME,
-        requested_quality="clean",
-        profile_version=TOOLHANG_PROFILE,
-        candidate_profile_version=TOOLHANG_PROFILE,
-        acceptance_amendment="full-task-env-predicate-gate",
-        noise_scale=0.0,
+    profile = resolve_profile("tool_hang", quality)
+    provenance = dataset_provenance(
+        profile,
         base_seed=seed,
-        task_code=TOOLHANG_TASK_CODE,
-        stream_code=1,
+        stream_code=NOISE_STREAM_CODE,
         coverage="stage1+stage2",
-        position_landmarks=("frame_pos", "tool_pos"),
-        orientation_landmarks=("frame_quat", "tool_quat"),
     )
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -280,16 +280,25 @@ def collect(
             with trace_path.open("w", encoding="utf-8") as trace_file:
                 for index in range(episodes):
                     episode_seed = seed + index
+                    runtime = build_runtime(
+                        profile,
+                        env.action_spec,
+                        base_seed=seed,
+                        episode_index=index,
+                    )
                     recorder = None
                     if video_dir is not None:
                         from src.labeling.playback import DEFAULT_PLAYBACK, RolloutRecorder
 
                         recorder = RolloutRecorder(env, DEFAULT_PLAYBACK)
                     outcome = _run_episode(
-                        env, episode_seed, max_attempts=max_attempts, recorder=recorder,
+                        env,
+                        episode_seed,
+                        max_attempts=max_attempts,
+                        recorder=recorder,
+                        runtime=runtime,
                     )
                     skill = outcome["skill"]
-                    result = outcome["result"]
                     success = outcome["success"]
                     summary = _episode_summary(outcome, episode_seed, knobs)
                     failure = _failure_kind(outcome)
@@ -332,13 +341,18 @@ def collect(
                             next_observation=_observation(env, next_state),
                         )
                     episode.dones[-1] = True
+                    sampled_variation = asdict(runtime.variation)
+                    sampled_variation["solver_summary"] = summary
                     item_provenance = EpisodeProvenance(
-                        task="tool_hang", tool_name=TOOL_NAME, requested_quality="clean",
-                        profile_version=TOOLHANG_PROFILE,
-                        candidate_profile_version=TOOLHANG_PROFILE, noise_scale=0.0,
-                        base_seed=seed, task_code=TOOLHANG_TASK_CODE, stream_code=1,
+                        task="tool_hang", tool_name=TOOL_NAME,
+                        requested_quality=profile.quality.value,
+                        profile_version=profile.profile_version,
+                        candidate_profile_version=profile.candidate_profile_version,
+                        noise_scale=profile.noise_scale,
+                        base_seed=seed, task_code=profile.task_code,
+                        stream_code=NOISE_STREAM_CODE,
                         episode_index=index, environment_seed=episode_seed,
-                        sampled_variation=summary,
+                        sampled_variation=sampled_variation,
                         outcome="success" if success else "failure",
                         success=success, episode_length=len(actions),
                         terminal_reason=terminal_reason,
@@ -375,6 +389,7 @@ def collect(
                         "terminal_phase": terminal_phase,
                         "failure_stage": None if success else failure,
                         "summary": summary,
+                        "sampled_variation": sampled_variation,
                     })
     return {
         "episodes": kept,
@@ -384,4 +399,6 @@ def collect(
         "trace_output": str(trace_path),
         "records": records,
         "videos": videos,
+        "quality": profile.quality.value,
+        "profile_version": profile.profile_version,
     }

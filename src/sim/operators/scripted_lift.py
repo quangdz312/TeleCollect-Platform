@@ -46,7 +46,7 @@ class LiftOperatorConfig:
 class ScriptedLiftOperator:
     """Grasp and lift the cube without consulting reward or task success."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
 
     def __init__(self, env: Any, config: LiftOperatorConfig | None = None) -> None:
         self.config = config or LiftOperatorConfig()
@@ -146,29 +146,43 @@ class ScriptedLiftOperator:
     def _wrapped_yaw_error(target: float, current: float) -> float:
         return float((target - current + np.pi) % (2 * np.pi) - np.pi)
 
+    @classmethod
+    def _cube_yaw_error(cls, target: float, current: float) -> float:
+        """Return the shortest yaw error to any equivalent face of a square cube."""
+        quarter_turn = np.pi / 2.0
+        candidates = (
+            cls._wrapped_yaw_error(target + k * quarter_turn, current)
+            for k in range(-2, 3)
+        )
+        return min(candidates, key=abs)
+
     def _grasp_yaw_error(self, observation: dict[str, Any]) -> float:
         yaw_bias = 0.0 if self._variation is None else self._variation.grasp_yaw_bias
-        if yaw_bias == 0.0:
-            return 0.0
-        if "robot0_eef_quat" not in observation:
-            raise ValueError("missing observation key: robot0_eef_quat")
+        for key in ("robot0_eef_quat", "cube_quat"):
+            if key not in observation:
+                raise ValueError(f"missing observation key: {key}")
+        current = np.asarray(observation["robot0_eef_quat"], dtype=np.float64)
+        cube = np.asarray(observation["cube_quat"], dtype=np.float64)
+        if current.shape != (4,) or cube.shape != (4,):
+            raise ValueError("invalid end-effector or cube quaternion shape")
         current = self._normalize_quaternion(
-            np.asarray(observation["robot0_eef_quat"], dtype=np.float64),
+            current,
         )
-        if current.shape != (4,):
-            raise ValueError("invalid end-effector quaternion shape")
-        if self._desired_grasp_quaternion is None:
-            yaw_delta = np.array(
-                [0.0, 0.0, np.sin(yaw_bias / 2.0), np.cos(yaw_bias / 2.0)],
-                dtype=np.float64,
-            )
-            self._desired_grasp_quaternion = self._normalize_quaternion(
-                self._quaternion_multiply(yaw_delta, current),
-            )
-        return self._wrapped_yaw_error(
-            self._yaw(self._desired_grasp_quaternion),
+        cube = self._normalize_quaternion(cube)
+        yaw_error = self._cube_yaw_error(
+            self._yaw(cube) + yaw_bias,
             self._yaw(current),
         )
+        # Preserve the current roll / pitch in diagnostics while showing the
+        # nearest equivalent cube-aligned yaw selected by the controller.
+        yaw_delta = np.array(
+            [0.0, 0.0, np.sin(yaw_error / 2.0), np.cos(yaw_error / 2.0)],
+            dtype=np.float64,
+        )
+        self._desired_grasp_quaternion = self._normalize_quaternion(
+            self._quaternion_multiply(yaw_delta, current),
+        )
+        return yaw_error
 
     def _move(
         self,

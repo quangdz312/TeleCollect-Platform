@@ -1,4 +1,29 @@
-"""Conservative automatic verdicts for scripted collection episodes."""
+"""Conservative automatic verdicts for scripted collection episodes.
+
+The three verdicts describe **how far verification got**, not how good the
+episode looked:
+
+``reject``
+    Verified broken. The simulator predicate failed, a hard check failed, or the
+    record repeats a configuration already in the corpus.
+``review``
+    Not verifiable. Evidence is missing, or two pieces of evidence disagree.
+    A human is needed because the machine has no answer, not because it has a
+    low opinion.
+``approve``
+    Verified. Every check that could run, ran and passed.
+
+Soft penalties -- jerk, path ratio, saturation, idle -- deliberately do **not**
+appear here. They measure how the scripted policy was written rather than how
+well the episode was performed, no published threshold exists for any of them,
+and the curation literature reports that action-only scores of this kind do not
+predict downstream policy performance. They stay in ``auto_flags`` for export
+filters and for refinement, where they can inform without gating.
+
+What replaces them is sampling: a fraction of every auto-pass goes to a human
+anyway, and one verified false approval disables auto-approve for that task.
+That catches mistakes nobody thought to write a threshold for.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +32,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-AUTO_GATE_VERSION = "telecollect-auto-gate-v2"
+from .duplicates import duplicate_episode_ids
+
+AUTO_GATE_VERSION = "telecollect-auto-gate-v3"
 AUDIT_SAMPLE_VERSION = "telecollect-auto-gate-v1"
-MAX_AUTO_APPROVE_PENALTY = 0.15
-IDLE_AFTER_TRIM_AUTO_APPROVE_LIMIT = 0.22
 DEFAULT_AUDIT_RATE = 0.10
 TOOLHANG_AUDIT_RATE = 0.20
 MAX_AUDIT_ERROR_RATE = 0.05
@@ -60,22 +85,6 @@ def evaluate(record: Mapping[str, Any]) -> GateVerdict:
     if str(provenance.get("failure_stage", "") or ""):
         return GateVerdict("review", "Failure-stage provenance conflicts with success")
 
-    quality = str(record.get("requested_quality", ""))
-    if quality not in {"clean", "good"}:
-        return GateVerdict("review", f"{quality or 'unknown'} quality stays in human review")
-    penalty_name = str(flags.get("worst_penalty") or "unknown")
-    penalty = float(flags.get("worst_penalty_value", 1.0) or 0.0)
-    penalty_limit = (
-        IDLE_AFTER_TRIM_AUTO_APPROVE_LIMIT
-        if penalty_name == "idle_after_trim"
-        else MAX_AUTO_APPROVE_PENALTY
-    )
-    if penalty > penalty_limit:
-        return GateVerdict(
-            "review",
-            f"{penalty_name} penalty {penalty:.3f} exceeds {penalty_limit:.2f}",
-        )
-
     task = str(record.get("task", ""))
     audit_rate = TOOLHANG_AUDIT_RATE if task == "tool_hang" else DEFAULT_AUDIT_RATE
     if task == "tool_hang":
@@ -83,6 +92,16 @@ def evaluate(record: Mapping[str, Any]) -> GateVerdict:
         stage2_ok = variation.get("stage2_tool_on_frame") is True
         if not (stage1_ok and stage2_ok and provenance.get("terminal_phase") == "done"):
             return GateVerdict("review", "ToolHang stage evidence is incomplete")
+        # Stage 1 retries by rotating the frame a quarter turn and trying again,
+        # so a late attempt reaches the same predicate by a different route than
+        # a first-attempt success. Whether that matters for training is unknown,
+        # which is the definition of a review.
+        try:
+            attempts = int(provenance.get("retry_count", 0) or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        if attempts > 0:
+            return GateVerdict("review", f"ToolHang succeeded after {attempts} retries")
     if _audit_selected(str(record.get("episode_id", "")), audit_rate):
         return GateVerdict("audit", "Auto-pass sampled for human audit", audit_rate)
     return GateVerdict("approve", "Success and all strict auto-pass checks passed", audit_rate)
@@ -93,6 +112,10 @@ def apply(space: Any) -> dict[str, Any]:
 
     labels = space.labels_by_id()
     scores = space.scores()
+    # Deterministic collection replays the same episode for the same seed, so a
+    # repeat carries no new information. This is a property of the corpus rather
+    # than of one record, which is why it is decided here and not in evaluate().
+    repeats = duplicate_episode_ids(scores)
     audit_by_task: dict[str, list[Mapping[str, Any]]] = {}
     for record in scores:
         if evaluate(record).action != "audit":
@@ -114,6 +137,7 @@ def apply(space: Any) -> dict[str, Any]:
             disabled_tasks.append(task)
     counts: dict[str, Any] = {
         "approved": 0, "rejected": 0, "audit": 0, "review": 0, "skipped": 0,
+        "duplicates": len(repeats),
         "auto_approve_enabled": not disabled_tasks,
         "disabled_tasks": disabled_tasks,
         "audit_error_rates": audit_error_rates,
@@ -123,7 +147,11 @@ def apply(space: Any) -> dict[str, Any]:
         if episode_id in labels:
             counts["skipped"] += 1
             continue
-        verdict = evaluate(record)
+        verdict = (
+            GateVerdict("reject", "Repeats a configuration already in the corpus")
+            if episode_id in repeats
+            else evaluate(record)
+        )
         if verdict.action == "approve" and str(record.get("task", "")) in disabled_tasks:
             counts["review"] = int(counts["review"] or 0) + 1
             continue

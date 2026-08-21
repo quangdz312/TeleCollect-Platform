@@ -63,14 +63,6 @@ out/
 .ai-log/archive/
 data/
 
-# Runtime artefacts — written while the app runs, not source
-MUJOCO_LOG.TXT
-frontend/.devserver*.log
-
-# Written by `next dev` itself on every run
-frontend/AGENTS.md
-frontend/CLAUDE.md
-
 # Local test and generated artifacts
 /.test-*/
 /.test-*.hdf5
@@ -105,3 +97,11 @@ wandb/
 /.codex/config.toml
 /scripts/log_hook.py
 /.ai-log/
+
+# Runtime artefacts — written while the app runs, not source
+MUJOCO_LOG.TXT
+frontend/.devserver*.log
+
+# Written by `next dev` itself on every run
+frontend/AGENTS.md
+frontend/CLAUDE.md

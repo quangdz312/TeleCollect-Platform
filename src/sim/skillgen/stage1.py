@@ -41,12 +41,19 @@ GRAVITY_FINISH_DEPTH = 0.040
 
 
 class Stage1:
-    def __init__(self, env, viewer=None, max_attempts=3, max_steps=2200, collect=False):
+    def __init__(
+        self, env, viewer=None, max_attempts=3, max_steps=2200, collect=False,
+        action_transform=None, action_reset=None,
+    ):
         self.env = env
         self.viewer = viewer
         self.max_attempts = max_attempts
         self.max_steps = max_steps
-        self.servo = Servo(env, on_step=self._on_step)
+        self.action_transform = action_transform
+        self.action_reset = action_reset
+        self.servo = Servo(
+            env, on_step=self._on_step, action_transform=self.action_transform,
+        )
         self.fgeoms = body_geom_names(env, "frame_root")
         self._fb = env.sim.model.body_name2id("frame_root")
         self.phase = "reach_grip"
@@ -115,6 +122,7 @@ class Stage1:
 
     def _set(self, phase):
         self.phase = phase
+        self.servo.phase = phase
 
     # ------------------------------------------------------------ phases
     def _grasp_frame(self, flip=False):
@@ -525,6 +533,8 @@ class Stage1:
             self.servo.aborted = False
             self._quit = False
             reset_and_settle(self.env, seed=seed)
+            if self.action_reset is not None:
+                self.action_reset()
             self.cavity = G.read_cavity(self.env)
             # Each attempt starts a fresh recording. A retry replays the episode
             # from the same reset, so keeping the failed attempt's steps would
@@ -534,7 +544,12 @@ class Stage1:
                 # captured per attempt: the placement sampler is re-rolled on
                 # every reset, so the XML that goes with these states is this one
                 self.model_xml = self.env.sim.model.get_xml()
-            self.servo = Servo(self.env, on_step=self._on_step, record=self.record)
+            self.servo = Servo(
+                self.env,
+                on_step=self._on_step,
+                record=self.record,
+                action_transform=self.action_transform,
+            )
 
             # The flipped grasp is the one that keeps joint 7 off its limit for
             # these poses, so it is not something to alternate away from; retries

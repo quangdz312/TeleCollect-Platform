@@ -12,6 +12,8 @@ export type HandControlState = {
   yawDegrees: number;
   gesture: "open" | "fist" | "like" | "neutral";
   clutched: boolean;
+  rollVelocityDeg: number;
+  rotationActive: boolean;
   input: AxisInput;
 };
 
@@ -26,6 +28,18 @@ const PIPS = [6, 10, 14, 18];
 const clamp = (value: number, low = -1, high = 1) => Math.min(high, Math.max(low, value));
 const distance = (a: NormalizedLandmark, b: NormalizedLandmark) => Math.hypot(a.x - b.x, a.y - b.y);
 const wrapAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+
+function palmHeading(landmarks?: NormalizedLandmark[]): number | null {
+  if (!landmarks || landmarks.length < 21) return null;
+  const index = landmarks[5];
+  const pinky = landmarks[17];
+  const acrossX = pinky.x - index.x;
+  const acrossZ = pinky.z - index.z;
+  if (Math.hypot(acrossX, acrossZ) < 1e-6) return null;
+  // The across-palm vector rotates in camera X/Z when the wrist turns left or
+  // right. This is more symmetric than deriving a noisy palm normal.
+  return Math.atan2(acrossZ, acrossX);
+}
 
 function deadzone(value: number, threshold: number): number {
   if (Math.abs(value) <= threshold) return 0;
@@ -76,6 +90,13 @@ export class HandCommandMapper {
   private filtered: ReturnType<typeof features> | null = null;
   private previousControl: ReturnType<typeof features> | null = null;
   private command: [number, number, number] = [0, 0, 0];
+  private previousHandAngle: number | null = null;
+  private previousRotationAt: number | null = null;
+  private rollVelocityDeg = 0;
+  private rotationCommand = 0;
+  private rotationActive = false;
+  private rotationStartFrames = 0;
+  private rotationStopFrames = 0;
   private gripperClosed = false;
   private openFrames = 0;
   private closedFrames = 0;
@@ -88,6 +109,7 @@ export class HandCommandMapper {
     this.filtered = value;
     this.previousControl = value;
     this.command = [0, 0, 0];
+    this.resetRotation();
     this.calibration = { x: value.palmX, y: value.palmY, scale: value.scale, yaw: value.yaw };
   }
 
@@ -96,6 +118,7 @@ export class HandCommandMapper {
     this.filtered = null;
     this.previousControl = null;
     this.command = [0, 0, 0];
+    this.resetRotation();
     this.openFrames = 0;
     this.closedFrames = 0;
     this.likeFrames = 0;
@@ -103,15 +126,25 @@ export class HandCommandMapper {
     this.clutched = false;
   }
 
-  update(landmarks: NormalizedLandmark[] | undefined, active: boolean): HandControlState {
+  update(
+    landmarks: NormalizedLandmark[] | undefined,
+    active: boolean,
+    frameAtMs?: number,
+    worldLandmarks?: NormalizedLandmark[],
+  ): HandControlState {
     if (!landmarks || landmarks.length < 21) {
       this.previousControl = null;
       this.command = [0, 0, 0];
+      this.resetRotation();
       return { ...this.empty(), detected: false, active: false };
     }
 
     const current = features(landmarks);
-    const alpha = 0.28;
+    const landmarkMotion = this.filtered
+      ? Math.hypot(current.palmX - this.filtered.palmX, current.palmY - this.filtered.palmY) +
+        Math.abs(Math.log(Math.max(current.scale, 1e-6) / Math.max(this.filtered.scale, 1e-6)))
+      : 0;
+    const alpha = clamp(0.24 + landmarkMotion * 8, 0.24, 0.68);
     this.filtered = this.filtered
       ? {
           palmX: alpha * current.palmX + (1 - alpha) * this.filtered.palmX,
@@ -125,11 +158,14 @@ export class HandCommandMapper {
       : current;
 
     const f = this.filtered;
+    const currentHandAngle = palmHeading(worldLandmarks);
+    const rotationAt = frameAtMs ?? performance.now();
     const justReleasedClutch = this.updateGesture(f.gesture);
     const base = this.calibration;
     if (!base || !active || this.clutched || justReleasedClutch) {
       this.previousControl = f;
       this.command = [0, 0, 0];
+      this.resetRotation(currentHandAngle, rotationAt);
       return { ...this.empty(), detected: true, calibrated: Boolean(base), active: Boolean(active && base), palmX: f.palmX, palmY: f.palmY, scaleRatio: base ? f.scale / base.scale : 1, openness: f.openness, yawDegrees: f.yaw * 180 / Math.PI, gesture: f.gesture, clutched: this.clutched, input: { ...ZERO_INPUT, gripper: this.gripperClosed ? 1 : -1 } };
     }
 
@@ -146,7 +182,8 @@ export class HandCommandMapper {
 
     // Smooth commands as well as landmarks. This suppresses single-frame
     // landmark jumps while retaining a responsive start/stop feel.
-    const commandAlpha = 0.42;
+    const commandMagnitude = Math.max(Math.abs(rawForward), Math.abs(rawRight), Math.abs(rawUp));
+    const commandAlpha = 0.48 + 0.24 * commandMagnitude;
     // Simulator camera convention (same as keyboard controls): linear[0] is
     // forward/back, linear[1] is screen left/right, linear[2] is up/down.
     // Keep this ordering explicit; swapping the first two makes a right-hand
@@ -155,6 +192,7 @@ export class HandCommandMapper {
       (value, index) => commandAlpha * value + (1 - commandAlpha) * this.command[index],
     ) as [number, number, number];
     this.command = this.command.map((value) => Math.abs(value) < 0.035 ? 0 : clamp(value)) as [number, number, number];
+    this.updateRotation(currentHandAngle, rotationAt);
 
     return {
       detected: true,
@@ -167,14 +205,85 @@ export class HandCommandMapper {
       yawDegrees: f.yaw * 180 / Math.PI,
       gesture: f.gesture,
       clutched: false,
+      rollVelocityDeg: this.rollVelocityDeg,
+      rotationActive: this.rotationActive,
       input: {
         linear: this.command,
-        // Yaw is intentionally disabled until translation is stable: apparent
-        // palm rotation changes scale and used to inject motion on two axes.
-        angular: [0, 0, 0],
+        // Direct Z-axis rotation: turning the hand clockwise/counter-clockwise
+        // in the camera plane drives drz while XYZ remains independent.
+        angular: [0, 0, this.rotationCommand],
         gripper: this.gripperClosed ? 1 : -1,
       },
     };
+  }
+
+  private updateRotation(currentAngle: number | null, at: number) {
+    if (currentAngle === null) {
+      this.resetRotation();
+      return;
+    }
+    const previousAngle = this.previousHandAngle;
+    const previousAt = this.previousRotationAt;
+    this.previousHandAngle = currentAngle;
+    this.previousRotationAt = at;
+    if (previousAngle === null || previousAt === null) {
+      this.rollVelocityDeg = 0;
+      this.rotationCommand = 0;
+      return;
+    }
+    const dt = (at - previousAt) / 1000;
+    if (dt <= 0 || dt > 0.15) {
+      this.rollVelocityDeg = 0;
+      this.rotationCommand = 0;
+      return;
+    }
+
+    const delta = wrapAngle(currentAngle - previousAngle);
+    const velocity = delta / dt;
+    this.rollVelocityDeg = velocity * 180 / Math.PI;
+
+    const speed = Math.abs(velocity);
+    const startThreshold = 3 * Math.PI / 180;
+    const stopThreshold = 2 * Math.PI / 180;
+    if (!this.rotationActive) {
+      this.rotationStartFrames = speed >= startThreshold ? this.rotationStartFrames + 1 : 0;
+      if (this.rotationStartFrames >= 2) {
+        this.rotationActive = true;
+        this.rotationStopFrames = 0;
+      }
+    } else {
+      this.rotationStopFrames = speed < stopThreshold ? this.rotationStopFrames + 1 : 0;
+      if (this.rotationStopFrames >= 2) {
+        this.rotationActive = false;
+        this.rotationStartFrames = 0;
+        this.rotationCommand = 0;
+      }
+    }
+
+    if (!this.rotationActive) {
+      this.rotationCommand = 0;
+      return;
+    }
+    const robotVelocity = -velocity;
+    const fullSpeed = 25 * Math.PI / 180;
+    const target = clamp(robotVelocity / fullSpeed) * 0.3;
+    if (this.rotationCommand !== 0 && Math.sign(target) !== Math.sign(this.rotationCommand)) {
+      // Reversing direction is a recovery action: discard the old filtered
+      // command immediately instead of making the user fight its momentum.
+      this.rotationCommand = 0;
+    }
+    this.rotationCommand = 0.8 * target + 0.2 * this.rotationCommand;
+    if (Math.abs(this.rotationCommand) < 0.005) this.rotationCommand = 0;
+  }
+
+  private resetRotation(currentAngle: number | null = null, at: number | null = null) {
+    this.previousHandAngle = currentAngle;
+    this.previousRotationAt = at;
+    this.rollVelocityDeg = 0;
+    this.rotationCommand = 0;
+    this.rotationActive = false;
+    this.rotationStartFrames = 0;
+    this.rotationStopFrames = 0;
   }
 
   private updateGesture(gesture: HandControlState["gesture"]): boolean {
@@ -202,6 +311,6 @@ export class HandCommandMapper {
   }
 
   private empty(): HandControlState {
-    return { detected: false, calibrated: Boolean(this.calibration), active: false, palmX: 0.5, palmY: 0.5, scaleRatio: 1, openness: 0, yawDegrees: 0, gesture: "neutral", clutched: this.clutched, input: { ...ZERO_INPUT, gripper: this.gripperClosed ? 1 : -1 } };
+    return { detected: false, calibrated: Boolean(this.calibration), active: false, palmX: 0.5, palmY: 0.5, scaleRatio: 1, openness: 0, yawDegrees: 0, gesture: "neutral", clutched: this.clutched, rollVelocityDeg: this.rollVelocityDeg, rotationActive: this.rotationActive, input: { ...ZERO_INPUT, gripper: this.gripperClosed ? 1 : -1 } };
   }
 }

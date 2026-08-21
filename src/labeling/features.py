@@ -25,6 +25,22 @@ OBJECT_LAYOUT: Mapping[str, Mapping[str, tuple[int, int]]] = {
     "tool_hang": {"position": (0, 3), "orientation": (3, 7)},
 }
 
+# RoboSuite 1.5 ToolHang concatenates its enabled object observables in this
+# order: base-to-eef, base pose, frame-to-eef, frame pose, tool-to-eef, tool
+# pose, and two success predicates. Consequently the frame pose in the native
+# 44-D object-state starts at column 21. Keep the legacy 14-D layout above so
+# already collected recordings remain reviewable.
+TOOLHANG_ROBOSUITE_LAYOUT: Mapping[str, tuple[int, int]] = {
+    "position": (21, 24),
+    "orientation": (24, 28),
+}
+
+
+def _object_layout(task: str, width: int) -> Mapping[str, tuple[int, int]] | None:
+    if task == "tool_hang" and width == 44:
+        return TOOLHANG_ROBOSUITE_LAYOUT
+    return OBJECT_LAYOUT.get(task)
+
 DEFAULT_CONTROL_HZ = 20.0
 
 
@@ -194,13 +210,13 @@ def load_episodes(
         for name in names:
             demo = data[name]
             resolved_task = _task_of(data, demo, task)
-            layout = OBJECT_LAYOUT.get(resolved_task)
-            if layout is None:
-                raise EpisodeLoadError(f"{source}::{name}: unsupported task {resolved_task!r}")
             observations = demo["obs"]
             next_observations = demo["next_obs"]
             object_state = np.asarray(observations["object"], dtype=np.float64)
             next_object_state = np.asarray(next_observations["object"], dtype=np.float64)
+            layout = _object_layout(resolved_task, object_state.shape[1])
+            if layout is None:
+                raise EpisodeLoadError(f"{source}::{name}: unsupported task {resolved_task!r}")
             position_slice = layout["position"]
             orientation_slice = layout["orientation"]
             if object_state.shape[1] < orientation_slice[1]:
