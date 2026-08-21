@@ -353,6 +353,11 @@ class DatasetCreateRequest(BaseModel):
         default="raw", pattern="^(raw|robomimic)$",
         description="raw: core ZIP cũ; robomimic: HDF5 từ scripted review workspace",
     )
+    collection_batch_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$",
+        description="Chỉ export scripted episodes thuộc đúng collection batch này",
+    )
 
 
 class DatasetResponse(BaseModel):
@@ -390,6 +395,9 @@ class ScriptedRunRequest(BaseModel):
     seed: int | None = Field(default=None, ge=0)
     horizon: int | None = Field(default=None, ge=1)
     overwrite: bool = False
+    collection_batch_id: str = Field(
+        default="legacy", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$",
+    )
 
 
 class ScriptedLabelRequest(BaseModel):

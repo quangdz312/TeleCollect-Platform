@@ -139,7 +139,9 @@ class Workspace:
     def datasets(self) -> list[Path]:
         return sorted(self.datasets_dir.glob("*.hdf5"))
 
-    def dataset_path(self, task: str, quality: str, seed: int) -> Path:
+    def dataset_path(
+        self, task: str, quality: str, seed: int, collection_batch_id: str = '',
+    ) -> Path:
         """One file per (task, quality, seed).
 
         The name is derived from the inputs rather than a timestamp so that
@@ -148,14 +150,18 @@ class Workspace:
         twice.
         """
 
-        name = f"{task}_{quality}_seed{seed}.hdf5"
+        batch_suffix = f"_{collection_batch_id}" if collection_batch_id else ""
+        name = f"{task}_{quality}_seed{seed}{batch_suffix}.hdf5"
         if not _SAFE.match(name):
             raise ValueError(f"unsafe dataset name: {name!r}")
         return self.datasets_dir / name
 
-    def next_free_seed(self, task: str, quality: str, *, start: int = 0) -> int:
+    def next_free_seed(
+        self, task: str, quality: str, *, start: int = 0,
+        collection_batch_id: str = '',
+    ) -> int:
         seed = start
-        while self.dataset_path(task, quality, seed).exists():
+        while self.dataset_path(task, quality, seed, collection_batch_id).exists():
             seed += 1
         return seed
 
@@ -304,10 +310,34 @@ class Workspace:
 
     # --- overview -----------------------------------------------------------
 
-    def summary(self) -> dict[str, Any]:
-        scores = self.scores()
+    @staticmethod
+    def _collection_batch(record: Mapping[str, Any]) -> str:
+        value = record.get("provenance", {}).get("collection_batch_id")
+        return str(value) if value else "legacy"
+
+    def collection_batches(self) -> list[str]:
+        """Return stable batch IDs found in the corpus, including legacy data."""
+
+        return sorted({self._collection_batch(record) for record in self.scores()})
+
+    def summary(
+        self,
+        *,
+        collection_batch_id: str | None = None,
+        task: str | None = None,
+    ) -> dict[str, Any]:
+        all_scores = self.scores()
+        scores = [
+            record for record in all_scores
+            if (collection_batch_id is None or self._collection_batch(record) == collection_batch_id)
+            and (task is None or str(record.get("task")) == task)
+        ]
         scores_by_id = {str(item["episode_id"]): item for item in scores}
-        labels = self.labels_by_id()
+        all_labels = self.labels_by_id()
+        labels = {
+            episode_id: label for episode_id, label in all_labels.items()
+            if episode_id in scores_by_id
+        }
         approved = sum(1 for item in labels.values() if item["human_decision"] == "approved")
         approved_successes = sum(
             1
@@ -342,6 +372,7 @@ class Workspace:
             and label.get("human_decision") == "rejected"
         )
         per_task: dict[str, dict[str, int]] = {}
+        per_quality: dict[str, dict[str, int]] = {}
         for record in scores:
             bucket = per_task.setdefault(
                 str(record["task"]), {
@@ -363,6 +394,29 @@ class Workspace:
             bucket[decision] += 1
             if decision == "approved" and record.get("recorded_success") is True:
                 bucket["approved_successes"] += 1
+        for record in scores:
+            quality_bucket = per_quality.setdefault(
+                str(record.get("requested_quality") or "unknown"), {
+                    "total": 0, "reviewed": 0, "pending": 0,
+                    "approved": 0, "approved_successes": 0, "rejected": 0,
+                    "recovery": 0,
+                },
+            )
+            quality_bucket["total"] += 1
+            label = labels.get(str(record["episode_id"]))
+            if label is None:
+                quality_bucket["pending"] += 1
+                continue
+            quality_bucket["reviewed"] += 1
+            decision = str(label["human_decision"])
+            quality_bucket[decision] += 1
+            if decision == "approved" and record.get("recorded_success") is True:
+                quality_bucket["approved_successes"] += 1
+                provenance = record.get("provenance", {})
+                if bool(provenance.get("recovery_demonstration")) or int(
+                    provenance.get("pregrasp_realign_count", 0) or 0
+                ) > 0 or int(provenance.get("retry_count", 0) or 0) > 0:
+                    quality_bucket["recovery"] += 1
         return {
             "root": str(self.root),
             "datasets": len(self.datasets()),
@@ -382,5 +436,9 @@ class Workspace:
                 round(audit_failed / audit_reviewed, 4) if audit_reviewed else None
             ),
             "per_task": per_task,
+            "per_quality": per_quality,
+            "collection_batch_id": collection_batch_id,
+            "task_filter": task,
+            "available_batches": sorted({self._collection_batch(record) for record in all_scores}),
             "scorer_version": scores[0]["scorer_version"] if scores else None,
         }

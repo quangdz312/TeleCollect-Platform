@@ -11,12 +11,16 @@ export function ScriptedReviewRows({
   task,
   status,
   label,
+  quality,
+  collectionBatchId,
   returnTo,
   onCount,
 }: {
   task?: string;
   status?: DemoStatus;
   label?: LabelValue;
+  quality?: string;
+  collectionBatchId?: string;
   returnTo: string;
   onCount?: (count: number) => void;
 }) {
@@ -32,6 +36,8 @@ export function ScriptedReviewRows({
           : "all";
       const result = await labeling.episodes({
         task,
+        quality,
+        collectionBatchId,
         status: scriptedStatus,
         includeScore: Boolean(label),
       });
@@ -47,7 +53,7 @@ export function ScriptedReviewRows({
     } finally {
       setLoading(false);
     }
-  }, [label, onCount, status, task]);
+  }, [collectionBatchId, label, onCount, quality, status, task]);
   useEffect(() => { void load(); }, [load]);
 
   return <>

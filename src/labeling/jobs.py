@@ -171,6 +171,7 @@ def submit_collection(
     seed: int,
     horizon: int | None = None,
     overwrite: bool = False,
+    collection_batch_id: str = '',
 ) -> Job:
     """Collect one batch, then rescore the whole corpus.
 
@@ -182,7 +183,7 @@ def submit_collection(
     from src.sim.scripted_generation import run_collection
 
     workspace.ensure()
-    output = workspace.dataset_path(task, quality, seed)
+    output = workspace.dataset_path(task, quality, seed, collection_batch_id)
     if output.exists() and not overwrite:
         raise FileExistsError(
             f"{output.name} already exists; pick another seed or ask to overwrite",
@@ -204,6 +205,7 @@ def submit_collection(
             # API before the HDF5 writer closed. Finish the trajectory first;
             # its videos are queued on the single render worker below.
             video_dir=capture_video_dir,
+            collection_batch_id=collection_batch_id,
         )
         scores = workspace.rescore()
         from .auto_gate import apply as apply_auto_gate
@@ -235,6 +237,7 @@ def submit_collection(
             "episodes": len(result.episodes),
             "successes": result.success_count,
             "profile_version": result.provenance.profile_version,
+            "collection_batch_id": collection_batch_id,
             "corpus_episodes": len(scores),
             "videos": rendered,
             "videos_queued": videos_queued,
@@ -250,6 +253,7 @@ def submit_collection(
             "seed": seed,
             "horizon": horizon,
             "output": output.name,
+            "collection_batch_id": collection_batch_id,
         },
         work,
         total=episodes,

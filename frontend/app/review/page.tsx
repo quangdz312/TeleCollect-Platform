@@ -47,6 +47,8 @@ function ReviewQueueContent() {
   const [loading, setLoading] = useState(true);
   const [scriptedTotal, setScriptedTotal] = useState(0);
   const [scriptedSummary, setScriptedSummary] = useState<WorkspaceSummary | null>(null);
+  const [batchFilter, setBatchFilter] = useState(() => searchParams.get("batch") ?? "");
+  const [qualityFilter, setQualityFilter] = useState(() => searchParams.get("quality") ?? "");
   const [scriptedTasks, setScriptedTasks] = useState<Array<{ id: string; title: string }>>([]);
   const [applyingGate, setApplyingGate] = useState(false);
   const [gateMessage, setGateMessage] = useState("");
@@ -88,26 +90,42 @@ function ReviewQueueContent() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!user || (user.role !== "reviewer" && user.role !== "admin")) return;
+    void labeling.overview({
+      collectionBatchId: batchFilter || undefined,
+      task: taskFilter || undefined,
+    }).then(setScriptedSummary);
+  }, [batchFilter, taskFilter, user]);
+
   if (!user) return null;
   const canReviewScripted = user.role === "reviewer" || user.role === "admin";
   const setQueueFilters = (next: {
     status?: DemoStatus | "";
     task?: string;
     label?: LabelValue | "";
+    batch?: string;
+    quality?: string;
   }) => {
     const status = next.status ?? statusFilter;
     const task = next.task ?? taskFilter;
     const label = next.label ?? labelFilter;
+    const batch = next.batch ?? batchFilter;
+    const quality = next.quality ?? qualityFilter;
     const query = new URLSearchParams();
     query.set("status", status || "all");
     if (task) query.set("task", task);
     if (label) query.set("label", label);
+    if (batch) query.set("batch", batch);
+    if (quality) query.set("quality", quality);
     router.replace(`/review?${query.toString()}`, { scroll: false });
   };
   const returnToParams = new URLSearchParams();
   returnToParams.set("status", statusFilter || "all");
   if (taskFilter) returnToParams.set("task", taskFilter);
   if (labelFilter) returnToParams.set("label", labelFilter);
+  if (batchFilter) returnToParams.set("batch", batchFilter);
+  if (qualityFilter) returnToParams.set("quality", qualityFilter);
   const returnTo = `/review?${returnToParams.toString()}`;
   const taskOptions = [
     ...tasks.map((task) => ({ id: task.id, title: task.title })),
@@ -151,8 +169,11 @@ function ReviewQueueContent() {
               onClick={() => {
                 setApplyingGate(true);
                 setGateMessage("");
-                void labeling.applyAutoGate().then(({ result, workspace }) => {
-                  setScriptedSummary(workspace);
+                void labeling.applyAutoGate().then(async ({ result }) => {
+                  setScriptedSummary(await labeling.overview({
+                    collectionBatchId: batchFilter || undefined,
+                    task: taskFilter || undefined,
+                  }));
                   const disabled = result.disabled_tasks.length ? ` Auto-approve disabled for: ${result.disabled_tasks.join(", ")}.` : "";
                   setGateMessage(`Auto-approved ${result.approved}, auto-rejected ${result.rejected}, audit ${result.audit}, still needs review ${result.review}.${disabled}`);
                 }).catch((problem) => {
@@ -178,36 +199,44 @@ function ReviewQueueContent() {
 
       {canReviewScripted && scriptedSummary && (
         <Card
-          title="Scripted review progress by task"
-          subtitle={`Approved successes are eligible for BC export · smoke target ${SMOKE_TRAIN_TARGET} per task`}
+          title={batchFilter ? `Batch progress · ${batchFilter}` : "Scripted review progress by task"}
+          subtitle={batchFilter
+            ? "Approved successes by quality; these are the episodes eligible for the selected batch export."
+            : `Approved successes are eligible for BC export · smoke target ${SMOKE_TRAIN_TARGET} per task`}
         >
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
                 <tr>
-                  <th className="pb-2">Task</th>
+                  <th className="pb-2">{batchFilter ? "Quality" : "Task"}</th>
                   <th className="pb-2 text-right">Total</th>
                   <th className="pb-2 text-right">Pending</th>
                   <th className="pb-2 text-right">Approved</th>
                   <th className="pb-2 text-right">Rejected</th>
                   <th className="pb-2 text-right">Train eligible</th>
-                  <th className="pb-2 pl-5">Smoke target</th>
+                  <th className="pb-2 text-right">{batchFilter ? "Eligible recovery" : "Smoke target"}</th>
                 </tr>
               </thead>
               <tbody className="tabular">
-                {scriptedTasks.map((task) => {
-                  const stats = scriptedSummary.per_task[task.id] ?? {
+                {(batchFilter
+                  ? ["clean", "good", "medium", "poor"].map((quality) => ({ id: quality, title: quality }))
+                  : scriptedTasks
+                ).map((row) => {
+                  const stats = (batchFilter
+                    ? scriptedSummary.per_quality[row.id]
+                    : scriptedSummary.per_task[row.id]) ?? {
                     total: 0,
                     reviewed: 0,
                     pending: 0,
                     approved: 0,
                     approved_successes: 0,
                     rejected: 0,
+                    recovery: 0,
                   };
                   const ready = stats.approved_successes >= SMOKE_TRAIN_TARGET;
                   return (
-                    <tr key={task.id} className="border-t border-ink-700/50">
-                      <td className="py-2 font-medium">{task.title}</td>
+                    <tr key={row.id} className="border-t border-ink-700/50">
+                      <td className="py-2 font-medium">{row.title}</td>
                       <td className="py-2 text-right">{stats.total}</td>
                       <td className="py-2 text-right text-warn-400">{stats.pending}</td>
                       <td className="py-2 text-right text-ok-400">{stats.approved}</td>
@@ -215,12 +244,12 @@ function ReviewQueueContent() {
                       <td className="py-2 text-right font-semibold text-ok-400">
                         {stats.approved_successes}
                       </td>
-                      <td className="py-2 pl-5">
-                        <Badge tone={ready ? "ok" : "warn"}>
-                          {ready
-                            ? "ready"
-                            : `${SMOKE_TRAIN_TARGET - stats.approved_successes} needed`}
-                        </Badge>
+                      <td className="py-2 text-right">
+                        {batchFilter ? Number("recovery" in stats ? stats.recovery : 0) : (
+                          <Badge tone={ready ? "ok" : "warn"}>
+                            {ready ? "ready" : `${SMOKE_TRAIN_TARGET - stats.approved_successes} needed`}
+                          </Badge>
+                        )}
                       </td>
                     </tr>
                   );
@@ -233,6 +262,39 @@ function ReviewQueueContent() {
 
       <Card>
         <div className="flex flex-wrap gap-3">
+          {canReviewScripted && (
+            <Select
+              className="w-64"
+              value={batchFilter}
+              onChange={(e) => {
+                setOffset(0);
+                setBatchFilter(e.target.value);
+                setQueueFilters({ batch: e.target.value });
+              }}
+            >
+              <option value="">All collection batches</option>
+              {scriptedSummary?.available_batches.map((batch) => (
+                <option key={batch} value={batch}>{batch}</option>
+              ))}
+            </Select>
+          )}
+          {canReviewScripted && (
+            <Select
+              className="w-40"
+              value={qualityFilter}
+              onChange={(e) => {
+                setOffset(0);
+                setQualityFilter(e.target.value);
+                setQueueFilters({ quality: e.target.value });
+              }}
+            >
+              <option value="">All qualities</option>
+              <option value="clean">clean</option>
+              <option value="good">good</option>
+              <option value="medium">medium</option>
+              <option value="poor">poor</option>
+            </Select>
+          )}
           <Select
             className="w-48"
             value={statusFilter}
@@ -359,6 +421,8 @@ function ReviewQueueContent() {
                     task={taskFilter || undefined}
                     status={statusFilter || undefined}
                     label={labelFilter || undefined}
+                    quality={qualityFilter || undefined}
+                    collectionBatchId={batchFilter || undefined}
                     returnTo={returnTo}
                     onCount={setScriptedTotal}
                   />

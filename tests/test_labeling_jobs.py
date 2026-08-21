@@ -25,8 +25,11 @@ class _Workspace:
         self.root.mkdir(parents=True, exist_ok=True)
         return self
 
-    def dataset_path(self, task: str, quality: str, seed: int) -> Path:
-        return self.root / f"{task}_{quality}_seed{seed}.hdf5"
+    def dataset_path(
+        self, task: str, quality: str, seed: int, collection_batch_id: str = "",
+    ) -> Path:
+        suffix = f"_{collection_batch_id}" if collection_batch_id else ""
+        return self.root / f"{task}_{quality}_seed{seed}{suffix}.hdf5"
 
     def rescore(self):
         return [

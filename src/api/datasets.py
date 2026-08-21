@@ -51,6 +51,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
+def _matches_scripted_export(score: dict, body: DatasetCreateRequest) -> bool:
+    if score.get("task") != body.task_names[0]:
+        return False
+    if body.collection_batch_id:
+        recorded_batch = score.get("provenance", {}).get("collection_batch_id")
+        if body.collection_batch_id == "legacy":
+            if recorded_batch not in (None, "", "legacy"):
+                return False
+        elif recorded_batch != body.collection_batch_id:
+            return False
+    if not body.include_failures and score.get("recorded_success") is not True:
+        return False
+    return True
+
+
 async def _get_dataset_or_404(dataset_id: str, session: AsyncSession) -> Dataset:
     dataset = await session.get(Dataset, dataset_id)
     if dataset is None:
@@ -83,9 +98,7 @@ async def create_dataset(
             label = labels.get(str(score["episode_id"]))
             if not label or label["human_decision"] != "approved":
                 continue
-            if score.get("task") != body.task_names[0]:
-                continue
-            if not body.include_failures and score.get("recorded_success") is not True:
+            if not _matches_scripted_export(score, body):
                 continue
             scripted.append({
                 **label,
@@ -96,7 +109,9 @@ async def create_dataset(
         if not scripted:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Không có scripted episode approved cho task đã chọn",
+                detail=(
+                    "Không có scripted episode approved khớp task và collection batch đã chọn"
+                ),
             )
     else:
         scripted = []

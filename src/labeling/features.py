@@ -151,18 +151,19 @@ def _control_hz(data: Any) -> float:
         return DEFAULT_CONTROL_HZ
 
 
-def _provenance(demo: Any) -> dict[str, Any]:
+def _provenance(data: Any, demo: Any) -> dict[str, Any]:
     record: dict[str, Any] = {}
-    for key in demo.attrs:
-        if not key.startswith("telecollect_"):
-            continue
-        value = _attr(demo, key)
-        if key == "telecollect_sampled_variation" and isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError:
-                pass
-        record[key[len("telecollect_") :]] = value
+    for container in (data, demo):
+        for key in container.attrs:
+            if not key.startswith("telecollect_"):
+                continue
+            value = _attr(container, key)
+            if key == "telecollect_sampled_variation" and isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            record[key[len("telecollect_") :]] = value
     return record
 
 
@@ -255,7 +256,7 @@ def load_episodes(
                     termination_reason=str(_attr(demo, "termination_reason", "unknown")),
                     control_hz=control_hz,
                     num_samples_attr=int(_attr(demo, "num_samples", -1)),
-                    provenance=_provenance(demo),
+                    provenance=_provenance(data, demo),
                 ),
             )
     return episodes

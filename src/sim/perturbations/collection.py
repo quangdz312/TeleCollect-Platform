@@ -112,6 +112,7 @@ class DatasetProvenance:
     task_code: int
     stream_code: int
     coverage: str = 'standard'
+    collection_batch_id: str = ''
     position_landmarks: tuple[str, ...] = ()
     orientation_landmarks: tuple[str, ...] = ()
     schema_version: int = PROVENANCE_SCHEMA_VERSION
@@ -130,6 +131,7 @@ class DatasetProvenance:
             'telecollect_task_code': int(self.task_code),
             'telecollect_stream_code': int(self.stream_code),
             'telecollect_coverage': self.coverage,
+            'telecollect_collection_batch_id': self.collection_batch_id,
             'telecollect_position_landmarks': json.dumps(list(self.position_landmarks)),
             'telecollect_orientation_landmarks': json.dumps(list(self.orientation_landmarks)),
         }
@@ -152,6 +154,8 @@ class EpisodeProvenance:
     environment_seed: int
     sampled_variation: dict[str, Any] = field(default_factory=dict)
     retry_count: int = 0
+    pregrasp_realign_count: int = 0
+    recovery_demonstration: bool = False
     outcome: str = 'unknown'
     success: bool = False
     episode_length: int = 0
@@ -180,6 +184,8 @@ class EpisodeProvenance:
                 _json_ready(self.sampled_variation), sort_keys=True,
             ),
             'telecollect_retry_count': int(self.retry_count),
+            'telecollect_pregrasp_realign_count': int(self.pregrasp_realign_count),
+            'telecollect_recovery_demonstration': bool(self.recovery_demonstration),
             'telecollect_outcome': self.outcome,
             'telecollect_success': bool(self.success),
             'telecollect_episode_length': int(self.episode_length),
@@ -203,6 +209,7 @@ def dataset_provenance(
     base_seed: int,
     stream_code: int,
     coverage: str = 'standard',
+    collection_batch_id: str = '',
 ) -> DatasetProvenance:
     landmarks = TASK_LANDMARKS[profile.task]
     return DatasetProvenance(
@@ -217,6 +224,7 @@ def dataset_provenance(
         task_code=profile.task_code,
         stream_code=stream_code,
         coverage=coverage,
+        collection_batch_id=collection_batch_id,
         position_landmarks=landmarks.position,
         orientation_landmarks=landmarks.orientation,
     )
@@ -256,6 +264,8 @@ def episode_provenance(
         environment_seed=environment_seed(provenance.base_seed, episode_index),
         sampled_variation=variation,
         retry_count=retry_count(profile.task, debug),
+        pregrasp_realign_count=int(debug.get('pregrasp_realigns', 0)),
+        recovery_demonstration=bool(debug.get('recovery_demonstration', False)),
         outcome=outcome,
         success=success,
         episode_length=episode_length,

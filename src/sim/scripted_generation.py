@@ -265,6 +265,7 @@ def run_collection(
     logger: Callable[[str], None] = print,
     reference_path: str | Path | None = None,
     video_dir: str | Path | None = None,
+    collection_batch_id: str = '',
 ) -> CollectionResult:
     """Collect one task/quality batch into a raw Robomimic-compatible HDF5.
 
@@ -284,6 +285,7 @@ def run_collection(
             base_seed=seed,
             stream_code=NOISE_STREAM_CODE,
             coverage='stage1+stage2',
+            collection_batch_id=collection_batch_id,
         )
         if not dry_run and output is None:
             raise ValueError('output is required unless dry_run is used')
@@ -299,6 +301,7 @@ def run_collection(
         result = collect(
             output, episodes=episodes, seed=seed, overwrite=overwrite, logger=logger,
             video_dir=video_dir, quality=profile.quality.value,
+            collection_batch_id=collection_batch_id,
         )
         records = tuple(
             EpisodeRecord(
@@ -344,6 +347,7 @@ def run_collection(
         profile,
         base_seed=seed,
         stream_code=NOISE_STREAM_CODE,
+        collection_batch_id=collection_batch_id,
     )
 
     writer = None
