@@ -147,4 +147,8 @@ def test_review_api_auto_label_matches_auto_gate_verdict():
     expected = "accept" if evaluate(_record()).action == "approve" else "review"
     assert approved["auto_label"] == expected
     assert rejected["auto_label"] == "reject"
-    assert medium["auto_label"] == "review"
+    # `requested_quality` is the perturbation level asked for at collection
+    # time, not a judgement on what came back. An episode that succeeded and
+    # passed every check is verified whatever noise it was collected under, so
+    # the gate reads the evidence and ignores the request.
+    assert medium["auto_label"] == expected
