@@ -157,3 +157,67 @@ def test_normalized_minimal_plan_uses_rollout_instead_of_validation(tmp_path: Pa
     assert plan.normalize_observations is True
     assert plan.validation_enabled is False
     assert plan.rollout_enabled is True
+
+
+def _flagged(source: Path) -> list[dict[str, object]]:
+    """Four episodes spanning what the quality masks are meant to separate."""
+    clean, rough, failed, unavailable = (
+        {"failed_checks": [], "unavailable_checks": [], "worst_penalty_value": 0.02},
+        {"failed_checks": [], "unavailable_checks": [], "worst_penalty_value": 0.80},
+        {"failed_checks": ["E_skill"], "unavailable_checks": []},
+        {"failed_checks": [], "unavailable_checks": ["E_released"]},
+    )
+    episodes = _episodes(source)
+    for item, flags in zip(episodes, (clean, rough, failed, unavailable), strict=True):
+        item["auto_flags"] = flags
+    return episodes
+
+
+def test_quality_masks_are_overlapping_views_not_a_pruned_corpus(tmp_path: Path) -> None:
+    source = tmp_path / "raw.hdf5"
+    output = tmp_path / "out.hdf5"
+    _source(source)
+    build_robomimic_hdf5(output, _flagged(source))
+
+    with h5py.File(output, "r") as handle:
+        masks = {
+            name: {value.decode() for value in handle["mask"][name][:]}
+            for name in ("all", "verified", "clean")
+        }
+        # Every episode is still in the file; nothing was pruned at export.
+        assert len(handle["data"]) == 4
+
+    assert masks["all"] == {"demo_0", "demo_1", "demo_2", "demo_3"}
+    # A failed check and an unevaluable one both keep an episode out of verified.
+    assert masks["verified"] == {"demo_0", "demo_1"}
+    # The rough episode is verified but sits above the clean slice's ceiling.
+    assert masks["clean"] == {"demo_0"}
+    assert masks["clean"] < masks["verified"] < masks["all"]
+
+
+def test_masks_survive_episodes_that_carry_no_flags(tmp_path: Path) -> None:
+    # Callers that do not attach auto_flags must not crash the export; they
+    # simply cannot claim an episode is verified.
+    source = tmp_path / "raw.hdf5"
+    output = tmp_path / "out.hdf5"
+    _source(source)
+    build_robomimic_hdf5(output, _episodes(source))
+
+    with h5py.File(output, "r") as handle:
+        assert len(handle["mask"]["all"]) == 4
+        assert len(handle["mask"]["verified"]) == 0
+        assert len(handle["mask"]["clean"]) == 0
+
+
+def test_quality_masks_do_not_disturb_the_train_valid_split(tmp_path: Path) -> None:
+    source = tmp_path / "raw.hdf5"
+    output = tmp_path / "out.hdf5"
+    _source(source)
+    build_robomimic_hdf5(output, _flagged(source))
+
+    with h5py.File(output, "r") as handle:
+        train = {value.decode() for value in handle["mask"]["train"][:]}
+        valid = {value.decode() for value in handle["mask"]["valid"][:]}
+
+    assert train & valid == set()
+    assert train | valid == {"demo_0", "demo_1", "demo_2", "demo_3"}
