@@ -115,6 +115,7 @@ def _public(record: dict[str, Any], *, include_score: bool) -> dict[str, Any]:
         record.get("recorded_success"),
         record.get("auto_flags"),
         record.get("task"),
+        record.get("provenance"),
     )
     public["auto_label"] = recommendation.label
     public["auto_label_reason"] = recommendation.reason

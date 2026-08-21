@@ -35,14 +35,19 @@ def test_scripted_warning_or_unavailable_check_stays_review():
     assert result.label == "review"
 
 
-def test_grasp_task_without_grasp_quality_stays_review():
+def test_lift_is_not_held_back_by_a_flag_nothing_writes():
+    # The old rule sent every successful Lift episode to review unless
+    # auto_flags carried "grasp_quality". Nothing ever wrote that key -- it
+    # exists only inside the ToolHang skill planner -- so the rule held back the
+    # whole task on evidence that could not arrive. Lift is now decided by the
+    # same checks as every other task.
     result = classify_scripted(
         "needs_review",
         True,
         {"failed_checks": [], "unavailable_checks": []},
         "lift",
     )
-    assert result.label == "review"
+    assert result.label == "accept"
 
 
 def test_non_lift_scripted_task_can_accept_without_lift_grasp_gate():
