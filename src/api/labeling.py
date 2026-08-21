@@ -21,7 +21,7 @@ bằng `require_role(UserRole.REVIEWER)`.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -29,8 +29,11 @@ from fastapi.responses import FileResponse
 from src.models.db import User
 from src.models.enums import UserRole
 from src.models.schemas import ScriptedLabelRequest, ScriptedRunRequest
-from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
 from src.services.auto_label import classify_scripted
+from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
+
+if TYPE_CHECKING:
+    from src.labeling.workspace import Workspace
 
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 reviewer_required = require_min_role(UserRole.REVIEWER)
@@ -115,6 +118,13 @@ def _public(record: dict[str, Any], *, include_score: bool) -> dict[str, Any]:
     )
     public["auto_label"] = recommendation.label
     public["auto_label_reason"] = recommendation.reason
+    from src.labeling.auto_gate import AUTO_GATE_VERSION, evaluate
+
+    gate = evaluate(record)
+    public["gate_action"] = gate.action
+    public["audit_required"] = gate.action == "audit"
+    public["auto_gate_version"] = AUTO_GATE_VERSION
+    public["auto_gate_reason"] = gate.reason
     return public
 
 
@@ -144,6 +154,29 @@ async def overview(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
     return workspace().summary()
 
 
+@router.post("/auto-gate/apply")
+async def apply_auto_gate(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
+    """Apply the conservative gate to unlabeled episodes; human labels are immutable."""
+
+    from src.labeling.auto_gate import apply
+
+    space = workspace()
+    return {"result": apply(space), "workspace": space.summary()}
+
+
+@router.get("/diversity")
+async def diversity(
+    task: str = Query(...),
+    scope: str = Query("approved", pattern="^(approved|reviewed|all)$"),
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    if task not in supported_tasks():
+        raise HTTPException(400, f"task không hợp lệ: {task}")
+    from src.labeling.diversity import diversity_report
+
+    return diversity_report(workspace(), task=task, scope=scope)
+
+
 # --- thu dữ liệu ------------------------------------------------------------
 
 
@@ -156,12 +189,6 @@ async def start_run(
         raise HTTPException(400, f"task không hợp lệ: {request.task}")
     if request.quality not in supported_qualities():
         raise HTTPException(400, f"quality không hợp lệ: {request.quality}")
-    # Nested under the check above this only fired for qualities that were
-    # already rejected, so every valid-but-unsupported quality reached the
-    # collector and failed there instead.
-    if request.task == "tool_hang" and request.quality != "clean":
-        raise HTTPException(400, "ToolHang hiện chỉ hỗ trợ quality clean")
-
     space = workspace()
     from src.labeling.jobs import submit_collection
 
@@ -339,7 +366,12 @@ async def report(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
 
     space = workspace()
     scores = space.scores()
-    labels = space.labels()
+    # Automatic verdicts must never be used to calibrate the same gate that
+    # produced them. Only independent human decisions are valid shadow truth.
+    labels = [
+        label for label in space.labels()
+        if label.get("decision_source", "human") != "auto_gate"
+    ]
     if not scores:
         raise HTTPException(409, "workspace chưa có episode nào")
 
@@ -371,33 +403,3 @@ async def report(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
             "min_reviews_for_yield": DEFAULT_SHADOW.min_reviews_for_yield,
         },
     }
-
-
-@router.post("/auto-gate/apply")
-async def apply_auto_gate(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
-    """Apply the conservative gate to unlabelled episodes.
-
-    Labels a human already made are never touched: the gate fills in what
-    nobody has judged yet, it does not revisit judgements.
-    """
-
-    from src.labeling.auto_gate import apply
-
-    space = workspace()
-    return {"result": apply(space), "workspace": space.summary()}
-
-
-@router.get("/diversity")
-async def diversity(
-    task: str = Query(...),
-    scope: str = Query("approved", pattern="^(approved|reviewed|all)$"),
-    _user: User = Depends(reviewer_required),
-) -> dict[str, Any]:
-    """Coverage, length spread and per-phase failures for one task's corpus."""
-
-    if task not in supported_tasks():
-        raise HTTPException(status_code=404, detail="TASK_NOT_FOUND")
-
-    from src.labeling.diversity import diversity_report
-
-    return diversity_report(workspace(), task=task, scope=scope)

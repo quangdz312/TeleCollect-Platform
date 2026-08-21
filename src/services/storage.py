@@ -51,6 +51,12 @@ def dataset_zip_path(dataset_id: str) -> Path:
     return datasets_root() / f"{dataset_id}.zip"
 
 
+def dataset_hdf5_path(dataset_id: str) -> Path:
+    """RoboMimic dataset đã lọc theo quyết định review."""
+    datasets_root().mkdir(parents=True, exist_ok=True)
+    return datasets_root() / f"{dataset_id}.hdf5"
+
+
 def _resolve_within(base: Path, name: str) -> Path:
     """Resolve `base/name` và đảm bảo kết quả nằm trong `base` — chặn path
     traversal qua `name` (vd `../../etc/passwd`)."""

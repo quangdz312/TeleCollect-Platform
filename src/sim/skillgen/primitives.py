@@ -23,7 +23,7 @@ def body_geom_names(env, body_name):
 class Servo:
     """Position/orientation servo. `on_step` is called after every control step."""
 
-    def __init__(self, env, on_step=None, record=None, prober=None):
+    def __init__(self, env, on_step=None, record=None, prober=None, action_transform=None):
         self.env = env
         self.on_step = on_step
         # `record` is an optional list collecting (state, action) pairs for dataset
@@ -33,6 +33,10 @@ class Servo:
         # also free when absent - but attached, it is what turns "the hand stopped"
         # into "joint 5 is at its stop", which cost hours to work out by hand.
         self.prober = prober
+        # Optional collection-only boundary. The solver continues to plan the
+        # same action; a perturbation runtime may transform it immediately
+        # before recording and env.step.
+        self.action_transform = action_transform
         self.phase = ""
         self.goal_pos = None
         self.goal_mat = None
@@ -70,21 +74,30 @@ class Servo:
         if drot is not None:
             a[3:6] = np.clip(np.asarray(drot) / self.rot_scale, -1.0, 1.0)
         a[6] = grip
+        executed = (
+            a
+            if self.action_transform is None
+            else np.asarray(self.action_transform(a, self.steps, phase=self.phase))
+        )
+        if executed.shape != (self.env.action_dim,) or not np.isfinite(executed).all():
+            raise ValueError(f"Invalid transformed action shape/value: {executed.shape}")
         # Record the state BEFORE stepping and the action that was applied to it,
         # so (states[i], actions[i]) is the pair robomimic expects. Recording the
         # post-step state instead silently shifts the dataset by one control step.
         if self.record is not None:
-            self.record.append((np.array(self.env.sim.get_state().flatten()), a.copy()))
-        self.env.step(a)
+            self.record.append((
+                np.array(self.env.sim.get_state().flatten()), executed.copy(),
+            ))
+        self.env.step(executed)
         self.steps += 1
         if self.prober is not None:
             self.prober.sample(phase=self.phase, goal_pos=self.goal_pos,
-                               goal_mat=self.goal_mat, action=a,
+                               goal_mat=self.goal_mat, action=executed,
                                grasped=(self.geoms is not None
                                         and self.grasped(self.geoms)))
         if self.on_step is not None and self.on_step() is False:
             self.aborted = True
-        return a
+        return executed
 
     def hold(self, n, grip=OPEN):
         for _ in range(n):

@@ -123,6 +123,10 @@ class Dataset(Base):
         passive_deletes=True,
     )
 
+    @property
+    def format(self) -> str:
+        return "robomimic" if self.zip_path and self.zip_path.lower().endswith(".hdf5") else "raw"
+
 
 class DatasetEpisode(Base):
     """Bảng nối datasets ↔ episodes (nhiều-nhiều)."""

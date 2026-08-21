@@ -52,6 +52,11 @@ export interface LatencyStats {
   tick: number;
   work: number;
   dropped: number;
+  decode?: number;
+  decodeP95?: number;
+  decodeDropped?: number;
+  visual?: number;
+  visualP95?: number;
 }
 
 export interface AxisInput {

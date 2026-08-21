@@ -33,6 +33,7 @@ TASK_LANDMARKS: Mapping[PerturbationTask, TaskLandmarks] = MappingProxyType({
         position=('SquareNut_pos',),
         orientation=('SquareNut_quat',),
     ),
+    PerturbationTask.TOOL_HANG: TaskLandmarks(),
 })
 
 #: Each operator counts its bounded recovery under a different debug key.
@@ -40,6 +41,7 @@ RETRY_DEBUG_KEYS: Mapping[PerturbationTask, str] = MappingProxyType({
     PerturbationTask.LIFT: 'regrasp_attempts',
     PerturbationTask.CAN: 'retry_attempts',
     PerturbationTask.SQUARE: 'retry_count',
+    PerturbationTask.TOOL_HANG: 'attempts',
 })
 
 PROVENANCE_SCHEMA_VERSION = 1

@@ -25,6 +25,8 @@ export default function ReviewDetailPage() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const router = useRouter();
+  const requestedReturnTo = searchParams.get("returnTo");
+  const returnTo = requestedReturnTo?.startsWith("/review") ? requestedReturnTo : "/review?status=recorded";
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wristRef = useRef<HTMLVideoElement | null>(null);
@@ -43,7 +45,7 @@ export default function ReviewDetailPage() {
 
   if (!user) return null;
   if (searchParams.get("source") === "scripted") {
-    return <ScriptedReviewDetail episodeId={decodeURIComponent(id)} />;
+    return <ScriptedReviewDetail episodeId={decodeURIComponent(id)} returnTo={returnTo} />;
   }
 
   const load = useCallback(async () => {
@@ -129,7 +131,7 @@ export default function ReviewDetailPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link href="/review" className="text-xs text-accent-400 hover:underline">
+          <Link href={returnTo} className="text-xs text-accent-400 hover:underline">
             ← Review queue
           </Link>
           <h1 className="mt-1 text-lg font-semibold">{demo.task_id}</h1>
@@ -364,7 +366,7 @@ export default function ReviewDetailPage() {
                   setBusy(true);
                   try {
                     await api.deleteDemo(demo.id);
-                    router.push("/review");
+                    router.push(returnTo);
                   } catch (exc) {
                     setError(exc instanceof Error ? exc.message : "Delete failed");
                     setBusy(false);

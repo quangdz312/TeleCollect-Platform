@@ -28,7 +28,7 @@ from src.sim.perturbations.profiles import (
     resolve_profile,
 )
 from src.sim.perturbations.runtime import MAX_BASE_SEED, environment_seed
-from src.sim.tool_hang import TOOLHANG_PROFILE, TOOLHANG_TASK_CODE, TOOLHANG_TOOL_NAME
+from src.sim.tool_hang import TOOLHANG_TOOL_NAME
 from src.sim.tools.defaults import build_default_registry
 from src.sim.tools.executor import execute_tool
 
@@ -276,21 +276,29 @@ def run_collection(
     """
 
     if task == 'tool_hang':
-        if quality != DEFAULT_QUALITY:
-            raise ValueError('ToolHang currently supports only the clean quality preset')
+        profile = resolve_profile(task, quality)
+        resolved_horizon = 6000 if horizon is None else int(horizon)
+        _validate_request(episodes, resolved_horizon, seed)
+        batch_provenance = dataset_provenance(
+            profile,
+            base_seed=seed,
+            stream_code=NOISE_STREAM_CODE,
+            coverage='stage1+stage2',
+        )
         if not dry_run and output is None:
             raise ValueError('output is required unless dry_run is used')
         if dry_run:
             return CollectionResult(
-                task='tool_hang', tool_name=TOOLHANG_TOOL_NAME, quality='clean',
-                output=None, horizon=6000, episodes=(),
-                provenance=_tool_hang_dataset_provenance(seed),
+                task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
+                quality=profile.quality.value,
+                output=None, horizon=resolved_horizon, episodes=(),
+                provenance=batch_provenance,
             )
         from src.sim.tool_hang_collection import collect
 
         result = collect(
             output, episodes=episodes, seed=seed, overwrite=overwrite, logger=logger,
-            video_dir=video_dir,
+            video_dir=video_dir, quality=profile.quality.value,
         )
         records = tuple(
             EpisodeRecord(
@@ -302,12 +310,14 @@ def run_collection(
                 termination_reason=item['terminal_reason'],
                 provenance=EpisodeProvenance(
                     task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
-                    requested_quality='clean',
-                    profile_version=TOOLHANG_PROFILE,
-                    candidate_profile_version=TOOLHANG_PROFILE, noise_scale=0.0,
-                    base_seed=seed, task_code=TOOLHANG_TASK_CODE, stream_code=1,
+                    requested_quality=profile.quality.value,
+                    profile_version=profile.profile_version,
+                    candidate_profile_version=profile.candidate_profile_version,
+                    noise_scale=profile.noise_scale,
+                    base_seed=seed, task_code=profile.task_code,
+                    stream_code=NOISE_STREAM_CODE,
                     episode_index=item['episode_index'], environment_seed=item['seed'],
-                    sampled_variation=item['summary'],
+                    sampled_variation=item.get('sampled_variation', item['summary']),
                     outcome=_outcome(item['success'], item['terminal_reason']),
                     success=item['success'], episode_length=item['steps'],
                     terminal_reason=item['terminal_reason'],
@@ -317,9 +327,10 @@ def run_collection(
             ) for item in result['records']
         )
         return CollectionResult(
-            task='tool_hang', tool_name=TOOLHANG_TOOL_NAME, quality='clean',
-            output=Path(output), horizon=6000, episodes=records,
-            provenance=_tool_hang_dataset_provenance(seed),
+            task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
+            quality=profile.quality.value,
+            output=Path(output), horizon=resolved_horizon, episodes=records,
+            provenance=batch_provenance,
         )
 
     profile = resolve_profile(task, quality)

@@ -77,8 +77,11 @@ class Settings(BaseSettings):
     telemetry_hz: int = Field(default=15, ge=1, le=120)
     """Nhịp gửi observation/stats JSON về browser."""
 
-    stream_fps: int = Field(default=15, ge=1, le=120)
-    """Nhịp gửi frame JPEG preview về browser."""
+    stream_fps: int = Field(default=30, ge=1, le=120)
+    """Nhịp camera preview chính; độc lập với nhịp ghi dataset."""
+
+    secondary_stream_fps: int = Field(default=10, ge=1, le=120)
+    """Nhịp camera preview phụ; camera vẫn được recorder ghi đủ mọi tick."""
 
     jpeg_quality: int = Field(default=75, ge=1, le=100)
     """Chất lượng JPEG của stream preview."""
