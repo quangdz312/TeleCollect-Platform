@@ -49,6 +49,12 @@ function ReviewQueueContent() {
   const [scriptedSummary, setScriptedSummary] = useState<WorkspaceSummary | null>(null);
   const [batchFilter, setBatchFilter] = useState(() => searchParams.get("batch") ?? "");
   const [qualityFilter, setQualityFilter] = useState(() => searchParams.get("quality") ?? "");
+  // Teleop and scripted episodes live in separate stores and keep separate task
+  // vocabularies, so one queue shows both. This picks which store to list.
+  const [sourceFilter, setSourceFilter] = useState<"" | "teleop" | "scripted">(() => {
+    const value = searchParams.get("source");
+    return value === "teleop" || value === "scripted" ? value : "";
+  });
   const [scriptedTasks, setScriptedTasks] = useState<Array<{ id: string; title: string }>>([]);
   const [applyingGate, setApplyingGate] = useState(false);
   const [gateMessage, setGateMessage] = useState("");
@@ -56,6 +62,14 @@ function ReviewQueueContent() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      if (sourceFilter === "scripted") {
+        setDemos([]);
+        setTotal(0);
+        return;
+      }
+      // ScriptedReviewRows is unmounted under a teleop-only filter, so its
+      // onCount never fires and the stale count would keep being displayed.
+      if (sourceFilter === "teleop") setScriptedTotal(0);
       const page = await api.demos({
         task_id: taskFilter || undefined,
         status: (statusFilter || undefined) as DemoStatus | undefined,
@@ -68,7 +82,7 @@ function ReviewQueueContent() {
     } finally {
       setLoading(false);
     }
-  }, [taskFilter, statusFilter, labelFilter, offset]);
+  }, [taskFilter, statusFilter, labelFilter, offset, sourceFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -127,9 +141,15 @@ function ReviewQueueContent() {
   if (batchFilter) returnToParams.set("batch", batchFilter);
   if (qualityFilter) returnToParams.set("quality", qualityFilter);
   const returnTo = `/review?${returnToParams.toString()}`;
+  // The two collection paths keep separate task vocabularies: teleop stores
+  // `lift_cube`/`pick_place`/`push`/`stack` in the tasks table, while scripted
+  // generation uses `lift`/`can`/`square`/`tool_hang` and shows the dataset
+  // name for each. Two entries can therefore read as "lift_cube" while
+  // carrying different ids, so the source is spelled out instead of trying to
+  // collapse them -- 925 scripted episodes already reference the short ids.
   const taskOptions = [
-    ...tasks.map((task) => ({ id: task.id, title: task.title })),
-    ...scriptedTasks.filter((scripted) => !tasks.some((task) => task.id === scripted.id)),
+    ...(sourceFilter === "scripted" ? [] : tasks.map((task) => ({ id: task.id, title: task.title }))),
+    ...(sourceFilter === "teleop" ? [] : scriptedTasks),
   ];
   const pendingCount = (summary?.by_status.recorded ?? 0)
     + (summary?.by_status.labeled ?? 0)
@@ -313,6 +333,23 @@ function ReviewQueueContent() {
           </Select>
           <Select
             className="w-48"
+            value={sourceFilter}
+            onChange={(e) => {
+              setOffset(0);
+              const source = e.target.value as "" | "teleop" | "scripted";
+              setSourceFilter(source);
+              // The two stores name their tasks differently, so a task chosen
+              // under one source cannot match the other.
+              setTaskFilter("");
+              setQueueFilters({ task: "" });
+            }}
+          >
+            <option value="">All sources</option>
+            <option value="teleop">Teleop</option>
+            <option value="scripted">Scripted</option>
+          </Select>
+          <Select
+            className="w-48"
             value={taskFilter}
             onChange={(e) => {
               setOffset(0);
@@ -416,7 +453,7 @@ function ReviewQueueContent() {
                     </td>
                   </tr>
                 ))}
-                {canReviewScripted && (
+                {canReviewScripted && sourceFilter !== "teleop" && (
                   <ScriptedReviewRows
                     task={taskFilter || undefined}
                     status={statusFilter || undefined}

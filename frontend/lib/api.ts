@@ -372,7 +372,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 function toTask(task: BackendTask): Task {
   return {
     id: task.name,
-    title: task.description || task.name,
+    // The label has to be the identifier, not the description. `description`
+    // holds the Vietnamese sentence shown to whoever collects the episode
+    // ("Gap khoi lap phuong tren ban..."), so using it here filled the task
+    // dropdowns with instructions instead of names, and stopped the DB-backed
+    // `lift_cube` from matching the scripted `lift_cube` — the same task then
+    // appeared twice, once per spelling.
+    title: task.name,
     instruction: task.instruction,
     max_steps: task.max_steps,
     hints: task.hints,
