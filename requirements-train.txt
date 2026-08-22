@@ -6,6 +6,31 @@
 #
 # Bao gồm cả dependency runtime vì src/training đọc dataset bằng pyarrow/numpy
 # và đánh giá policy bằng chính môi trường mujoco đã dùng lúc thu demo.
+#
+# Trên Windows lệnh trên KHÔNG chạy trọn, vì hai lý do độc lập nhau:
+#
+#   1. robomimic kéo theo egl_probe, gói này biên dịch C bằng cmake + make.
+#      Windows không có sẵn hai công cụ đó nên bước build hỏng, và pip bỏ luôn
+#      cả những gói đã tải được. egl_probe chỉ dùng để dò thiết bị EGL trên
+#      Linux; `scripts/evaluate_robomimic.py::_install_egl_probe_fallback`
+#      thay nó bằng một module rỗng, nên thiếu nó không ảnh hưởng gì.
+#
+#   2. PyPI trả bản torch CPU trên Windows. Muốn dùng GPU phải lấy từ index
+#      riêng của PyTorch; chọn cu1xx khớp với driver (xem `nvidia-smi`).
+#
+# Cách cài trên Windows:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+#   pip install imageio imageio-ffmpeg tensorboard tensorboardX matplotlib
+#   pip install huggingface-hub diffusers transformers safetensors
+#   pip install --no-deps "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5"
+#   pip install "numpy>=1.26.0,<2.0.0"
+#
+# Dòng numpy cuối cùng không thừa: mấy lệnh trên kéo numpy lên 2.x, mà numba
+# (qua dvc) chỉ chạy với numpy <= 2.4, và robosuite cần đúng bản 1.x mà
+# requirements.txt đã ghim. Bỏ qua bước này thì các test dựng dataset hỏng với
+# "RoboSuite is required to build rollout-compatible metadata", che mất nguyên
+# nhân thật là numba từ chối numpy 2.5.
 
 -r requirements.txt
 
