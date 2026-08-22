@@ -38,7 +38,13 @@ function ReviewQueueContent() {
     if (value === "recorded" || value === "labeled" || value === "approved" || value === "rejected") {
       return value;
     }
-    return "recorded";
+    // `labeled`, not `recorded`: teleop already knows whether the simulator's
+    // success predicate passed, so it files episodes as labeled and the only
+    // step left is a reviewer's decision. Defaulting to `recorded` meant the
+    // queue opened on a filter that no teleop recording can ever match, and an
+    // operator who had just recorded one saw an empty table with nothing to
+    // distinguish it from having recorded nothing at all.
+    return "labeled";
   });
   const [labelFilter, setLabelFilter] = useState<LabelValue | "">(() => {
     const value = searchParams.get("label");
@@ -154,6 +160,12 @@ function ReviewQueueContent() {
   const pendingCount = (summary?.by_status.recorded ?? 0)
     + (summary?.by_status.labeled ?? 0)
     + (scriptedSummary?.pending ?? 0);
+  const hiddenByStatus = statusFilter
+    ? Object.entries(summary?.by_status ?? {}).reduce(
+        (sum, [name, count]) => (name === statusFilter ? sum : sum + (count ?? 0)),
+        0,
+      )
+    : 0;
   const approvedCount = (summary?.by_status.approved ?? 0) + (scriptedSummary?.approved ?? 0);
   const rejectedCount = (summary?.by_status.rejected ?? 0) + (scriptedSummary?.rejected ?? 0);
 
@@ -326,8 +338,8 @@ function ReviewQueueContent() {
             }}
           >
             <option value="">All statuses</option>
-            <option value="recorded">Needs review</option>
-            <option value="labeled">Labeled · needs review</option>
+            <option value="recorded">Awaiting label</option>
+            <option value="labeled">Awaiting review</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </Select>
@@ -405,7 +417,13 @@ function ReviewQueueContent() {
         {loading ? (
           <Empty>Loading…</Empty>
         ) : demos.length === 0 && !canReviewScripted ? (
-          <Empty>Nothing matches these filters.</Empty>
+          // Saying only "nothing matches" is what made a recording look lost:
+          // the queue filters on one status at a time, so episodes sitting in
+          // another one are invisible with no hint that they exist. Name them.
+          <Empty>
+            Nothing matches these filters.
+            {hiddenByStatus > 0 && ` ${hiddenByStatus} recording${hiddenByStatus === 1 ? "" : "s"} sit in another status — try "All statuses".`}
+          </Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
