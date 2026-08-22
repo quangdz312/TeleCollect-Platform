@@ -1,25 +1,47 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
 @import "tailwindcss";
 
+/*
+ * Token names (ink-*, accent-*, ok-*, warn-*, bad-*) are kept stable so every
+ * existing page/component className is untouched. Only the underlying values
+ * changed, from the old dark "control room" ramp to the light SaaS palette
+ * used by frontend_demo/css/styles.css. ink-950 now means "lightest surface"
+ * and ink-100 means "darkest/primary text" — the inverse of before — because
+ * every consumer already uses ink-950/900/850/800 for backgrounds and
+ * ink-400/300/100 for text, from muted to most prominent.
+ */
 @theme {
-  --color-ink-950: #07090d;
-  --color-ink-900: #0c1017;
-  --color-ink-850: #11161f;
-  --color-ink-800: #161c27;
-  --color-ink-700: #212a39;
-  --color-ink-600: #334054;
-  --color-ink-400: #7d8ba4;
-  --color-ink-300: #a7b3c6;
-  --color-ink-100: #e6ebf3;
+  --font-heading: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  --color-accent-400: #4bb4ff;
-  --color-accent-500: #2b96e8;
-  --color-accent-600: #1a76bd;
+  --color-ink-950: #f3f6fa; /* page background */
+  --color-ink-900: #ffffff; /* card / surface background */
+  --color-ink-850: #f8fafc; /* soft surface */
+  --color-ink-800: #eef4fb; /* hover surface */
+  --color-ink-700: #dce3ec; /* border */
+  --color-ink-600: #cbd5e1; /* strong border / control border */
+  --color-ink-400: #64748b; /* muted text */
+  --color-ink-300: #334155; /* secondary text */
+  --color-ink-100: #0f172a; /* primary text */
 
-  --color-ok-400: #34d399;
-  --color-ok-600: #0f9b6c;
-  --color-warn-400: #fbbf24;
-  --color-bad-400: #f87171;
-  --color-bad-600: #c53838;
+  --color-accent-400: #1d4ed8; /* primary hover (darker) */
+  --color-accent-500: #2563eb; /* primary */
+  --color-accent-600: #1e40af; /* primary active / selection */
+
+  --color-ok-400: #047857; /* success hover */
+  --color-ok-600: #059669; /* success */
+  --color-warn-400: #d97706; /* warning */
+  --color-bad-400: #b91c1c; /* danger hover */
+  --color-bad-600: #dc2626; /* danger */
+
+  /* Dark technical surfaces (camera viewport, timeline, console, code block).
+     These stay dark regardless of the light page theme above, so they use
+     their own fixed ramp instead of the ink-* tokens. */
+  --color-tech-bg: #0b1220;
+  --color-tech-bg-alt: #121b2e;
+  --color-tech-border: rgb(148 163 184 / 0.25);
+  --color-tech-text: #cbd5e1;
+  --color-tech-muted: #64748b;
+  --color-media-overlay: rgb(3 7 18 / 0.7); /* dark scrim over trimmed-out video */
 }
 
 html,
@@ -27,16 +49,18 @@ body {
   height: 100%;
 }
 
+h1, h2, h3 {
+  font-family: var(--font-heading);
+}
+
 body {
-  background:
-    radial-gradient(1100px 600px at 12% -8%, #16324a 0%, transparent 60%),
-    radial-gradient(900px 500px at 92% 0%, #1c2340 0%, transparent 55%),
-    var(--color-ink-950);
+  background: var(--color-ink-950);
   color: var(--color-ink-100);
   font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
@@ -52,7 +76,7 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--color-ink-700);
+  background: var(--color-ink-600);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: content-box;
@@ -75,8 +99,62 @@ input[type="range"] {
   }
 }
 
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .fade-in {
     animation: fade-in 150ms ease-out;
+  }
+  .slide-up {
+    animation: slide-up 250ms ease-out;
+  }
+  .slide-down {
+    animation: slide-down 250ms ease-out;
+  }
+  .pulse-glow {
+    animation: pulse-glow 2s infinite;
+  }
+  .pulse-subtle {
+    animation: pulse-subtle 2s ease-in-out infinite;
   }
 }

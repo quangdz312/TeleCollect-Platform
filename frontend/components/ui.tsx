@@ -22,14 +22,16 @@ export function Card({
   return (
     <section
       className={cx(
-        "rounded-xl border border-ink-700/70 bg-ink-900/70 backdrop-blur-sm shadow-lg shadow-black/20",
+        "slide-up rounded-2xl border border-ink-700 bg-ink-900 shadow-[0_4px_14px_rgba(15,23,42,0.05),0_1px_3px_rgba(15,23,42,0.06)] transition-shadow duration-200 hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]",
         className,
       )}
     >
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700/60 px-5 py-3.5">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 px-5 py-4">
           <div>
-            {title && <h2 className="text-sm font-semibold tracking-wide">{title}</h2>}
+            {title && (
+              <h2 className="font-heading text-[15px] font-bold tracking-tight">{title}</h2>
+            )}
             {subtitle && <p className="mt-0.5 text-xs text-ink-400">{subtitle}</p>}
           </div>
           {actions && <div className="flex items-center gap-2">{actions}</div>}
@@ -43,11 +45,14 @@ export function Card({
 type ButtonVariant = "primary" | "ghost" | "danger" | "success" | "subtle";
 
 const BUTTON_STYLES: Record<ButtonVariant, string> = {
-  primary: "bg-accent-500 hover:bg-accent-400 text-white border-transparent",
-  success: "bg-ok-600 hover:bg-ok-400 text-white border-transparent",
-  danger: "bg-bad-600 hover:bg-bad-400 text-white border-transparent",
-  ghost: "bg-transparent hover:bg-ink-800 text-ink-100 border-ink-600",
-  subtle: "bg-ink-800 hover:bg-ink-700 text-ink-100 border-ink-700",
+  primary:
+    "bg-accent-500 hover:bg-accent-400 text-white border-transparent shadow-[0_6px_14px_rgba(37,99,235,0.22)]",
+  success:
+    "bg-ok-600 hover:bg-ok-400 text-white border-transparent shadow-[0_6px_14px_rgba(5,150,105,0.2)]",
+  danger:
+    "bg-bad-600 hover:bg-bad-400 text-white border-transparent shadow-[0_6px_14px_rgba(220,38,38,0.2)]",
+  ghost: "bg-transparent hover:bg-accent-500/10 text-accent-500 border-ink-600",
+  subtle: "bg-ink-850 hover:bg-ink-800 text-ink-100 border-ink-700",
 };
 
 export function Button({
@@ -59,8 +64,8 @@ export function Button({
     <button
       {...props}
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium",
-        "transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold",
+        "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         BUTTON_STYLES[variant],
         className,
@@ -77,16 +82,16 @@ export function Badge({
   children: ReactNode;
 }) {
   const tones = {
-    neutral: "bg-ink-700/60 text-ink-300 border-ink-600",
-    ok: "bg-ok-600/15 text-ok-400 border-ok-600/40",
-    warn: "bg-warn-400/15 text-warn-400 border-warn-400/40",
-    bad: "bg-bad-600/15 text-bad-400 border-bad-600/40",
-    info: "bg-accent-500/15 text-accent-400 border-accent-500/40",
+    neutral: "bg-ink-850 text-ink-300 border-ink-700",
+    ok: "bg-ok-600/10 text-ok-600 border-ok-600/30",
+    warn: "bg-warn-400/10 text-warn-400 border-warn-400/30",
+    bad: "bg-bad-600/10 text-bad-600 border-bad-600/30",
+    info: "bg-accent-500/10 text-accent-500 border-accent-500/30",
   };
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide",
         tones[tone],
       )}
     >
@@ -115,10 +120,17 @@ export function Stat({
           ? "text-bad-400"
           : "text-ink-100";
   return (
-    <div className="rounded-lg border border-ink-700/60 bg-ink-850/60 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wider text-ink-400">{label}</div>
-      <div className={cx("mt-1 text-2xl font-semibold tabular", toneClass)}>{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-ink-400">{hint}</div>}
+    <div className="slide-up rounded-xl border border-ink-700 bg-ink-900 px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-transform duration-200 hover:-translate-y-0.5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-ink-400">{label}</div>
+      <div
+        className={cx(
+          "font-heading mt-2 text-[26px] font-bold tracking-tight tabular",
+          toneClass,
+        )}
+      >
+        {value}
+      </div>
+      {hint && <div className="mt-1.5 text-xs text-ink-400">{hint}</div>}
     </div>
   );
 }
@@ -127,13 +139,15 @@ export function Field({
   label,
   hint,
   children,
+  className,
 }: {
   label: string;
   hint?: string;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="block">
+    <label className={cx("block", className)}>
       <span className="mb-1 block text-xs font-medium text-ink-300">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-ink-400">{hint}</span>}
@@ -142,8 +156,8 @@ export function Field({
 }
 
 const CONTROL =
-  "w-full rounded-lg border border-ink-600 bg-ink-850 px-3 py-1.5 text-sm text-ink-100 " +
-  "outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/40";
+  "w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 " +
+  "outline-none transition-colors hover:border-ink-400/60 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/15";
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(CONTROL, props.className)} />;
@@ -165,9 +179,9 @@ export function Alert({
   children: ReactNode;
 }) {
   const tones = {
-    bad: "border-bad-600/40 bg-bad-600/10 text-bad-400",
-    ok: "border-ok-600/40 bg-ok-600/10 text-ok-400",
-    info: "border-accent-500/40 bg-accent-500/10 text-accent-400",
+    bad: "border-bad-600/30 bg-bad-600/10 text-bad-600",
+    ok: "border-ok-600/30 bg-ok-600/10 text-ok-600",
+    info: "border-accent-500/30 bg-accent-500/10 text-accent-500",
   };
   return (
     <div className={cx("fade-in rounded-lg border px-3 py-2 text-sm", tones[tone])}>{children}</div>
@@ -210,6 +224,50 @@ export function Thumbnail({ src, alt, className }: { src: string; alt: string; c
           onError={() => setFailed(true)}
         />
       )}
+    </div>
+  );
+}
+
+/** File-picker card matching frontend_demo's `.dropzone` (icon, title, required/optional tag). */
+export function Dropzone({
+  icon,
+  title,
+  tag,
+  required,
+  fileName,
+  inputProps,
+}: {
+  icon: ReactNode;
+  title: string;
+  tag: string;
+  required?: boolean;
+  fileName?: string | null;
+  inputProps: React.InputHTMLAttributes<HTMLInputElement>;
+}) {
+  return (
+    <div
+      className={cx(
+        "rounded-xl border-[1.5px] border-dashed p-4 text-center transition-colors",
+        required ? "border-accent-500/40" : "border-ink-600",
+        "bg-ink-850 hover:border-accent-500 hover:bg-accent-500/5",
+      )}
+    >
+      <div className="mx-auto mb-2.5 grid h-10 w-10 place-items-center rounded-[10px] bg-accent-500/10 text-accent-500">
+        {icon}
+      </div>
+      <div className="text-[13px] font-bold text-ink-100">{title}</div>
+      <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-ink-400">{tag}</div>
+      <label className="mt-3 block text-left">
+        <input
+          {...inputProps}
+          type="file"
+          className={cx(
+            "block w-full cursor-pointer text-xs text-ink-300 file:mr-2.5 file:cursor-pointer file:rounded-md file:border file:border-ink-600 file:bg-ink-900 file:px-2.5 file:py-1 file:text-xs file:font-semibold file:text-ink-100 hover:file:bg-ink-800 hover:file:border-accent-500",
+            inputProps.className,
+          )}
+        />
+      </label>
+      {fileName && <div className="mt-1.5 truncate text-[11px] text-accent-500">{fileName}</div>}
     </div>
   );
 }

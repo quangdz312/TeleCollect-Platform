@@ -215,7 +215,7 @@ export function HandControl({
 
   return (
     <div className="space-y-3">
-      <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-ink-700 bg-black">
+      <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-tech-border bg-tech-bg">
         <video ref={videoRef} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
         <canvas ref={canvasRef} width={640} height={480} className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100" />
         <div className="absolute left-2 top-2"><Badge tone={state?.clutched ? "warn" : state?.detected ? "ok" : "neutral"}>{state?.clutched ? "CLUTCHED — đưa tay về tâm" : state?.detected ? `Gesture: ${state.gesture}` : status}</Badge></div>

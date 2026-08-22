@@ -55,6 +55,10 @@ export function TrimTimeline({
 
   const onPointerDown = (mode: "start" | "end" | "seek") => (event: React.PointerEvent) => {
     event.preventDefault();
+    // Handles sit on top of the track, but pointerdown still bubbles to the
+    // track's own "seek" handler unless stopped — without this, grabbing a
+    // handle would immediately get overridden to seek mode.
+    event.stopPropagation();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     dragging.current = mode;
     apply(mode, frameAt(event.clientX));
@@ -103,7 +107,7 @@ export function TrimTimeline({
     <div className="select-none">
       <div
         ref={trackRef}
-        className="relative h-14 cursor-pointer rounded-lg border border-ink-700 bg-ink-850"
+        className="relative h-14 cursor-pointer rounded-lg border border-tech-border bg-tech-bg transition-colors hover:border-accent-500"
         onPointerDown={onPointerDown("seek")}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -112,23 +116,27 @@ export function TrimTimeline({
         {successRuns.map(([from, to]) => (
           <div
             key={`${from}-${to}`}
-            className="absolute inset-y-0 bg-ok-600/25"
+            className="absolute inset-y-0 bg-ok-600/40"
             style={{ left: pct(from), width: pct(to - from) }}
           />
         ))}
 
-        <div className="absolute inset-y-0 left-0 bg-ink-950/70" style={{ width: pct(start) }} />
+        {/* Dark scrim over the trimmed-away head/tail. Uses a fixed
+            technical-surface overlay token, not the ink-* scale — those
+            tokens follow the light page theme and would render as a pale
+            wash on this permanently-dark timeline instead of a scrim. */}
+        <div className="absolute inset-y-0 left-0 bg-media-overlay" style={{ width: pct(start) }} />
         <div
-          className="absolute inset-y-0 right-0 bg-ink-950/70"
+          className="absolute inset-y-0 right-0 bg-media-overlay"
           style={{ width: pct(numFrames - 1 - end) }}
         />
         <div
-          className="pointer-events-none absolute inset-y-0 border-x-2 border-accent-500/70 bg-accent-500/10"
+          className="pointer-events-none absolute inset-y-0 border-x-2 border-[#60a5fa] bg-accent-500/25"
           style={{ left: pct(start), width: pct(end - start) }}
         />
 
         <div
-          className="pointer-events-none absolute inset-y-0 w-0.5 bg-white"
+          className="pointer-events-none absolute -inset-y-1 w-0.5 bg-warn-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
           style={{ left: pct(playhead) }}
         />
 
@@ -148,13 +156,22 @@ export function TrimTimeline({
             onPointerCancel={onPointerUp}
             onKeyDown={onHandleKeyDown(handle)}
             className={cx(
-              "absolute top-0 h-full w-3 -translate-x-1/2 cursor-ew-resize rounded",
-              "bg-accent-500 hover:bg-accent-400",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80",
+              // The visible bar stays a thin 3px stripe, but the element
+              // itself is 20px wide so the pointer target is easy to grab —
+              // a 3px hit zone is what made dragging feel finicky.
+              "group absolute top-0 flex h-full w-5 -translate-x-1/2 cursor-ew-resize items-center justify-center",
+              "focus-visible:outline-none",
             )}
             style={{ left: pct(handle === "start" ? start : end) }}
             title={`${handle} of clip`}
-          />
+          >
+            <div
+              className={cx(
+                "h-full w-[3px] rounded bg-accent-500 group-hover:bg-accent-400",
+                "group-focus-visible:ring-2 group-focus-visible:ring-white/80",
+              )}
+            />
+          </div>
         ))}
       </div>
 

@@ -134,7 +134,7 @@ export default function ReviewDetailPage() {
           <Link href={returnTo} className="text-xs text-accent-400 hover:underline">
             ← Review queue
           </Link>
-          <h1 className="mt-1 text-lg font-semibold">{demo.task_id}</h1>
+          <h1 className="font-heading mt-1 text-[22px] font-bold tracking-tight">{demo.task_id}</h1>
           <p className="text-sm text-ink-400">
             {demo.operator_name} · {timeAgo(demo.created_at)} · seed {demo.seed} ·{" "}
             {demo.num_frames} frames @ {demo.fps} Hz · {bytes(demo.size_bytes)}
@@ -162,17 +162,17 @@ export default function ReviewDetailPage() {
                 src={mediaUrl(`/api/demos/${demo.id}/video/front`)}
                 controls
                 loop={!loopTrim}
-                className="w-full rounded-lg border border-ink-700 bg-black"
+                className="w-full rounded-lg border border-tech-border bg-tech-bg"
               />
               {demo.has_wrist ? (
                 <video
                   ref={wristRef}
                   src={mediaUrl(`/api/demos/${demo.id}/video/wrist`)}
                   muted
-                  className="w-full self-start rounded-lg border border-ink-700 bg-black"
+                  className="w-full self-start rounded-lg border border-tech-border bg-tech-bg"
                 />
               ) : (
-                <div className="grid aspect-square w-full place-items-center self-start rounded-lg border border-ink-700 bg-ink-900 text-xs text-ink-400">
+                <div className="grid aspect-square w-full place-items-center self-start rounded-lg border border-tech-border bg-tech-bg-alt text-xs text-tech-muted">
                   No wrist camera
                 </div>
               )}
@@ -192,6 +192,39 @@ export default function ReviewDetailPage() {
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-ink-400">
+                In
+                <input
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  max={trim[1] / demo.fps}
+                  value={(trim[0] / demo.fps).toFixed(2)}
+                  onChange={(e) => {
+                    const frame = Math.round(Number(e.target.value) * demo.fps);
+                    if (Number.isFinite(frame)) setTrim([Math.min(frame, trim[1] - 1), trim[1]]);
+                  }}
+                  className="w-20 rounded-md border border-ink-700/60 bg-ink-850/60 px-2 py-1 tabular text-ink-100"
+                />
+                s
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-ink-400">
+                Out
+                <input
+                  type="number"
+                  step={0.01}
+                  min={trim[0] / demo.fps}
+                  max={demo.num_frames / demo.fps}
+                  value={(trim[1] / demo.fps).toFixed(2)}
+                  onChange={(e) => {
+                    const frame = Math.round(Number(e.target.value) * demo.fps);
+                    if (Number.isFinite(frame))
+                      setTrim([trim[0], Math.min(demo.num_frames, Math.max(frame, trim[0] + 1))]);
+                  }}
+                  className="w-20 rounded-md border border-ink-700/60 bg-ink-850/60 px-2 py-1 tabular text-ink-100"
+                />
+                s
+              </label>
               <Button variant="subtle" onClick={() => seek(trim[0])}>
                 Jump to in-point
               </Button>

@@ -113,7 +113,7 @@ export default function DatasetsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Datasets</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Datasets</h1>
         <p className="mt-0.5 text-sm text-ink-400">
           An export is an immutable snapshot of the approved demonstrations, with each
           reviewer&apos;s trim applied and their decision recorded alongside every episode.
@@ -263,13 +263,13 @@ export default function DatasetsPage() {
       </Card>
 
       <Card title="Version control">
-        <p className="text-sm text-ink-300">
+        <p className="text-sm text-tech-text">
           Datasets are tracked by DVC rather than committed to git: the payload lives in the DVC
           cache and remote, while a small hash pointer goes into git next to the code. The hash
           recorded on each export is also stored on every training run, so any policy can be
           traced back to the exact bytes it learned from.
         </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg border border-ink-700 bg-ink-950 p-3 text-xs text-ink-300">
+        <pre className="mt-3 overflow-x-auto rounded-lg border border-tech-border bg-tech-bg p-3 font-mono text-xs text-tech-text">
 {`dvc push                      # upload the dataset payload to the remote
 git add -A && git commit -m "dataset v1"
 dvc checkout                  # restore the exact dataset for this commit`}

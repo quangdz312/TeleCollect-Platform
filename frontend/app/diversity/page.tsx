@@ -53,18 +53,18 @@ function Scatter({ sets }: { sets: DiversityReport["position_sets"] }) {
           {sets.map((set) => <option key={set.key} value={set.key}>{set.label}</option>)}
         </Select>
       )}
-      <svg viewBox="0 0 560 250" className="w-full min-w-[360px] rounded-lg bg-ink-950/50">
+      <svg viewBox="0 0 560 250" className="w-full min-w-[360px] rounded-lg border border-ink-700 bg-ink-850">
         {[0, 1, 2, 3, 4].map((index) => <g key={index}>
-          <line x1={45} x2={545} y1={20 + index * 52} y2={20 + index * 52} stroke="#253044" />
-          <line x1={45 + index * 125} x2={45 + index * 125} y1={20} y2={228} stroke="#253044" />
+          <line x1={45} x2={545} y1={20 + index * 52} y2={20 + index * 52} stroke="#dce3ec" />
+          <line x1={45 + index * 125} x2={45 + index * 125} y1={20} y2={228} stroke="#dce3ec" />
         </g>)}
         {points.map((point) => (
-          <circle key={point.episode_id} cx={scale(point.x, x0, x1, 55, 480)} cy={228 - scale(point.y, y0, y1, 10, 198)} r="4.5" fill={COLORS[point.quality] ?? COLORS.unknown} opacity="0.82">
+          <circle key={point.episode_id} cx={scale(point.x, x0, x1, 55, 480)} cy={228 - scale(point.y, y0, y1, 10, 198)} r="4.5" fill={COLORS[point.quality] ?? COLORS.unknown} opacity="0.9">
             <title>{`${point.episode_id}\n${point.quality} · ${point.decision}\nX ${point.x.toFixed(3)}, Y ${point.y.toFixed(3)}`}</title>
           </circle>
         ))}
-        <text x="280" y="246" fill="#8491a7" fontSize="11">initial X (m)</text>
-        <text x="8" y="125" fill="#8491a7" fontSize="11" transform="rotate(-90 8 125)">initial Y (m)</text>
+        <text x="280" y="246" fill="#64748b" fontSize="11">initial X (m)</text>
+        <text x="8" y="125" fill="#64748b" fontSize="11" transform="rotate(-90 8 125)">initial Y (m)</text>
       </svg>
       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-ink-400">
         {Object.entries(COLORS).filter(([key]) => key !== "unknown").map(([key, color]) => (
@@ -121,7 +121,7 @@ export default function DiversityPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Data diversity</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Data diversity</h1>
         <p className="mt-0.5 text-sm text-ink-400">Track quality balance, initial-state coverage, trajectory length and phase risk before training.</p>
       </div>
       <Card>

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { Alert, Button, Card, Field, Select } from "@/components/ui";
+import { Alert, Button, Card, Dropzone, Field, Select } from "@/components/ui";
 import { ApiError, api, type Task } from "@/lib/api";
 
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,.mp4,.mov";
@@ -72,7 +72,7 @@ export default function UploadPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Upload demo</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Upload demo</h1>
         <p className="mt-0.5 text-sm text-ink-400">
           Thêm một bản ghi thu ở nơi khác (ví dụ robot thật). Demo sẽ vào hàng đợi review ngay
           sau khi upload xong.
@@ -80,50 +80,70 @@ export default function UploadPage() {
       </div>
 
       <Card title="Upload mới">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Task">
-            <Select value={taskId} onChange={(e) => setTaskId(e.target.value)} disabled={busy}>
-              {tasks.length === 0 && <option value="">Đang tải task…</option>}
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        <Field label="Task" className="mb-4 max-w-xs">
+          <Select value={taskId} onChange={(e) => setTaskId(e.target.value)} disabled={busy}>
+            {tasks.length === 0 && <option value="">Đang tải task…</option>}
+            {tasks.map((task) => (
+              <option key={task.id} value={task.id}>
+                {task.title}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
-          <Field label="Front camera" hint="Bắt buộc — .mp4 hoặc .mov">
-            <input
-              type="file"
-              accept={VIDEO_ACCEPT}
-              disabled={busy}
-              onChange={(e) => setFront(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-ink-300 file:mr-3 file:rounded-lg file:border file:border-ink-600 file:bg-ink-850 file:px-3 file:py-1.5 file:text-sm file:text-ink-100 hover:file:bg-ink-800"
-            />
-          </Field>
-
-          <Field label="Wrist camera" hint="Không bắt buộc — .mp4 hoặc .mov">
-            <input
-              type="file"
-              accept={VIDEO_ACCEPT}
-              disabled={busy}
-              onChange={(e) => setWrist(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-ink-300 file:mr-3 file:rounded-lg file:border file:border-ink-600 file:bg-ink-850 file:px-3 file:py-1.5 file:text-sm file:text-ink-100 hover:file:bg-ink-800"
-            />
-          </Field>
-
-          <Field label="Trajectory" hint="Không bắt buộc — .json">
-            <input
-              type="file"
-              accept="application/json"
-              disabled={busy}
-              onChange={(e) => setTrajectory(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-ink-300 file:mr-3 file:rounded-lg file:border file:border-ink-600 file:bg-ink-850 file:px-3 file:py-1.5 file:text-sm file:text-ink-100 hover:file:bg-ink-800"
-            />
-          </Field>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Dropzone
+            required
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <path d="M15 8l6-3v14l-6-3" />
+                <rect x="1" y="5" width="14" height="14" rx="2" />
+              </svg>
+            }
+            title="Front camera"
+            tag="Required · .mp4 / .mov"
+            fileName={front?.name}
+            inputProps={{
+              accept: VIDEO_ACCEPT,
+              disabled: busy,
+              onChange: (e) => setFront(e.target.files?.[0] ?? null),
+            }}
+          />
+          <Dropzone
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            }
+            title="Wrist camera"
+            tag="Optional · .mp4 / .mov"
+            fileName={wrist?.name}
+            inputProps={{
+              accept: VIDEO_ACCEPT,
+              disabled: busy,
+              onChange: (e) => setWrist(e.target.files?.[0] ?? null),
+            }}
+          />
+          <Dropzone
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                <path d="M14 2v6h6" />
+              </svg>
+            }
+            title="Trajectory"
+            tag="Optional · .json"
+            fileName={trajectory?.name}
+            inputProps={{
+              accept: "application/json",
+              disabled: busy,
+              onChange: (e) => setTrajectory(e.target.files?.[0] ?? null),
+            }}
+          />
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button variant="primary" disabled={!canSubmit} onClick={submit}>
             {busy ? `Đang upload… ${progress}%` : "Upload"}
           </Button>

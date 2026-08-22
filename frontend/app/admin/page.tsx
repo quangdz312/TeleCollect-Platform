@@ -88,7 +88,7 @@ export default function AdminPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Users and roles</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Users and roles</h1>
         <p className="mt-0.5 text-sm text-ink-400">
           The operator/reviewer split is what makes the review step meaningful: the person who
           approves a demonstration is not the person who recorded it.

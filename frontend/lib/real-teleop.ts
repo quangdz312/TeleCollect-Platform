@@ -115,7 +115,7 @@ export class TeleopClient {
   constructor(readonly token: string) {}
 
   async connect(task: string) {
-    this.disconnect(false);
+    this.disconnect(true);
     this.taskId = task;
     this.onStatus?.("connecting");
 

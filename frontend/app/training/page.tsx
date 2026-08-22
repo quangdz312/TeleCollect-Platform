@@ -342,7 +342,7 @@ export default function TrainingPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">RoboMimic training</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Imitation learning</h1>
         <p className="mt-0.5 text-sm text-ink-400">
           Huấn luyện BC hoặc BC-RNN từ dataset HDF5 đã duyệt và theo dõi checkpoint.
         </p>
@@ -637,8 +637,9 @@ function EvaluationVideos({ evaluation }: { evaluation: EvaluationRun }) {
           <video
             controls
             muted
+            loop
             preload="metadata"
-            className="w-full rounded-lg border border-ink-700 bg-black"
+            className="w-full rounded-lg border border-tech-border bg-tech-bg"
             src={mediaUrl(`/training/evaluations/${evaluation.id}/videos/${episode.video}`)}
           />
           <div className="mt-1 text-xs text-ink-400">

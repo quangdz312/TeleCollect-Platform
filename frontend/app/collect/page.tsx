@@ -25,12 +25,22 @@ export default function CollectPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Thu data</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Thu data</h1>
         <p className="mt-0.5 text-sm text-ink-400">Chọn thu tay hoặc thu tự động. Episode đã lưu sẽ xuất hiện trong Review.</p>
       </div>
-      <div className="flex gap-2 rounded-lg border border-ink-700 bg-ink-900/60 p-1">
-        <button className={`rounded-md px-4 py-2 text-sm ${mode === "manual" ? "bg-accent-500 text-white" : "text-ink-300"}`} onClick={() => setMode("manual")}>Thu tay</button>
-        <button className={`rounded-md px-4 py-2 text-sm ${mode === "scripted" ? "bg-accent-500 text-white" : "text-ink-300"}`} onClick={() => setMode("scripted")}>Thu tự động</button>
+      <div className="flex w-fit gap-1 rounded-lg border border-ink-700 bg-ink-850 p-1">
+        <button
+          className={`rounded-[7px] px-4 py-2 text-sm font-semibold transition-all ${mode === "manual" ? "bg-ink-900 text-accent-500 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" : "text-ink-300 hover:text-accent-500"}`}
+          onClick={() => setMode("manual")}
+        >
+          Thu tay
+        </button>
+        <button
+          className={`rounded-[7px] px-4 py-2 text-sm font-semibold transition-all ${mode === "scripted" ? "bg-ink-900 text-accent-500 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" : "text-ink-300 hover:text-accent-500"}`}
+          onClick={() => setMode("scripted")}
+        >
+          Thu tự động
+        </button>
       </div>
       {mode === "scripted" ? <ScriptedCollector /> : !tasks ? <Empty>Đang tải task…</Empty> : tasks.length === 0 ? <Alert>Không có simulator task.</Alert> : <TeleopConsole tasks={tasks} />}
     </div>

@@ -126,7 +126,14 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
     setFrame(null);
   }, []);
 
-  useEffect(() => () => clientRef.current?.disconnect(), []);
+  useEffect(() => {
+    const onPageHide = () => clientRef.current?.disconnect();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      clientRef.current?.disconnect();
+    };
+  }, []);
 
   // -- input pump ------------------------------------------------------
   useEffect(() => {
@@ -247,7 +254,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
               deriving them from `100dvh` cannot work at all -- the viewport
               does not know how much of the card the header above took. */}
           <div className="flex aspect-[4/3] w-full gap-2">
-          <div className="relative h-full flex-[3] overflow-hidden rounded-lg border border-ink-700 bg-black">
+          <div className="relative h-full flex-[3] overflow-hidden rounded-lg border border-tech-border bg-tech-bg">
             <canvas
               ref={frontRef}
               width={256}
@@ -643,7 +650,7 @@ function SidePane({
   connected: boolean;
 }) {
   return (
-    <div className="relative min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-ink-700 bg-black">
+    <div className="relative min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border border-tech-border bg-tech-bg">
       <canvas
         ref={canvasRef}
         width={128}
