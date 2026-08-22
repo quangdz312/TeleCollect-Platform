@@ -1,54 +1,37 @@
-"""Seed 3 task mặc định: pick_place, stack, push.
+"""Seed the tasks table from the simulator's own task registry.
 
-BẮT BUỘC phải chạy trước khi upload demo — `episodes.task_name` tham chiếu
-tới `tasks.name`, bảng `tasks` rỗng thì `POST /demos/upload` sẽ fail vì
-`task_name` không tồn tại.
+REQUIRED before uploading a demo: `episodes.task_name` references `tasks.name`,
+so an empty table makes `POST /demos/upload` fail on a missing task.
 
-Dùng:
+Usage:
     python -m scripts.seed_tasks
 
-Idempotent: task nào đã có (theo `name`) thì bỏ qua, không ghi đè, không
-nhân bản. Chạy lại nhiều lần an toàn.
+The rows are read from `src.sim.tasks`, never written out by hand. An earlier
+version hard-coded `pick_place`, `stack` and `push` -- robosuite sample tasks
+from before the four real ones were settled on. The simulator moved on and this
+table did not, so the review filter offered `push` and `stack`, which no
+episode can ever carry, and spelled the can task `pick_place` where the
+simulator calls it `pick_place_can`. Reading the registry keeps the two from
+drifting apart again.
+
+Idempotent: an existing task (matched on `name`) has its metadata refreshed
+rather than duplicated. Stale rows that the simulator no longer registers are
+removed, unless an episode still references them -- those are reported and
+left alone, since deleting one would orphan recorded work.
 """
 
 import asyncio
 import sys
 from pathlib import Path
 
-# Cho phép chạy cả `python scripts/seed_tasks.py` lẫn `python -m scripts.seed_tasks`
-# — cách đầu không tự thêm thư mục gốc repo vào sys.path nên `import src.*` sẽ vỡ.
+# Allows both `python scripts/seed_tasks.py` and `python -m scripts.seed_tasks`
+# -- the former does not put the repo root on sys.path, breaking `import src.*`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 
-from src.models.db import Task, get_engine, init_db, session_factory
-
-DEFAULT_TASKS = [
-    {
-        "name": "pick_place",
-        "description": "Nhặt một vật thể và đặt vào vị trí mục tiêu.",
-        "instruction": "Gắp vật thể màu đỏ trên bàn và đặt vào khay đích ở góc phải.",
-        "hints": ["Giữ gripper song song với mặt bàn", "Hạ chậm trước khi gắp"],
-        "action_dim": 7,
-        "max_steps": 200,
-    },
-    {
-        "name": "stack",
-        "description": "Xếp chồng khối này lên khối khác.",
-        "instruction": "Xếp khối xanh lên trên khối vàng sao cho không đổ.",
-        "hints": ["Căn giữa trước khi hạ", "Thả tay gripper từ từ"],
-        "action_dim": 7,
-        "max_steps": 250,
-    },
-    {
-        "name": "push",
-        "description": "Đẩy vật thể tới vị trí đích trên mặt bàn.",
-        "instruction": "Đẩy khối gỗ tới vạch đích màu trắng mà không làm rơi khỏi bàn.",
-        "hints": ["Đẩy theo đường thẳng", "Giảm tốc khi gần đích"],
-        "action_dim": 7,
-        "max_steps": 150,
-    },
-]
+from src.models.db import Episode, Task, get_engine, init_db, session_factory
+from src.sim.tasks import list_tasks
 
 
 async def seed_tasks() -> None:
@@ -56,14 +39,41 @@ async def seed_tasks() -> None:
     await init_db(engine)
     factory = session_factory(engine)
 
+    specs = list_tasks()
+    wanted = {spec.name for spec in specs}
+
     async with factory() as session:
-        for spec in DEFAULT_TASKS:
-            existing = await session.scalar(select(Task).where(Task.name == spec["name"]))
-            if existing is not None:
-                print(f"Task '{spec['name']}' đã tồn tại — bỏ qua.")
+        for spec in specs:
+            existing = await session.scalar(select(Task).where(Task.name == spec.name))
+            if existing is None:
+                session.add(
+                    Task(
+                        name=spec.name,
+                        description=spec.description,
+                        instruction=spec.description,
+                        hints=[],
+                        action_dim=7,
+                        max_steps=spec.max_steps,
+                    )
+                )
+                print(f"Created task '{spec.name}'.")
                 continue
-            session.add(Task(**spec))
-            print(f"Đã tạo task '{spec['name']}'.")
+            existing.description = spec.description
+            existing.max_steps = spec.max_steps
+            print(f"Task '{spec.name}' already present - metadata refreshed.")
+
+        for task in (await session.scalars(select(Task))).all():
+            if task.name in wanted:
+                continue
+            referenced = await session.scalar(
+                select(Episode).where(Episode.task_name == task.name).limit(1)
+            )
+            if referenced is not None:
+                print(f"Task '{task.name}' is not a simulator task but has episodes - kept.")
+                continue
+            await session.delete(task)
+            print(f"Removed stale task '{task.name}'.")
+
         await session.commit()
 
 
