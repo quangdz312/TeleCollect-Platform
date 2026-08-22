@@ -45,7 +45,7 @@ export function ScriptedCollector() {
         const next = await labeling.run(job.id);
         setJob(next);
         if (next.status === "succeeded") {
-          setNotice(`Đã thu ${next.result.episodes ?? 0} episode. Dữ liệu sẵn sàng trong hàng đợi review scripted.`);
+          setNotice(`Collected ${next.result.episodes ?? 0} episodes. They are queued in the scripted review list.`);
           await loadConfig();
         }
         if (next.status === "failed") setError(next.error ?? "Collection failed.");
@@ -61,7 +61,7 @@ export function ScriptedCollector() {
     setNotice(null);
     const parsedEpisodes = Number(episodeCount);
     if (!Number.isInteger(parsedEpisodes) || parsedEpisodes < 1 || parsedEpisodes > 200) {
-      setError("Episodes phải là số nguyên từ 1 đến 200.");
+      setError("Episodes must be a whole number between 1 and 200.");
       return;
     }
     try {
@@ -85,7 +85,7 @@ export function ScriptedCollector() {
         <Stat label="Rejected" value={config?.workspace.rejected ?? 0} tone="bad" />
         <Stat label="Pending" value={config?.workspace.pending ?? 0} tone="warn" />
       </div>
-      <Card title="Thu tự động" subtitle="Sinh episode scripted để chuyển sang hàng đợi review.">
+      <Card title="Scripted collection" subtitle="Generate scripted episodes and send them to the review queue.">
         <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_140px_140px_auto] md:items-end">
           <Field label="Task">
             <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
@@ -94,7 +94,7 @@ export function ScriptedCollector() {
               ))}
             </Select>
           </Field>
-          <Field label="Collection batch" hint="Dùng lại cùng ID cho clean/good/medium của một dataset">
+          <Field label="Collection batch" hint="Reuse one id across the clean/good/medium runs of a dataset">
             <Input
               value={batchId}
               disabled={running}
@@ -133,10 +133,10 @@ export function ScriptedCollector() {
             disabled={running || !config || !/^\d+$/.test(episodeCount) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(batchId)}
             onClick={startRun}
           >
-            {running ? `Đang chạy ${Math.round((job?.progress ?? 0) * 100)}%` : "Bắt đầu thu"}
+            {running ? `Running ${Math.round((job?.progress ?? 0) * 100)}%` : "Start collection"}
           </Button>
         </div>
-        <Alert tone="info">Noise giảm theo phase; một số episode non-clean có tối đa một semantic fault có kiểm soát. Auto-gate xử lý các trường hợp chắc chắn và giữ trường hợp không rõ để review.</Alert>
+        <Alert tone="info">Noise decreases across phases; some non-clean episodes carry at most one controlled semantic fault. The auto-gate settles the clear-cut cases and leaves the uncertain ones for review.</Alert>
         {job && (
           <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-850/60 p-3 text-xs">
             <div className="mb-2 flex items-center justify-between">

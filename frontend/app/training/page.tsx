@@ -154,7 +154,7 @@ export default function TrainingPage() {
   useEffect(() => {
     if (!user) return;
     void load().catch((exc) =>
-      setError(exc instanceof Error ? exc.message : "Không tải được dữ liệu training"),
+      setError(exc instanceof Error ? exc.message : "Could not load training data"),
     );
   }, [load, user]);
 
@@ -251,7 +251,7 @@ export default function TrainingPage() {
       setRunView("active");
       await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Không thể bắt đầu training");
+      setError(exc instanceof Error ? exc.message : "Could not start training");
     } finally {
       setBusy(false);
     }
@@ -265,7 +265,7 @@ export default function TrainingPage() {
       await api.cancelRun(selected.id);
       await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Không thể hủy training");
+      setError(exc instanceof Error ? exc.message : "Could not cancel training");
     } finally {
       setBusy(false);
     }
@@ -282,7 +282,7 @@ export default function TrainingPage() {
       });
       await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Không thể bắt đầu evaluation");
+      setError(exc instanceof Error ? exc.message : "Could not start evaluation");
     } finally {
       setBusy(false);
     }
@@ -295,7 +295,7 @@ export default function TrainingPage() {
       await api.cancelEvaluation(evaluationId);
       await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Không thể hủy evaluation");
+      setError(exc instanceof Error ? exc.message : "Could not cancel evaluation");
     } finally {
       setBusy(false);
     }
@@ -344,16 +344,16 @@ export default function TrainingPage() {
       <div>
         <h1 className="font-heading text-[22px] font-bold tracking-tight">Imitation learning</h1>
         <p className="mt-0.5 text-sm text-ink-400">
-          Huấn luyện BC hoặc BC-RNN từ dataset HDF5 đã duyệt và theo dõi checkpoint.
+          Train BC or BC-RNN from an approved HDF5 dataset and follow the checkpoints.
         </p>
       </div>
 
       {error && <Alert>{error}</Alert>}
 
       {canTrain && (
-        <Card title="New training run" subtitle="Mỗi thời điểm backend chỉ chạy một job để tránh tranh GPU.">
+        <Card title="New training run" subtitle="The backend runs one job at a time so runs do not contend for the GPU.">
           {datasets.length === 0 ? (
-            <Empty>Hãy export ít nhất một RoboMimic dataset ở trạng thái ready.</Empty>
+            <Empty>Export at least one RoboMimic dataset in the ready state first.</Empty>
           ) : (
             <>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -424,20 +424,20 @@ export default function TrainingPage() {
                 )}
               </div>
               {form.normalize_observations && (
-                <div className="mt-3"><Alert tone="info">RoboMimic không hỗ trợ normalization cùng validation split. Run này sẽ chọn checkpoint bằng simulator rollout success thay cho validation loss.</Alert></div>
+                <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
               )}
               <div className="mt-4 flex items-center gap-3">
                 <Button variant="primary" disabled={busy || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
                   {busy ? "Starting…" : "Start training"}
                 </Button>
-                <span className="text-xs text-ink-400">Training tiếp tục ở backend nếu bạn chuyển tab.</span>
+                <span className="text-xs text-ink-400">Training keeps running on the backend if you switch tabs.</span>
               </div>
             </>
           )}
         </Card>
       )}
 
-      <Card title="Training workspace" subtitle="Chọn task và run cần xem; các run lưu trữ vẫn có thể mở lại bất cứ lúc nào.">
+      <Card title="Training workspace" subtitle="Pick a task and a run; archived runs can be reopened at any time.">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Task">
             <Select value={selectedTask} onChange={(event) => selectTask(event.target.value)}>
@@ -467,7 +467,7 @@ export default function TrainingPage() {
 
       <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card title="Training runs">
-          {visibleRuns.length === 0 ? <Empty>Không có training run phù hợp bộ lọc.</Empty> : (
+          {visibleRuns.length === 0 ? <Empty>No training run matches the filter.</Empty> : (
             <ul className="space-y-2">
               {visibleRuns.map((run) => (
                 <li key={run.id}>
@@ -484,7 +484,7 @@ export default function TrainingPage() {
           )}
         </Card>
 
-        {!selected ? <Empty>Chọn một training run để xem chi tiết.</Empty> : (
+        {!selected ? <Empty>Select a training run to see its details.</Empty> : (
           <div className="space-y-5">
             <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge><Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}</div>}>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -497,8 +497,8 @@ export default function TrainingPage() {
               {selected.error && <div className="mt-3"><Alert><pre className="whitespace-pre-wrap text-xs">{selected.error}</pre></Alert></div>}
             </Card>
 
-            <Card title="Checkpoints" subtitle="Best validation là checkpoint có validation loss thấp nhất.">
-              {!selected.checkpoints?.length ? <Empty>Chưa có checkpoint.</Empty> : (
+            <Card title="Checkpoints" subtitle="Best validation is the checkpoint with the lowest validation loss.">
+              {!selected.checkpoints?.length ? <Empty>No checkpoint yet.</Empty> : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">File</th><th className="px-2 py-2">Tags</th></tr></thead>
@@ -519,7 +519,7 @@ export default function TrainingPage() {
             </Card>
 
             {selected.status === "succeeded" && Boolean(selected.checkpoints?.length) && (
-              <Card title="Evaluate in simulator" subtitle="Mỗi rollout dùng một seed khác nhau; mặc định chọn best validation.">
+              <Card title="Evaluate in simulator" subtitle="Each rollout uses a different seed; the best-validation checkpoint is the default.">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <Field label="Checkpoint">
                     <Select value={evaluationForm.checkpoint_id} onChange={(event) => setEvaluationForm({ ...evaluationForm, checkpoint_id: event.target.value })}>
@@ -554,13 +554,13 @@ export default function TrainingPage() {
                   </span>
                 </div>
                 {evaluationForm.record_videos > evaluationForm.num_rollouts && (
-                  <div className="mt-3"><Alert>Số video không được lớn hơn số rollout.</Alert></div>
+                  <div className="mt-3"><Alert>The video count cannot exceed the rollout count.</Alert></div>
                 )}
               </Card>
             )}
 
             <Card title="Evaluation results">
-              {selectedEvaluations.length === 0 ? <Empty>Chưa chạy evaluation cho training run này.</Empty> : (
+              {selectedEvaluations.length === 0 ? <Empty>No evaluation has run for this training run yet.</Empty> : (
                 <div className="space-y-2">
                   {visibleEvaluations.map((evaluation) => {
                     const successes = evaluation.episodes.filter((episode) => episode.success).length;
@@ -613,8 +613,8 @@ export default function TrainingPage() {
               )}
             </Card>
 
-            <Card title="Job log" subtitle="Đóng mặc định; log vẫn được cập nhật trong khi RoboMimic đang chạy." actions={<Button variant="subtle" onClick={() => setShowJobLog((value) => !value)}>{showJobLog ? "Hide log" : "Open log"}</Button>}>
-              {showJobLog && (log ? <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-3 text-[11px] leading-relaxed text-ink-300">{log}</pre> : <Empty>Chưa có log.</Empty>)}
+            <Card title="Job log" subtitle="Collapsed by default; the log keeps updating while RoboMimic runs." actions={<Button variant="subtle" onClick={() => setShowJobLog((value) => !value)}>{showJobLog ? "Hide log" : "Open log"}</Button>}>
+              {showJobLog && (log ? <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-3 text-[11px] leading-relaxed text-ink-300">{log}</pre> : <Empty>No log yet.</Empty>)}
             </Card>
           </div>
         )}

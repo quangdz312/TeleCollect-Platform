@@ -12,15 +12,15 @@ const VIDEO_ACCEPT = "video/mp4,video/quicktime,.mp4,.mov";
  * straight from `src/api/demos.py` (`detail` string). */
 function uploadErrorMessage(exc: unknown): string {
   if (exc instanceof ApiError) {
-    if (exc.status === 413) return `File vượt quá dung lượng cho phép: ${exc.message}`;
+    if (exc.status === 413) return `File exceeds the size limit: ${exc.message}`;
     if (exc.status === 422) return exc.message;
     if (exc.status === 404) {
-      return "Task đã chọn không còn tồn tại — tải lại danh sách task và chọn lại.";
+      return "The selected task no longer exists — reload the task list and pick again.";
     }
-    if (exc.status === 0) return "Không kết nối được máy chủ — kiểm tra mạng rồi thử lại.";
+    if (exc.status === 0) return "Could not reach the server — check the network and try again.";
     return exc.message;
   }
-  return "Upload thất bại";
+  return "Upload failed";
 }
 
 export default function UploadPage() {
@@ -74,15 +74,15 @@ export default function UploadPage() {
       <div>
         <h1 className="font-heading text-[22px] font-bold tracking-tight">Upload demo</h1>
         <p className="mt-0.5 text-sm text-ink-400">
-          Thêm một bản ghi thu ở nơi khác (ví dụ robot thật). Demo sẽ vào hàng đợi review ngay
+          Add a recording captured elsewhere (a real robot, for instance). The demo enters the review queue right away
           sau khi upload xong.
         </p>
       </div>
 
-      <Card title="Upload mới">
+      <Card title="New upload">
         <Field label="Task" className="mb-4 max-w-xs">
           <Select value={taskId} onChange={(e) => setTaskId(e.target.value)} disabled={busy}>
-            {tasks.length === 0 && <option value="">Đang tải task…</option>}
+            {tasks.length === 0 && <option value="">Loading tasks…</option>}
             {tasks.map((task) => (
               <option key={task.id} value={task.id}>
                 {task.title}
@@ -145,7 +145,7 @@ export default function UploadPage() {
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button variant="primary" disabled={!canSubmit} onClick={submit}>
-            {busy ? `Đang upload… ${progress}%` : "Upload"}
+            {busy ? `Uploading… ${progress}%` : "Upload"}
           </Button>
         </div>
 

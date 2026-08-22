@@ -233,9 +233,9 @@ export function HandControl({
         <span>Depth ×{state?.scaleRatio.toFixed(2) ?? "1.00"}</span>
         <span>Gripper {state?.input.gripper === 1 ? "closed" : "open"}</span>
         <span>{state?.clutched ? "Clutched" : state?.active ? "Control active" : "Control stopped"}</span>
-        <span className="font-mono">Tiến/lùi {signed(state?.input.linear[0])}</span>
-        <span className="font-mono">Trái/phải {signed(state?.input.linear[1])}</span>
-        <span className="font-mono">Lên/xuống {signed(state?.input.linear[2])}</span>
+        <span className="font-mono">Forward/back {signed(state?.input.linear[0])}</span>
+        <span className="font-mono">Left/right {signed(state?.input.linear[1])}</span>
+        <span className="font-mono">Up/down {signed(state?.input.linear[2])}</span>
         <span className="font-mono">Xoay Z {signed(state?.input.angular[2])}</span>
         <span className="font-mono">{state?.rollVelocityDeg.toFixed(1) ?? "0.0"}°/s</span>
         <span>{state?.rotationActive ? "ROTATING" : "Rotation idle"}</span>
@@ -250,7 +250,7 @@ export function HandControl({
           <span>Tracking rate</span><span className="text-right font-mono">{diagnostics ? `${diagnostics.cameraFps.toFixed(1)} fps` : "—"}</span>
         </div>
       </div>
-      <p className="text-xs text-ink-400">Di chuyển bàn tay để điều khiển XYZ. Xoay cổ tay sang trái/phải để đổi hướng lòng bàn tay và xoay gripper theo trục Z; dừng xoay tay thì gripper dừng. Xòe tay: mở gripper. Nắm tay: đóng gripper. Giữ 👍 để clutch.</p>
+      <p className="text-xs text-ink-400">Move your hand to drive XYZ. Turn your wrist left or right to change the palm direction and rotate the gripper about Z; stop turning and the gripper stops. Open hand: open the gripper. Fist: close it. Hold 👍 to clutch.</p>
     </div>
   );
 }

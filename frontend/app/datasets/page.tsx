@@ -133,7 +133,7 @@ export default function DatasetsPage() {
             <Field label="Name" hint="Becomes the directory and the DVC-tracked version">
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Collection batch" hint="Chỉ lấy episode thuộc batch này">
+            <Field label="Collection batch" hint="Only include episodes from this batch">
               <Input value={batchId} onChange={(e) => setBatchId(e.target.value)} />
             </Field>
             <Field label="Format">

@@ -59,12 +59,12 @@ export function ScriptedReviewRows({
   return <>
     {loading && (
       <tr className="border-t border-ink-700/50">
-        <td colSpan={9} className="py-6 text-center text-sm text-ink-400">Đang tải episode scripted…</td>
+        <td colSpan={9} className="py-6 text-center text-sm text-ink-400">Loading scripted episodes…</td>
       </tr>
     )}
     {!loading && episodes.length === 0 && (
       <tr className="border-t border-ink-700/50">
-        <td colSpan={9} className="py-6 text-center text-sm text-ink-400">Chưa có episode scripted.</td>
+        <td colSpan={9} className="py-6 text-center text-sm text-ink-400">No scripted episodes yet.</td>
       </tr>
     )}
     {episodes.map((episode) => (
