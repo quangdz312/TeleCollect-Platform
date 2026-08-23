@@ -1,9 +1,9 @@
 """Built-in tool catalog."""
 
-from .pick_place_can import register_can_tools
-from .lift_cube import register_lift_tools
-from .registry import ToolRegistry
 from .assemble_square import register_square_tools
+from .lift_cube import register_lift_tools
+from .pick_place_can import register_can_tools
+from .registry import ToolRegistry
 
 
 def build_default_registry() -> ToolRegistry:

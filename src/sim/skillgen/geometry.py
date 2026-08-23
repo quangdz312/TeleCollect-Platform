@@ -215,7 +215,7 @@ def threaded(env, hook):
     ring, the centre is within the aperture, and it is far enough along the bar.
     Tilt is left free, because the task leaves it free.
     """
-    d, m = env.sim.data, env.sim.model
+    d = env.sim.data
     origin = d.site_xpos[env.obj_site_id["frame_hang_site"]].copy()
     vec = d.site_xpos[env.obj_site_id["frame_intersection_site"]] - origin
     length = float(np.linalg.norm(vec))
@@ -228,7 +228,7 @@ def threaded(env, hook):
 
     n = env.tool_args["ngeoms"]
     g1 = d.geom_xpos[env.obj_geom_id["tool_hole1_hc_0"]] - origin
-    g2 = d.geom_xpos[env.obj_geom_id["tool_hole1_hc_%d" % (n // 2)]] - origin
+    g2 = d.geom_xpos[env.obj_geom_id[f"tool_hole1_hc_{n // 2}"]] - origin
     # Opposite sides of the bar axis: the sign of the cross products disagrees
     # only when the axis runs between the two geoms.
     between = float(np.dot(np.cross(g1, axis), np.cross(g2, axis))) < 0.0

@@ -5,6 +5,15 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
+[lint.per-file-ignores]
+# Standard robotics/linear-algebra notation used consistently across this
+# subsystem: R (rotation matrix), J (Jacobian), and T/F/G/GP as module
+# aliases for transform_utils/feasibility/geometry/graspplan. Renaming these
+# to satisfy N806/N812/N803 would touch every call site in five files for a
+# pure style change against well-established domain convention, not a
+# correctness fix — scoped here instead of renamed or globally ignored.
+"src/sim/skillgen/*.py" = ["N806", "N812", "N803"]
+
 [format]
 quote-style = "double"
 indent-style = "space"

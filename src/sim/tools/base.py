@@ -6,16 +6,20 @@ internal operator remains responsible for producing control-rate actions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
 from src.sim.collection.robomimic_hdf5_writer import EpisodeData
 
 
-class ToolStatus(str, Enum):
+# enum.StrEnum's str()/format() output differs from this (str, Enum) mixin in
+# ways that would change behavior wherever a member is printed or serialized
+# implicitly, not just its style — kept as-is rather than "modernized".
+class ToolStatus(str, Enum):  # noqa: UP042
     SUCCESS = "success"
     FAILED = "failed"
     ENVIRONMENT_DONE = "environment_done"

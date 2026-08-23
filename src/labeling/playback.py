@@ -83,8 +83,14 @@ def _render_views(env: Any, config: PlaybackConfig) -> np.ndarray:
             return None
 
     half = config.height // 2
+    main = shot(config.camera, config.height)
+    if main is None:
+        # _compose has no fallback for the main pane (unlike the side panes,
+        # which are optional) — it would previously fail deeper inside with a
+        # confusing AttributeError on `None.shape` instead of this.
+        raise RuntimeError(f"could not render main camera '{config.camera}'")
     return _compose(
-        shot(config.camera, config.height),
+        main,
         shot(config.top_camera, half),
         shot(config.wrist_camera, half),
     )

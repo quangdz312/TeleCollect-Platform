@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from src.sim.operators.scripted_square import SquareOperatorConfig, SquarePhase, ScriptedSquareOperator
+from src.sim.operators.scripted_square import ScriptedSquareOperator, SquareOperatorConfig, SquarePhase
 from src.sim.perturbations.variations import SquareVariation
 
 

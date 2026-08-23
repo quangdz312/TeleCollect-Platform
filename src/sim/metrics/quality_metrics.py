@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 import numpy as np
-
 
 ARM_DIMENSIONS = 6
 ACTION_ENTROPY_BINS = 20
@@ -173,7 +173,7 @@ def convex_hull_coverage(episodes: Sequence[TrajectoryEpisode]) -> dict[str, Any
         for episode in episodes
         for observation in episode.observations
         if np.asarray(observation.get('robot0_eef_pos')).shape == (3,)
-        and np.isfinite(observation.get('robot0_eef_pos')).all()
+        and np.isfinite(np.asarray(observation.get('robot0_eef_pos'))).all()
     ]
     if not positions:
         return {'points': 0, 'unique_points': 0, 'volume': 0.0, 'warning': 'no EEF positions'}

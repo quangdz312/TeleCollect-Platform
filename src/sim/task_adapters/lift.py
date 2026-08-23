@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.sim.collection.robomimic_hdf5_writer import RobomimicHDF5Writer
 from src.sim.lift_env import reset_lift_environment

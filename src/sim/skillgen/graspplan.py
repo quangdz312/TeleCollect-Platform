@@ -15,7 +15,6 @@ from . import feasibility as F
 from .compat import grip_site_id
 from .primitives import grasp_mat
 
-
 IK_POS_TOL = 5e-3
 IK_ROT_TOL = np.radians(15.0)
 IK_ITERS = 300
@@ -70,10 +69,6 @@ def _grasp_quality(model, geom_name, surf_dist):
     """
     gid = model.geom_name2id(geom_name)
     half = np.asarray(model.geom_size[gid], dtype=float)[:3]
-    # Smallest cross-section the jaws would span, and the depth of material
-    # behind the contact. A thin plate grasped on its face is fine; a small
-    # box approximating a curve is not.
-    thickness = 2.0 * float(np.min(half))
     footprint = 2.0 * float(np.median(half))
     curved = "hc_" in geom_name  # annulus approximation, not a real flat face
     q = footprint * (1.0 if not curved else 0.2)
@@ -88,7 +83,7 @@ def _hand_sweep(env, q_a, q_b, samples=17):
     """
     m, d = env.sim.model, env.sim.data
     sid = grip_site_id(m)
-    qadr = [m.jnt_qposadr[m.joint_name2id("robot0_joint%d" % i)] for i in range(1, 8)]
+    qadr = [m.jnt_qposadr[m.joint_name2id(f"robot0_joint{i}")] for i in range(1, 8)]
     saved = d.qpos.copy()
     try:
         pts = []

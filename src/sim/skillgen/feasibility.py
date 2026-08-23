@@ -12,7 +12,6 @@ import numpy as np
 
 from .compat import grip_site_id
 
-
 DEFAULT_LIMIT_MARGIN = 0.05
 CONTINUE_FRACTION_THRESHOLD = 0.5
 
@@ -29,7 +28,7 @@ class IKResult:
 
 def _joint_layout(model):
     ids = [
-        model.joint_name2id("robot0_joint%d" % i)
+        model.joint_name2id(f"robot0_joint{i}")
         for i in range(1, 8)
     ]
     qadr = [model.jnt_qposadr[j] for j in ids]

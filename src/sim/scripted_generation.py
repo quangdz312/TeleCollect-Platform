@@ -119,19 +119,6 @@ def _tool_hang_spec() -> CollectionTaskSpec:
     )
 
 
-def _tool_hang_dataset_provenance(seed: int) -> DatasetProvenance:
-    return DatasetProvenance(
-        task='tool_hang', tool_name=TOOLHANG_TOOL_NAME, requested_quality='clean',
-        profile_version=TOOLHANG_PROFILE,
-        candidate_profile_version=TOOLHANG_PROFILE,
-        acceptance_amendment='full-task-env-predicate-gate', noise_scale=0.0,
-        base_seed=seed, task_code=TOOLHANG_TASK_CODE, stream_code=1,
-        coverage='stage1+stage2',
-        position_landmarks=('frame_pos', 'tool_pos'),
-        orientation_landmarks=('frame_quat', 'tool_quat'),
-    )
-
-
 _SPEC_FACTORIES: Mapping[str, Callable[[], CollectionTaskSpec]] = {
     'lift': _lift_spec,
     'can': _can_spec,
@@ -298,12 +285,18 @@ def run_collection(
             )
         from src.sim.tool_hang_collection import collect
 
+        # Guaranteed non-None here: the raise above covers "not dry_run and
+        # output is None", and the return above covers "dry_run" — so this
+        # line only runs when dry_run is False and output was checked
+        # non-None. Spelled out for mypy since it doesn't chain the two
+        # separate `if`s to derive that on its own.
+        assert output is not None
         result = collect(
             output, episodes=episodes, seed=seed, overwrite=overwrite, logger=logger,
             video_dir=video_dir, quality=profile.quality.value,
             collection_batch_id=collection_batch_id,
         )
-        records = tuple(
+        tool_hang_records = tuple(
             EpisodeRecord(
                 episode_index=item['episode_index'],
                 environment_seed=item['seed'],
@@ -332,7 +325,7 @@ def run_collection(
         return CollectionResult(
             task='tool_hang', tool_name=TOOLHANG_TOOL_NAME,
             quality=profile.quality.value,
-            output=Path(output), horizon=resolved_horizon, episodes=records,
+            output=Path(output), horizon=resolved_horizon, episodes=tool_hang_records,
             provenance=batch_provenance,
         )
 

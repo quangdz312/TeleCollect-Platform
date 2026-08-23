@@ -7,7 +7,6 @@ from typing import Any
 
 from .base import RobotTool
 
-
 ToolFactory = Callable[[Any], RobotTool]
 
 
