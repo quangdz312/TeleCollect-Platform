@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
 from src.sim.metrics.quality_metrics import TrajectoryEpisode, json_safe, noise_magnitudes
-from src.sim.metrics.quality_report import build_quality_report, report_markdown
+from src.sim.metrics.quality_report import build_quality_report
 from src.sim.task_adapters.can import build_can_tool_context
 from src.sim.task_adapters.lift import build_lift_tool_context
 from src.sim.task_adapters.square import build_square_tool_context
@@ -21,9 +22,8 @@ from src.sim.tools.defaults import build_default_registry
 from src.sim.tools.executor import execute_tool
 
 from .collection import TASK_LANDMARKS, build_runtime, retry_count
-from .profiles import PerturbationTask, Quality, resolve_profile
+from .profiles import PerturbationTask, resolve_profile
 from .runtime import environment_seed
-
 
 CALIBRATION_SEEDS = tuple(range(100, 120))
 HELDOUT_SEEDS = tuple(range(200, 210))

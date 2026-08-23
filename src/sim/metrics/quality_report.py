@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -18,7 +19,6 @@ from .quality_metrics import (
     local_action_variance,
     technical_validation,
 )
-
 
 REPORT_SCHEMA_VERSION = '1'
 

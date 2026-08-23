@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 LIFT_REFERENCE_DATASET = Path("data/datasets/lift/ph/low_dim_v15.hdf5")
 

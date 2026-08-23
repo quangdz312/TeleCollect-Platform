@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -120,7 +120,10 @@ def build_report(
             "pending": decisions["pending"],
         })
     coverage = _coverage(selected_ids, positions)
-    represented = sum(row["total"] > 0 for row in quality_rows)
+    # quality_rows entries are dict[str, object] (mixed str/int/bool values in
+    # the literal above collapse to that common type); "total" is always the
+    # int from len(subset) a few lines up.
+    represented = sum(cast(int, row["total"]) > 0 for row in quality_rows)
     if not selected:
         status = {"code": "no_data", "label": "No data", "detail": "No episodes match this scope."}
     elif len(selected) < 20:

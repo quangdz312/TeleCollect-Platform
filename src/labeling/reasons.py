@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -122,9 +123,13 @@ def disagreements(
     reviewer disagreeing with one is a calibration matter, not a defect.
     """
 
-    flags = score.get("auto_flags") or {}
-    failed = set(flags.get("failed_checks", []))  # type: ignore[union-attr]
-    unavailable = set(flags.get("unavailable_checks", []))  # type: ignore[union-attr]
+    # `score` is typed as Mapping[str, object] (an auto-label score dict of
+    # mixed value types), but "auto_flags" specifically is always a dict at
+    # runtime — cast documents that known shape instead of widening the
+    # whole Mapping's value type or silencing the checker.
+    flags = cast("dict[str, Any]", score.get("auto_flags") or {})
+    failed = set(flags.get("failed_checks", []))
+    unavailable = set(flags.get("unavailable_checks", []))
 
     missed: list[dict[str, str]] = []
     for code in reasons:

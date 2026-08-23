@@ -61,10 +61,11 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
 
   const pushLog = useCallback((text: string, tone: LogLine["tone"] = "info") => {
     logId.current += 1;
+    const id = logId.current;
     setLogs((previous) =>
       [
         {
-          id: logId.current,
+          id,
           text,
           tone,
           at: new Date().toLocaleTimeString(),
@@ -233,8 +234,8 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
                   Disconnect
                 </Button>
               ) : (
-                <Button variant="primary" onClick={connect}>
-                  Connect
+                <Button variant="primary" onClick={connect} disabled={status === "connecting"}>
+                  {status === "connecting" ? "Connecting…" : "Connect"}
                 </Button>
               )}
             </>

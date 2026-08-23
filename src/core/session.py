@@ -350,6 +350,10 @@ class SessionManager:
             loop = session.control_loop
             recording = loop is not None and loop.session_state() == SessionState.RECORDING.value
             if recording and now - disconnected_at >= grace:
+                # `recording` is only True when loop is not None (see above);
+                # mypy doesn't carry that through the stored bool, so it's
+                # re-asserted here.
+                assert loop is not None
                 try:
                     loop.submit_command("stop_recording", timeout=30.0, stop_reason="disconnect")
                 except Exception:

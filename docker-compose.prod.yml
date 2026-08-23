@@ -1,0 +1,103 @@
+# CPU-only staging production stack. One backend instance (SessionManager and
+# TrainingJobManager keep state in RAM — see src/core/session.py,
+# src/training/jobs.py — so more than one backend replica would split state
+# across processes and silently drop teleop sessions/training jobs).
+#
+# Only `caddy` publishes ports. frontend/backend stay on the internal Docker
+# network so 3000/8000 are never reachable from the public internet directly.
+#
+# Usage (see docs/DEPLOYMENT_STAGING.md):
+#   docker compose --env-file /srv/telecollect/secrets/.env.production \
+#     -f docker-compose.prod.yml config
+#   docker compose --env-file /srv/telecollect/secrets/.env.production \
+#     -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ${ENV_FILE:-/srv/telecollect/secrets/.env.production}
+    environment:
+      # Fail-closed default: Settings.training_enabled (src/config.py)
+      # defaults to True when unset, so if .env.production is ever missing
+      # this line, `environment:` (higher precedence than `env_file:` for the
+      # same key) keeps Training off instead of silently turning it on.
+      TRAINING_ENABLED: ${TRAINING_ENABLED:-false}
+    volumes:
+      - ${DATA_HOST_PATH:-/srv/telecollect/data}:/app/data
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://${PROJECT_DOMAIN}
+        NEXT_PUBLIC_API_ORIGIN: https://${PROJECT_DOMAIN}
+        NEXT_PUBLIC_WS_BASE: wss://${PROJECT_DOMAIN}
+        NEXT_PUBLIC_TRAINING_ENABLED: ${NEXT_PUBLIC_TRAINING_ENABLED:-false}
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      PROJECT_DOMAIN: ${PROJECT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - internal
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

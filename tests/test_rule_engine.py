@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from src.core.recorder import EpisodeRecorder, TELEOP_SCHEMA_VERSION
+from src.core.recorder import TELEOP_SCHEMA_VERSION, EpisodeRecorder
 from src.labeling.rule_engine import (
     RuleConfig,
     RuleEpisode,
@@ -10,7 +10,6 @@ from src.labeling.rule_engine import (
     load_manual_rule_episode,
 )
 from src.services import storage
-
 
 CONFIG = RuleConfig(stable_tail_frames=3)
 
@@ -202,6 +201,7 @@ def test_recorder_writes_privileged_state_schema(storage_dir):
     recorder.finalize()
 
     import json
+
     import pyarrow.parquet as pq
 
     meta = json.loads(storage.meta_path("episode_with_state").read_text(encoding="utf-8"))
@@ -219,6 +219,7 @@ def test_old_manual_episode_without_privileged_state_degrades_to_cannot_evaluate
     episode_dir.mkdir(parents=True)
 
     import json
+
     import pyarrow as pa
     import pyarrow.parquet as pq
 

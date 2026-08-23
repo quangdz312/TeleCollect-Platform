@@ -39,7 +39,7 @@ def test_batch_id_round_trips_from_dataset_metadata(tmp_path) -> None:
     with h5py.File(path, "w") as handle:
         data = handle.create_group("data")
         data.attrs["telecollect_collection_batch_id"] = "lift-scripted-v1.2"
-        demo = data.create_group("demo_0")
+        data.create_group("demo_0")
     with h5py.File(path, "r") as handle:
         provenance = _provenance(handle["data"], handle["data"]["demo_0"])
 

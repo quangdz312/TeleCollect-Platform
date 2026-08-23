@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
-
 #: The candidate marker these doses carried through Phase D2. Kept so dataset
 #: provenance can trace a published episode back to the frozen candidate run.
 CANDIDATE_PROFILE_VERSION = "candidate-phase-d2-frozen"
@@ -24,14 +23,17 @@ TOOLHANG_CANDIDATE_PROFILE_VERSION = "toolhang-phase-decay-calibration"
 TOOLHANG_ACCEPTANCE_AMENDMENT = "pending-calibration"
 
 
-class PerturbationTask(str, Enum):
+# See src/sim/tools/base.py ToolStatus for why these stay (str, Enum) instead
+# of enum.StrEnum: their str()/format() output differs, and these values may
+# already be logged/serialized as plain strings.
+class PerturbationTask(str, Enum):  # noqa: UP042
     LIFT = "lift"
     CAN = "can"
     SQUARE = "square"
     TOOL_HANG = "tool_hang"
 
 
-class Quality(str, Enum):
+class Quality(str, Enum):  # noqa: UP042
     CLEAN = "clean"
     GOOD = "good"
     MEDIUM = "medium"

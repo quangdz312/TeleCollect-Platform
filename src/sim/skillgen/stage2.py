@@ -13,11 +13,10 @@ hard as before.
 import numpy as np
 import robosuite.utils.transform_utils as T
 
-from . import geometry as G
 from . import feasibility as F
-from . import graspplan as GP
+from . import geometry as G
 from .compat import grip_site_id
-from .primitives import Servo, grasp_mat, body_geom_names, CLOSE, OPEN
+from .primitives import CLOSE, OPEN, body_geom_names, grasp_mat
 
 APPROACH_UP = 0.09
 LIFT_CLEAR = 0.15
@@ -123,7 +122,7 @@ class Stage2:
     def _arm_q(self):
         """Current joint angles of the seven arm joints, in order."""
         m, d = self.env.sim.model, self.env.sim.data
-        return np.array([d.qpos[m.jnt_qposadr[m.joint_name2id("robot0_joint%d" % i)]]
+        return np.array([d.qpos[m.jnt_qposadr[m.joint_name2id(f"robot0_joint{i}")]]
                          for i in range(1, 8)])
 
     def _holdable(self, target_pos, target_mat):
@@ -270,7 +269,7 @@ class Stage2:
         """
         import mujoco
         m, d = self.env.sim.model, self.env.sim.data
-        ids = [m.joint_name2id("robot0_joint%d" % i) for i in range(1, 8)]
+        ids = [m.joint_name2id(f"robot0_joint{i}") for i in range(1, 8)]
         keep = d.qpos.copy()
         try:
             for j, v in zip(ids, np.asarray(self.env.robots[0].init_qpos, float)):

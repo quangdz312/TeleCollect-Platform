@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from src.sim.collection.robomimic_hdf5_writer import RobomimicHDF5Writer
 from src.sim.can_env import reset_can_environment
+from src.sim.collection.robomimic_hdf5_writer import RobomimicHDF5Writer
 from src.sim.tools.base import ToolContext
 
 

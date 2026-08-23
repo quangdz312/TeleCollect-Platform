@@ -304,7 +304,13 @@ def collect(
                     success = outcome["success"]
                     summary = _episode_summary(outcome, episode_seed, knobs)
                     failure = _failure_kind(outcome)
-                    terminal_reason = "success" if success else failure
+                    if success:
+                        terminal_reason = "success"
+                    else:
+                        # _failure_kind() returns None only when outcome["success"]
+                        # is True, so this is guaranteed non-None here.
+                        assert failure is not None
+                        terminal_reason = failure
                     terminal_phase = "done" if success else (skill.phase or "unknown")
                     logger(
                         f"episode={index} seed={episode_seed} success={success} "
@@ -372,6 +378,9 @@ def collect(
                         # `write_episode` names demos in write order, so this
                         # episode is `demo_<kept>` — the key `video_filename`
                         # builds the cached review video's name from.
+                        # recorder is only ever created when video_dir was set
+                        # (see above), so this is guaranteed non-None here.
+                        assert video_dir is not None
                         target = video_dir / f"{output.stem}__demo_{kept}.mp4"
                         try:
                             if recorder.write(target) is not None:

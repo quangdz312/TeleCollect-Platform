@@ -11,7 +11,10 @@ import numpy as np
 from src.sim.perturbations.variations import SquareVariation
 
 
-class SquarePhase(str, Enum):
+# See src/sim/tools/base.py ToolStatus for why this stays (str, Enum) instead
+# of enum.StrEnum: their str()/format() output differs, and phase names may
+# already be logged/serialized as plain strings.
+class SquarePhase(str, Enum):  # noqa: UP042
     APPROACH_NUT = "approach_nut"
     ALIGN_NUT = "align_nut"
     DESCEND = "descend"
@@ -279,7 +282,16 @@ class ScriptedSquareOperator:
                     dtype=np.float64,
                 ),
             )
-        target_yaw = 0.0 if bias == 0.0 else self._yaw(self._desired_peg_quaternion)
+        if bias == 0.0:
+            target_yaw = 0.0
+        else:
+            # Guaranteed non-None here: the guard above sets it whenever
+            # bias != 0.0 and it was still None. mypy doesn't carry that
+            # narrowing across statements for an instance attribute, so it's
+            # copied to a local first.
+            desired_peg_quaternion = self._desired_peg_quaternion
+            assert desired_peg_quaternion is not None
+            target_yaw = self._yaw(desired_peg_quaternion)
         return self._symmetric_yaw_error(target_yaw, self._yaw(eef_quaternion))
 
     def _nut_on_target(self, nut_position: np.ndarray) -> bool:
@@ -353,7 +365,6 @@ class ScriptedSquareOperator:
             0.0 if semantic is None else semantic.peg_approach_height_offset
         )
         insert_depth = 0.0 if semantic is None else semantic.insert_depth_offset
-        eef_yaw = self._yaw(eef_quat)
         try:
             grasp_yaw_error = self._grasp_yaw_error(
                 nut_quat,

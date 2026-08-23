@@ -171,7 +171,7 @@ class EpisodeRecorder:
 
             for camera in cameras:
                 if camera in self.human_cameras:
-                    anonymize.anonymize_video(storage.video_path(self.episode_id, camera))
+                    anonymize.anonymize_video(str(storage.video_path(self.episode_id, camera)))
 
         meta = EpisodeMeta(
             episode_id=self.episode_id,

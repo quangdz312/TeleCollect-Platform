@@ -3,8 +3,7 @@
 The skill emits one StepTelemetry per control step. Nothing downstream may
 assume anything beyond these fields.
 """
-from dataclasses import dataclass, asdict, field
-from typing import Optional, List
+from dataclasses import asdict, dataclass, field
 
 # Phases, in execution order. The viewer renders these as a progress strip.
 PHASES = [
@@ -67,8 +66,8 @@ class StepTelemetry:
     # state
     grasped: bool
     n_contacts: int
-    eef_pos: List[float]
-    tip_pos: List[float]
+    eef_pos: list[float]
+    tip_pos: list[float]
     # thresholds, so the viewer can draw the bar without importing geometry
     capture_tol_mm: float
     seat_depth_mm: float
@@ -85,14 +84,14 @@ class EpisodeResult:
     seed: int
     success: bool                     # geometric truth (is_seated), not the env predicate
     env_predicate: bool               # what robosuite's _check_frame_assembled says
-    failure: Optional[str] = None     # one of FAILURE_KINDS
-    failed_phase: Optional[str] = None
+    failure: str | None = None     # one of FAILURE_KINDS
+    failed_phase: str | None = None
     steps: int = 0
     wall_time_s: float = 0.0
     attempts: int = 1
     final_lateral_mm: float = float("nan")
     final_depth_mm: float = float("nan")
-    trace: List[dict] = field(default_factory=list)
+    trace: list[dict] = field(default_factory=list)
     stage: int = 1
 
     def to_dict(self):
