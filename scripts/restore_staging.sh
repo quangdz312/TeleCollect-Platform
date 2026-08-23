@@ -187,6 +187,27 @@ verify_artifacts_manifest() {
   local manifest="$source_dir/manifest.sha256"
   [ -f "$manifest" ] || die "no manifest.sha256 found in '$source_dir' — refusing to restore artifacts without integrity verification. This backup predates manifest support or is incomplete."
   log "verifying artifact manifest: $manifest"
+  if [ ! -s "$manifest" ]; then
+    # An empty manifest is only legitimate when the mirror genuinely has no
+    # files — backup_staging.sh line 203 produces exactly this via
+    # `xargs --no-run-if-empty` when `find` matches nothing. Count only
+    # inside the four artifact subdirs (episodes/datasets/training/review) —
+    # the same list the restore loops below actually copy from — rather than
+    # every file under source_dir: in the --archive path, source_dir is
+    # $EXTRACT_DIR, which also holds the extracted app-*.db and its .sha256
+    # sidecar sitting alongside the artifact tree. Those are not covered by
+    # this manifest and must not count as "artifacts the manifest missed".
+    local real_file_count=0
+    for sub in episodes datasets training review; do
+      [ -d "$source_dir/$sub" ] || continue
+      real_file_count=$((real_file_count + $(find "$source_dir/$sub" -type f | wc -l)))
+    done
+    if [ "$real_file_count" -eq 0 ]; then
+      log "artifact manifest is empty and '$source_dir' has no artifact files — nothing to verify, treating as OK"
+      return 0
+    fi
+    die "artifact manifest '$manifest' is empty but '$source_dir' contains $real_file_count file(s) — manifest looks truncated or incomplete. Refusing to restore."
+  fi
   ( cd "$source_dir" && sha256sum -c manifest.sha256 ) \
     || die "artifact manifest verification failed for '$source_dir' — one or more files are modified, missing, or corrupted. Refusing to restore. See the manifest output above for which file(s)."
   log "artifact manifest OK"
@@ -210,7 +231,6 @@ if [ -n "$ARCHIVE" ]; then
 
   FOUND_DB="$(find "$EXTRACT_DIR" -maxdepth 1 -name 'app-*.db' | head -n1)"
   [ -n "$FOUND_DB" ] || die "archive did not contain an app-*.db file"
-  cp "$EXTRACT_DIR/$(basename "$FOUND_DB").sha256" "$EXTRACT_DIR/../" 2>/dev/null || true
 
   # The archive's manifest.sha256 (written by backup_staging.sh alongside
   # the artifact tree inside the tarball) covers the artifacts it contains —
