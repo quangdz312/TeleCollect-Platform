@@ -4,52 +4,13 @@ Nền tảng teleoperation & thu thập demonstration cho imitation learning (đ
 
 ---
 
-## Gate 1
+## Tài liệu theo giai đoạn
 
-Chi tiết đầy đủ nằm trong các file `.md` được dẫn ở mỗi mục.
-
-### 1. Project Brief — [`docs/gate1/brief.md`](docs/gate1/brief.md)
-
-- [X] **Vấn đề**
-- [X] **Giải pháp**
-- [X] **Đối tượng**
-
-### 2. PRD — [`docs/gate1/prd.md`](docs/gate1/prd.md)
-
-- [X] **Mục tiêu (Goals)**
-- [X] **Tính năng chính (Core Features)**
-- [X] **User Stories**
-- [X] **Yêu cầu chức năng & phi chức năng**
-- [X] **Tech Stack**
-- [X] **Tiêu chí thành công**
-
-### 3. Wireframe & UI Flow — [`docs/gate1/ui-flow.md`](docs/gate1/ui-flow.md)
-
-- [X] **User flow**
-
-### 4. AI Log Setup
-
-- [X] Đã tạo API Key trên Phoenix
-- [X] Đã tích hợp Hook vào Repo
-- [X] Đã test log thành công
-
----
-
-## Gate 2
-
-### 1. Demo MVP
-
-- Video: [`docs/gate2/demo_mvp.mp4`](docs/gate2/demo_mvp.mp4) (21 MB)
-- Bản trên Drive, không cần clone:
-  [drive.google.com/…/1Nhpw48HzYSTEMAM8HiRT_9rRvc0BOLiJ](https://drive.google.com/file/d/1Nhpw48HzYSTEMAM8HiRT_9rRvc0BOLiJ/view?usp=sharing)
-
-### 2. Kiến trúc — [`docs/gate2/architecture_diagram.md`](docs/gate2/architecture_diagram.md)
-
-### 3. Eval Evidences — [`docs/gate2/eval_evidences.md`](docs/gate2/eval_evidences.md)
-
-Năm test case chạy tay trên app đang chạy thật, kèm output nguyên văn (JSON, log
-job, listing file, sha256) và ảnh ba camera lấy thẳng từ luồng WebSocket.
-Những khoảng trống đã biết được ghi thẳng trong đó, không giấu.
+| Giai đoạn | Thư mục | Nội dung |
+|---|---|---|
+| Gate 1 | [`docs/gate1/`](docs/gate1/) | Project Brief, PRD, Wireframe & UI Flow, AI Log Setup |
+| Gate 2 | [`docs/gate2/`](docs/gate2/) | Video demo MVP, sơ đồ kiến trúc, eval evidences |
+| Phase 1 | [`docs/phase1/`](docs/phase1/) | Mô tả chi tiết dự án, nội dung slide trình bày |
 
 ---
 
