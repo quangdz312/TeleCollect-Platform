@@ -132,6 +132,14 @@ class Settings(BaseSettings):
     # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
     enable_face_anonymization: bool = True
 
+    training_enabled: bool = True
+    """Cho phép tạo training/evaluation job thật (spawn subprocess).
+
+    Mặc định bật để không đổi hành vi dev/test hiện có. CPU staging (chưa có
+    GPU, image production core chưa cài `requirements-train`) đặt biến này
+    `false` qua `.env.production` — endpoint tạo job trả 403 thay vì spawn
+    subprocess rồi lỗi giữa chừng."""
+
     def data_dirs(self) -> list[Path]:
         """Những thư mục ứng dụng cần có sẵn để ghi được dữ liệu.
 

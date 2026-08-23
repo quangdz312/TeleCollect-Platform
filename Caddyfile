@@ -1,0 +1,69 @@
+# TeleCollect P-111 — production Caddyfile.
+# Domain, one origin for everything (see plan section 3.1: simpler CORS, one
+# certificate, one URL). Routes match src/main.py (health at root, everything
+# else under /api/v1, mounted with app.include_router(router, prefix="/api/v1"))
+# and src/api/teleop.py (`@router.websocket("/ws/{session_id}")` on a router
+# mounted at prefix "/teleop", so the real path is /api/v1/teleop/ws/{id}).
+#
+# {$PROJECT_DOMAIN} and {$ACME_EMAIL} come from the environment
+# docker-compose.prod.yml passes into the caddy service (see
+# .env.production.example). Caddy requests/renews the certificate
+# automatically via Let's Encrypt once DNS resolves here and 80/443 are open.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$PROJECT_DOMAIN} {
+	encode gzip
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		# Don't log the Authorization header or a ?token= query string used by
+		# a couple of authenticated GET endpoints (see
+		# src/services/security.py current_user_allow_query_token).
+		format filter {
+			wrap console
+			fields {
+				request>headers>Authorization delete
+				request>uri query {
+					delete token
+				}
+			}
+		}
+	}
+
+	# WebSocket teleop control loop. Must come before the generic /api/v1/*
+	# match below so it is not shadowed.
+	@ws {
+		path /api/v1/teleop/ws/*
+	}
+	reverse_proxy @ws backend:8000
+
+	# REST API and health.
+	@api {
+		path /api/v1/* /health
+	}
+	reverse_proxy @api backend:8000 {
+		header_up X-Forwarded-Host {host}
+	}
+
+	# Everything else: the Next.js frontend.
+	reverse_proxy frontend:3000 {
+		header_up X-Forwarded-Host {host}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# No restrictive Permissions-Policy here: MediaPipe/HandControl needs
+		# camera access from the browser (frontend/components/HandControl.tsx),
+		# and a mis-scoped `camera=()` would silently break it.
+	}
+}

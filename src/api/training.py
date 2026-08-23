@@ -25,6 +25,14 @@ from src.training.jobs import TrainingJobManager
 router = APIRouter(prefix="/training", tags=["training"])
 
 
+def _require_training_enabled() -> None:
+    if not get_settings().training_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Training chưa khả dụng trong bản CPU staging",
+        )
+
+
 @lru_cache
 def job_manager() -> TrainingJobManager:
     return TrainingJobManager(Path(get_settings().storage_dir) / "training")
@@ -67,6 +75,7 @@ async def create_training_job(
     session: AsyncSession = Depends(get_session),
     _user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> TrainingJobResponse:
+    _require_training_enabled()
     dataset = await session.get(Dataset, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy dataset")
@@ -137,6 +146,7 @@ async def create_evaluation(
     body: EvaluationJobRequest,
     _user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> EvalResultResponse:
+    _require_training_enabled()
     if body.training_run_id != job_id:
         raise HTTPException(status_code=422, detail="training_run_id không khớp URL")
     training_job = _job_or_404(job_id)

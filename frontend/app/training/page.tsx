@@ -80,6 +80,11 @@ export default function TrainingPage() {
   });
 
   const canTrain = user?.role === "reviewer" || user?.role === "admin";
+  // CPU staging sets this build-time flag to "false" (no GPU, no training
+  // dependencies in the production image yet); default stays enabled so the
+  // dev/demo build is unaffected. Checking it here avoids calling the
+  // endpoint just to have it fail with a 403.
+  const trainingEnabled = process.env.NEXT_PUBLIC_TRAINING_ENABLED !== "false";
   const datasetById = useMemo(
     () => new Map(datasets.map((dataset) => [dataset.id, dataset])),
     [datasets],
@@ -241,6 +246,10 @@ export default function TrainingPage() {
   if (!user) return null;
 
   async function startTraining() {
+    if (!trainingEnabled) {
+      setError("Training chưa khả dụng trong bản CPU staging.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -273,6 +282,10 @@ export default function TrainingPage() {
 
   async function startEvaluation() {
     if (!selected) return;
+    if (!trainingEnabled) {
+      setError("Training chưa khả dụng trong bản CPU staging.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -349,6 +362,9 @@ export default function TrainingPage() {
       </div>
 
       {error && <Alert>{error}</Alert>}
+      {canTrain && !trainingEnabled && (
+        <Alert tone="info">Training chưa khả dụng trong bản CPU staging. Bản demo này chưa chạy trên GPU và chưa cài dependency huấn luyện.</Alert>
+      )}
 
       {canTrain && (
         <Card title="New training run" subtitle="The backend runs one job at a time so runs do not contend for the GPU.">
@@ -427,7 +443,7 @@ export default function TrainingPage() {
                 <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
               )}
               <div className="mt-4 flex items-center gap-3">
-                <Button variant="primary" disabled={busy || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
+                <Button variant="primary" disabled={busy || !trainingEnabled || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
                   {busy ? "Starting…" : "Start training"}
                 </Button>
                 <span className="text-xs text-ink-400">Training keeps running on the backend if you switch tabs.</span>
@@ -542,6 +558,7 @@ export default function TrainingPage() {
                     variant="primary"
                     disabled={
                       busy ||
+                      !trainingEnabled ||
                       !evaluationForm.checkpoint_id ||
                       evaluationForm.record_videos > evaluationForm.num_rollouts
                     }
