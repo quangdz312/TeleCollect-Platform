@@ -68,6 +68,7 @@ def test_export_has_deterministic_disjoint_train_valid_masks(tmp_path: Path) -> 
         assert train.isdisjoint(valid)
         assert train | valid == {f"demo_{index}" for index in range(4)}
         assert len(valid) == 1
+        assert {a[f"data/demo_{index}"].attrs["source"] for index in range(4)} == {"scripted"}
 
     result = validate_training_dataset(first)
     assert result.valid, result.errors

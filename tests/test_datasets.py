@@ -13,6 +13,17 @@ from src.services import storage
 from src.services.security import create_access_token, hash_password
 
 API = "/api/v1/datasets"
+
+
+def test_dataset_source_defaults_to_both_and_rejects_unknown_value():
+    from pydantic import ValidationError
+
+    from src.models.schemas import DatasetCreateRequest
+
+    assert DatasetCreateRequest(name="source-default").data_source == "both"
+    assert DatasetCreateRequest(name="source-teleop", data_source="teleop").data_source == "teleop"
+    with pytest.raises(ValidationError):
+        DatasetCreateRequest(name="source-invalid", data_source="camera")
 DEMOS_API = "/api/v1/demos"
 
 

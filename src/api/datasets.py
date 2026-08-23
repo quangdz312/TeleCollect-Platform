@@ -83,6 +83,15 @@ async def create_dataset(
     """Chọn episode TRƯỚC khi đụng tới dataset trùng tên — nếu không có demo
     nào khớp thì trả 422 mà KHÔNG xoá mất dataset cũ (trường hợp overwrite).
     """
+    query = select(Episode).where(Episode.status == DemoStatus.APPROVED)
+    if body.task_names:
+        query = query.where(Episode.task_name.in_(body.task_names))
+    if not body.include_failures:
+        query = query.where(Episode.outcome == DemoOutcome.SUCCESS)
+    episodes = list((await session.scalars(query)).all())
+    if body.format == "robomimic" and body.data_source == "scripted":
+        episodes = []
+
     if body.format == "robomimic":
         if len(body.task_names) != 1:
             raise HTTPException(
@@ -94,35 +103,51 @@ async def create_dataset(
         space = workspace()
         labels = space.labels_by_id()
         scripted = []
-        for score in space.scores():
-            label = labels.get(str(score["episode_id"]))
-            if not label or label["human_decision"] != "approved":
+        if body.data_source != "teleop":
+            for score in space.scores():
+                label = labels.get(str(score["episode_id"]))
+                if not label or label["human_decision"] != "approved":
+                    continue
+                if not _matches_scripted_export(score, body):
+                    continue
+                scripted.append({
+                    **label,
+                    "decision": label["human_decision"],
+                    "source_path": str(space.resolve_source(str(score["source"]))),
+                    "demo": score["demo"],
+                })
+        manual = []
+        for episode in episodes:
+            root = storage.episode_dir(episode.id)
+            if not (root / storage.ACTIONS_FILENAME).is_file() or not (
+                root / storage.META_FILENAME
+            ).is_file():
                 continue
-            if not _matches_scripted_export(score, body):
-                continue
-            scripted.append({
-                **label,
-                "decision": label["human_decision"],
-                "source_path": str(space.resolve_source(str(score["source"]))),
-                "demo": score["demo"],
+            manual.append({
+                "artifact_format": "teleop_dir",
+                "episode_dir": str(root),
+                "episode_id": episode.id,
+                "decision": "approved",
+                "reviewer": episode.reviewer_id or "unknown",
+                "reviewed_at": episode.reviewed_at.isoformat() if episode.reviewed_at else "",
+                "note": episode.note,
+                "trim_start_s": episode.trim_start_s,
+                "trim_end_s": episode.trim_end_s,
+                "successful": episode.outcome == DemoOutcome.SUCCESS,
             })
-        if not scripted:
+        export_items = [*scripted, *manual]
+        if not export_items:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    "Không có scripted episode approved khớp task và collection batch đã chọn"
+                    f"Không có {body.data_source} episode approved có trajectory "
+                    "khớp task và collection batch đã chọn"
                 ),
             )
     else:
         scripted = []
-
-    query = select(Episode).where(Episode.status == DemoStatus.APPROVED)
-    if body.task_names:
-        query = query.where(Episode.task_name.in_(body.task_names))
-    if not body.include_failures:
-        query = query.where(Episode.outcome == DemoOutcome.SUCCESS)
-
-    episodes = list((await session.scalars(query)).all())
+        manual = []
+        export_items = []
     if not episodes and not scripted:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -154,7 +179,13 @@ async def create_dataset(
         # expose the correct format even while the background build is running.
         dataset.zip_path = str(storage.dataset_hdf5_path(dataset.id))
 
-    for episode in episodes if body.format == "raw" else []:
+    linked_episode_ids = (
+        {str(item["episode_id"]) for item in manual}
+        if body.format == "robomimic" else {episode.id for episode in episodes}
+    )
+    for episode in episodes:
+        if episode.id not in linked_episode_ids:
+            continue
         session.add(DatasetEpisode(dataset_id=dataset.id, episode_id=episode.id))
 
     await session.commit()
@@ -172,7 +203,7 @@ async def create_dataset(
             build_robomimic_dataset,
             dataset.id,
             Path(dataset.zip_path),
-            scripted,
+            export_items,
             session_factory(bind),
         )
     else:

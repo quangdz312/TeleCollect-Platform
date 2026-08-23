@@ -1,4 +1,4 @@
-"""Build an immutable RoboMimic HDF5 snapshot from reviewed scripted demos."""
+"""Build an immutable RoboMimic HDF5 snapshot from reviewed demonstrations."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import h5py
 import numpy as np
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from src.export.teleop_robomimic import TeleopRoboMimicEpisode, load_teleop_episode
 from src.models.db import Dataset
 from src.models.enums import DatasetStatus
 from src.sim.collection.robomimic_hdf5_writer import normalize_robomimic_env_args
@@ -45,6 +46,30 @@ def _split_names(
 #: exists for these penalties, so the value is a starting point for whoever
 #: trains rather than a claim about quality.
 CLEAN_SLICE_MAX_PENALTY = 0.15
+
+
+def _write_teleop_demo(
+    target_data: h5py.Group,
+    name: str,
+    episode: TeleopRoboMimicEpisode,
+) -> h5py.Group:
+    """Write already-aligned manual arrays without materialising another HDF5."""
+    demo = target_data.create_group(name)
+    demo.create_dataset("actions", data=episode.actions)
+    demo.create_dataset("states", data=episode.states)
+    demo.create_dataset("rewards", data=episode.rewards)
+    demo.create_dataset("dones", data=episode.dones)
+    for group_name, values in (
+        ("obs", episode.observations),
+        ("next_obs", episode.next_observations),
+    ):
+        group = demo.create_group(group_name)
+        for key in sorted(values):
+            group.create_dataset(key, data=values[key])
+    demo.attrs["num_samples"] = episode.num_samples
+    for key, value in episode.attrs.items():
+        demo.attrs[key] = value
+    return demo
 
 
 def _quality_masks(episodes: Sequence[dict[str, object]]) -> dict[str, list[bytes]]:
@@ -95,33 +120,49 @@ def build_robomimic_hdf5(
             target_data = target.create_group("data")
             env_args: dict[str, object] | None = None
             for index, item in enumerate(episodes):
-                source_path = Path(str(item["source_path"]))
-                source_demo = str(item["demo"])
-                with h5py.File(source_path, "r") as source:
-                    source_data = source["data"]
-                    current_env_args = normalize_robomimic_env_args(
-                        json.loads(str(source_data.attrs.get("env_args", "")))
+                name = f"demo_{index}"
+                if item.get("artifact_format") == "teleop_dir":
+                    converted = load_teleop_episode(
+                        Path(str(item["episode_dir"])),
+                        trim_start_s=item.get("trim_start_s"),  # type: ignore[arg-type]
+                        trim_end_s=item.get("trim_end_s"),  # type: ignore[arg-type]
+                        successful=item.get("successful"),  # type: ignore[arg-type]
                     )
-                    if env_args is None:
-                        env_args = current_env_args
-                        for key, value in source_data.attrs.items():
-                            target_data.attrs[key] = value
-                        target_data.attrs["env_args"] = json.dumps(current_env_args, indent=4)
-                    elif current_env_args != env_args:
-                        raise ValueError("Các episode không cùng environment; hãy export từng task riêng")
-                    if source_demo not in source_data:
-                        raise KeyError(f"Không tìm thấy {source_demo} trong {source_path.name}")
-                    name = f"demo_{index}"
-                    source.copy(source_data[source_demo], target_data, name=name)
-                    demo = target_data[name]
-                    count = int(demo.attrs.get("num_samples", len(demo["actions"])))
-                    total += count
-                    demo.attrs["source_episode_id"] = str(item["episode_id"])
-                    demo.attrs["review_decision"] = str(item["decision"])
-                    demo.attrs["reviewer"] = str(item.get("reviewer", "unknown"))
-                    demo.attrs["reviewed_at"] = str(item.get("reviewed_at", ""))
-                    demo.attrs["review_note"] = str(item.get("note", ""))
-                    demo.attrs["review_reasons"] = json.dumps(item.get("reasons", []))
+                    current_env_args = normalize_robomimic_env_args(converted.env_args)
+                    demo = _write_teleop_demo(target_data, name, converted)
+                else:
+                    source_path = Path(str(item["source_path"]))
+                    source_demo = str(item["demo"])
+                    with h5py.File(source_path, "r") as source:
+                        source_data = source["data"]
+                        current_env_args = normalize_robomimic_env_args(
+                            json.loads(str(source_data.attrs.get("env_args", "")))
+                        )
+                        if env_args is None:
+                            for key, value in source_data.attrs.items():
+                                target_data.attrs[key] = value
+                        if source_demo not in source_data:
+                            raise KeyError(f"Không tìm thấy {source_demo} trong {source_path.name}")
+                        source.copy(source_data[source_demo], target_data, name=name)
+                        demo = target_data[name]
+                if env_args is None:
+                    env_args = current_env_args
+                    target_data.attrs["env_args"] = json.dumps(current_env_args, indent=4)
+                elif current_env_args != env_args:
+                    raise ValueError("Các episode không cùng environment; hãy export từng task riêng")
+                count = int(demo.attrs.get("num_samples", len(demo["actions"])))
+                total += count
+                demo.attrs["source_episode_id"] = str(item["episode_id"])
+                demo.attrs["source"] = (
+                    "manual_teleop"
+                    if item.get("artifact_format") == "teleop_dir"
+                    else "scripted"
+                )
+                demo.attrs["review_decision"] = str(item["decision"])
+                demo.attrs["reviewer"] = str(item.get("reviewer", "unknown"))
+                demo.attrs["reviewed_at"] = str(item.get("reviewed_at", ""))
+                demo.attrs["review_note"] = str(item.get("note", ""))
+                demo.attrs["review_reasons"] = json.dumps(item.get("reasons", []))
             target_data.attrs["total"] = total
             target_data.attrs["telecollect_export_format"] = "robomimic"
             target_data.attrs["telecollect_reviewed_only"] = True

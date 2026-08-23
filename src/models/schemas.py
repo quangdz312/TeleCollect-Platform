@@ -351,7 +351,11 @@ class DatasetCreateRequest(BaseModel):
     )
     format: str = Field(
         default="raw", pattern="^(raw|robomimic)$",
-        description="raw: core ZIP cũ; robomimic: HDF5 từ scripted review workspace",
+        description="raw: core ZIP cũ; robomimic: HDF5 từ scripted hoặc manual teleop đã duyệt",
+    )
+    data_source: Literal["teleop", "scripted", "both"] = Field(
+        default="both",
+        description="Nguồn episode cho RoboMimic: manual teleop, scripted, hoặc cả hai",
     )
     collection_batch_id: str | None = Field(
         default=None,
