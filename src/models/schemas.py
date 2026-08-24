@@ -271,6 +271,115 @@ class DemoUploadResponse(DemoDetailResponse):
     warnings: list[str] = Field(default_factory=list)
 
 
+class RawEpisodeCameras(BaseModel):
+    """Availability of the canonical camera streams for a raw episode."""
+
+    front: bool = False
+    birdview: bool = False
+    wrist: bool = False
+
+
+class RawEpisodeResponse(BaseModel):
+    """Source-neutral contract shared by teleop and scripted episodes.
+
+    This model intentionally describes metadata only. Raw arrays and video
+    bytes remain behind dedicated endpoints so list responses stay small.
+    """
+
+    episode_id: str = Field(..., min_length=1)
+    display_name: str = ""
+    source: Literal["teleop", "scripted"]
+    task: str = Field(..., min_length=1)
+    created_at: datetime | None = None
+
+    length: int = Field(..., ge=0)
+    duration_s: float | None = Field(default=None, ge=0)
+    control_hz: float | None = Field(default=None, gt=0)
+    size_bytes: int | None = Field(default=None, ge=0)
+
+    recorded_success: bool | None = None
+    quality: Literal["clean", "good", "medium", "poor"] | None = None
+    review_status: Literal["pending", "approved", "rejected", "archived"]
+
+    operator_id: str | None = None
+    collection_batch_id: str | None = None
+    cameras: RawEpisodeCameras = Field(default_factory=RawEpisodeCameras)
+    artifact_health: Literal["healthy", "warning", "corrupted"] = "healthy"
+    management_version: int = Field(default=0, ge=0)
+
+
+class RawEpisodeSummaryResponse(BaseModel):
+    total: int = Field(..., ge=0)
+    teleop: int = Field(..., ge=0)
+    scripted: int = Field(..., ge=0)
+    successes: int = Field(..., ge=0)
+    failures: int = Field(..., ge=0)
+    pending: int = Field(..., ge=0)
+    approved: int = Field(..., ge=0)
+    rejected: int = Field(..., ge=0)
+    archived: int = Field(..., ge=0)
+
+
+class RawEpisodePageResponse(BaseModel):
+    items: list[RawEpisodeResponse]
+    total: int = Field(..., ge=0)
+    page: int = Field(..., ge=1)
+    page_size: int = Field(..., ge=1)
+    total_pages: int = Field(..., ge=0)
+    summary: RawEpisodeSummaryResponse
+    available_tasks: list[str] = Field(default_factory=list)
+
+
+class RawArtifactResponse(BaseModel):
+    """One file or container that belongs to a raw episode."""
+
+    name: str
+    kind: Literal["metadata", "table", "video", "dataset"]
+    exists: bool
+    size_bytes: int | None = Field(default=None, ge=0)
+    camera: Literal["front", "birdview", "wrist"] | None = None
+
+
+class RawEpisodeAuditResponse(BaseModel):
+    id: str
+    action: str
+    changes: dict[str, object]
+    actor_name: str
+    created_at: datetime
+
+
+class RawEpisodeDetailResponse(RawEpisodeResponse):
+    """Raw episode metadata plus a safe manifest without filesystem paths."""
+
+    artifacts: list[RawArtifactResponse] = Field(default_factory=list)
+    audit: list[RawEpisodeAuditResponse] = Field(default_factory=list)
+
+
+class RawEpisodeArchiveUpdate(BaseModel):
+    archived: bool
+    expected_version: int = Field(..., ge=0)
+
+
+class RawSignalSeries(BaseModel):
+    labels: list[str]
+    values: list[list[float]]
+
+
+class RawSignalsResponse(BaseModel):
+    episode_id: str
+    source: Literal["teleop", "scripted"]
+    start: int = Field(..., ge=0)
+    end: int = Field(..., ge=0)
+    total_frames: int = Field(..., ge=0)
+    sampled_frames: list[int]
+    control_hz: float = Field(..., gt=0)
+    video_stride: int = Field(default=1, ge=1)
+    time_basis: Literal["recorded", "scripted_playback"]
+    t: list[float]
+    available_fields: list[str]
+    signals: dict[str, RawSignalSeries]
+
+
 class TrimRequest(BaseModel):
     """Yêu cầu cắt bớt đầu/cuối bản ghi — đơn vị GIÂY (bản Core không có
     control loop sinh frame index thật). Chỉ ghi metadata, không đụng file
