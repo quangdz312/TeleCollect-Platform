@@ -702,6 +702,7 @@ export const api = {
     tasks: string[];
     include_failures: boolean;
     overwrite: boolean;
+    data_source: "teleop" | "scripted" | "both";
     collection_batch_id?: string;
   }) =>
     toExport(
@@ -713,6 +714,7 @@ export const api = {
           task_names: body.tasks,
           include_failures: body.include_failures,
           overwrite: body.overwrite,
+          data_source: body.data_source,
           collection_batch_id: body.collection_batch_id || null,
         }),
       }),

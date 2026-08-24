@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import Any
 
@@ -32,18 +33,31 @@ def normalize_robomimic_env_args(env_args: Mapping[str, Any]) -> dict[str, Any]:
             f"TeleCollect datasets require RoboSuite env type {ROBOSUITE_ENV_TYPE}, got {existing!r}"
         )
     try:
-        import robosuite
-        from robosuite.controllers import load_composite_controller_config
-    except ImportError as exc:
+        robosuite_distribution = distribution("robosuite")
+        robosuite_version = version("robosuite")
+    except ModuleNotFoundError as exc:
         raise RuntimeError("RoboSuite is required to build rollout-compatible metadata") from exc
 
-    normalized.setdefault("env_version", robosuite.__version__)
+    normalized.setdefault("env_version", robosuite_version)
     env_kwargs = deepcopy(dict(normalized.get("env_kwargs", {})))
     # `stage` is TeleCollect provenance, not a valid RoboSuite constructor kwarg.
     env_kwargs.pop("stage", None)
 
     supplied_controller = env_kwargs.get("controller_configs")
-    full_controller = load_composite_controller_config(controller="BASIC")
+    # Importing ``robosuite.controllers`` triggers Numba JIT initialisation and
+    # can hold a simple dataset export for minutes on a fresh Windows machine.
+    # The loader itself only reads this packaged JSON and flattens ``arms``;
+    # reproduce that data-only operation here so export never boots a simulator.
+    controller_path = robosuite_distribution.locate_file(
+        "robosuite/controllers/config/default/composite/basic.json"
+    )
+    try:
+        full_controller = json.loads(Path(controller_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Cannot read RoboSuite BASIC controller metadata") from exc
+    raw_parts = dict(full_controller.get("body_parts", {}))
+    arms = dict(raw_parts.pop("arms", {}))
+    full_controller["body_parts"] = {**arms, **raw_parts}
     if isinstance(supplied_controller, Mapping):
         supplied_right = supplied_controller.get("body_parts", {}).get("right", {})
         if isinstance(supplied_right, Mapping):

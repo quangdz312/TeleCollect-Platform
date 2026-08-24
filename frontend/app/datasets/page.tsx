@@ -33,6 +33,7 @@ export default function DatasetsPage() {
   const [name, setName] = useState("v1");
   const [format, setFormat] = useState("robomimic");
   const [taskFilter, setTaskFilter] = useState("");
+  const [dataSource, setDataSource] = useState<"teleop" | "scripted" | "both">("both");
   const [includeFailures, setIncludeFailures] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [batchId, setBatchId] = useState("lift-scripted-v1.2");
@@ -81,7 +82,8 @@ export default function DatasetsPage() {
         tasks: taskFilter ? [taskFilter] : [],
         include_failures: includeFailures,
         overwrite,
-        collection_batch_id: batchId,
+        data_source: dataSource,
+        collection_batch_id: dataSource === "teleop" ? undefined : batchId,
       });
       setInfo(`Building ${created.name}… The page will update when the HDF5 is ready.`);
       await load();
@@ -129,12 +131,16 @@ export default function DatasetsPage() {
               : undefined
           }
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <Field label="Name" hint="Becomes the directory and the DVC-tracked version">
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Collection batch" hint="Only include episodes from this batch">
-              <Input value={batchId} onChange={(e) => setBatchId(e.target.value)} />
+            <Field label="Collection batch" hint="Only applies to scripted episodes">
+              <Input
+                value={batchId}
+                disabled={dataSource === "teleop"}
+                onChange={(e) => setBatchId(e.target.value)}
+              />
             </Field>
             <Field label="Format">
               <Select value={format} onChange={(e) => setFormat(e.target.value)}>
@@ -149,6 +155,16 @@ export default function DatasetsPage() {
                     {task.tool_label ?? task.task}
                   </option>
                 ))}
+              </Select>
+            </Field>
+            <Field label="Data source" hint="Export one source or mix both">
+              <Select
+                value={dataSource}
+                onChange={(e) => setDataSource(e.target.value as "teleop" | "scripted" | "both")}
+              >
+                <option value="teleop">Teleop only</option>
+                <option value="scripted">Scripted only</option>
+                <option value="both">Teleop + Scripted</option>
               </Select>
             </Field>
             <div className="flex flex-col justify-end gap-2 text-xs">
@@ -172,7 +188,11 @@ export default function DatasetsPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button variant="primary" disabled={busy || !taskFilter || !batchId} onClick={createExport}>
+            <Button
+              variant="primary"
+              disabled={busy || !taskFilter || (dataSource !== "teleop" && !batchId)}
+              onClick={createExport}
+            >
               {busy ? "Exporting…" : "Export dataset"}
             </Button>
             {dvc && (
@@ -182,9 +202,9 @@ export default function DatasetsPage() {
             )}
           </div>
           <p className="mt-2 text-xs text-ink-400">
-            The exported HDF5 contains only human-approved scripted demonstrations and can be
-            passed directly to RoboMimic BC. Export each task separately because every task has
-            different environment metadata and observation semantics.
+            The exported HDF5 contains only human-approved demonstrations from the selected
+            source. Mixed exports retain a per-demo source attribute. Export each task separately
+            because every task has different environment metadata and observation semantics.
           </p>
 
           {error && (
