@@ -10,5 +10,6 @@ Module:
     teleop    — WebSocket điều khiển realtime + đóng/mở phiên
     demos     — xem lại, cắt, gắn nhãn, duyệt demo (human-in-the-loop)
     datasets  — gom demo đã duyệt thành dataset và export
+    raw       — danh sách/chi tiết hợp nhất episode teleop và scripted
     training  — chạy huấn luyện behavior cloning và xem kết quả đánh giá
 """

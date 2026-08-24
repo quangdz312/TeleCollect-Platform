@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, event
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -100,6 +100,38 @@ class Episode(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+class RawEpisodeManagement(Base):
+    """Mutable management overlay; raw files and source records stay immutable."""
+
+    __tablename__ = "raw_episode_management"
+
+    episode_id: Mapped[str] = mapped_column(String(500), primary_key=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RawEpisodeAudit(Base):
+    """Append-only audit trail for management/review changes."""
+
+    __tablename__ = "raw_episode_audit"
+    __table_args__ = (Index("ix_raw_audit_episode_created", "episode_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    episode_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    changes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Dataset(Base):
