@@ -32,7 +32,6 @@ export default function UploadPage() {
   const [front, setFront] = useState<File | null>(null);
   const [wrist, setWrist] = useState<File | null>(null);
   const [trajectory, setTrajectory] = useState<File | null>(null);
-  const [reviewPackage, setReviewPackage] = useState<File | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -70,20 +69,6 @@ export default function UploadPage() {
     }
   }
 
-  async function submitPackage() {
-    if (!reviewPackage) return;
-    setBusy(true);
-    setProgress(0);
-    setError(null);
-    try {
-      const demo = await api.uploadReviewPackage({ package: reviewPackage, onProgress: setProgress });
-      router.push(`/review/${demo.id}`);
-    } catch (exc) {
-      setError(uploadErrorMessage(exc));
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="space-y-5">
       <div>
@@ -94,23 +79,7 @@ export default function UploadPage() {
         </p>
       </div>
 
-      <Card title="Episode package" subtitle="Upload one .telecollect.zip from the local app; it contains the review video and raw trajectory.">
-        <Dropzone
-          required
-          icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"><path d="M4 4h16v16H4z" /><path d="M8 8h8v8H8z" /></svg>}
-          title="Review package"
-          tag="Required · .zip"
-          fileName={reviewPackage?.name}
-          inputProps={{ accept: ".zip,application/zip", disabled: busy, onChange: (e) => setReviewPackage(e.target.files?.[0] ?? null) }}
-        />
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button variant="primary" disabled={busy || !reviewPackage} onClick={submitPackage}>
-            {busy ? `Uploading… ${progress}%` : "Upload package for review"}
-          </Button>
-        </div>
-      </Card>
-
-      <Card title="New video upload">
+      <Card title="New upload">
         <Field label="Task" className="mb-4 max-w-xs">
           <Select value={taskId} onChange={(e) => setTaskId(e.target.value)} disabled={busy}>
             {tasks.length === 0 && <option value="">Loading tasks…</option>}

@@ -62,9 +62,7 @@ import json
 import logging
 import math
 import shutil
-import zipfile
 from pathlib import Path
-from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
@@ -100,10 +98,6 @@ chuỗi từ query param thành đường dẫn (dù `episode_dir()` đã tự r
 toàn trong `storage_dir`, ánh xạ cứng này loại bỏ luôn khả năng đó ngay từ đầu)."""
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB — đọc UploadFile theo chunk, không await .read() cả file.
-PACKAGE_FILES = frozenset({
-    "manifest.json", storage.FRONT_FILENAME, storage.WRIST_FILENAME,
-    storage.ACTIONS_FILENAME, storage.META_FILENAME,
-})
 
 
 class UploadTooLargeError(Exception):
@@ -152,44 +146,6 @@ def _validate_trajectory(path: Path, action_dim: int) -> None:
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"trajectory.action[{i}] phải có độ dài {action_dim}",
             )
-
-
-def _extract_review_package(archive: Path, destination: Path, max_bytes: int) -> str:
-    """Extract one flat, self-contained review package without trusting ZIP paths."""
-    try:
-        with zipfile.ZipFile(archive) as bundle:
-            entries = [entry for entry in bundle.infolist() if not entry.is_dir()]
-            names = [entry.filename for entry in entries]
-            if len(entries) != len(set(names)) or not set(names).issubset(PACKAGE_FILES):
-                raise ValueError("Package chỉ được chứa manifest.json, video và artifact episode chuẩn")
-            if "manifest.json" not in names or storage.FRONT_FILENAME not in names:
-                raise ValueError("Package phải có manifest.json và front.mp4")
-            if any("\\" in name or PurePosixPath(name).name != name for name in names):
-                raise ValueError("Package không được chứa thư mục con")
-            if sum(entry.file_size for entry in entries) > max_bytes:
-                raise ValueError("Nội dung sau giải nén vượt giới hạn upload")
-            for entry in entries:
-                target = destination / entry.filename
-                with bundle.open(entry) as source, open(target, "wb") as output:
-                    shutil.copyfileobj(source, output, length=UPLOAD_CHUNK_SIZE)
-    except zipfile.BadZipFile as exc:
-        raise ValueError("Package không phải ZIP hợp lệ") from exc
-
-    try:
-        manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("manifest.json không hợp lệ") from exc
-    task_name = manifest.get("task_name") if isinstance(manifest, dict) else None
-    if not isinstance(task_name, str) or not task_name:
-        raise ValueError("manifest.json thiếu task_name")
-    if (destination / storage.META_FILENAME).is_file():
-        try:
-            meta = json.loads((destination / storage.META_FILENAME).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("meta.json không hợp lệ") from exc
-        if isinstance(meta, dict) and meta.get("task_name") not in (None, task_name):
-            raise ValueError("task_name trong meta.json không khớp manifest.json")
-    return task_name
 
 
 async def _get_episode_or_404(episode_id: str, session: AsyncSession) -> Episode:
@@ -305,65 +261,6 @@ async def upload_demo(
             has_thumbnail=has_thumbnail,
             warnings=warnings,
         )
-    finally:
-        if not moved:
-            storage.delete_dir(tmp_dir)
-            if episode is not None:
-                await session.delete(episode)
-                await session.commit()
-
-
-@router.post("/upload-package", response_model=DemoUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_review_package(
-    package: UploadFile = File(...),
-    user: User = Depends(current_user),
-    session: AsyncSession = Depends(get_session),
-) -> DemoUploadResponse:
-    """Receive a local episode package so the web review UI gets its video and raw artifacts."""
-    settings = get_settings()
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    tmp_dir = storage.new_tmp_dir()
-    archive = tmp_dir / "package.zip"
-    episode: Episode | None = None
-    moved = False
-    warnings: list[str] = []
-    try:
-        try:
-            await _save_upload_chunked(package, archive, max_bytes)
-            task_name = _extract_review_package(archive, tmp_dir, max_bytes)
-        except UploadTooLargeError as exc:
-            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        archive.unlink(missing_ok=True)
-        task = await session.get(Task, task_name)
-        if task is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy task")
-        front_path = tmp_dir / storage.FRONT_FILENAME
-        if not has_mp4_magic_bytes(front_path):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="front.mp4 không hợp lệ")
-        try:
-            probe = await probe_video(front_path)
-        except MediaProbeError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        thumb_path = tmp_dir / storage.THUMBNAIL_FILENAME
-        has_thumbnail = await generate_thumbnail(front_path, thumb_path)
-        if not has_thumbnail:
-            warnings.append("Không sinh được thumbnail — video vẫn được chấp nhận")
-            thumb_path.unlink(missing_ok=True)
-        episode = Episode(
-            task_name=task.name, operator_id=user.id, status=DemoStatus.RECORDED,
-            fps=probe.fps, num_frames=probe.num_frames, duration_s=probe.duration_s,
-            size_bytes=storage.dir_size_bytes(tmp_dir),
-            has_wrist=(tmp_dir / storage.WRIST_FILENAME).is_file(),
-            has_trajectory=(tmp_dir / storage.ACTIONS_FILENAME).is_file(),
-        )
-        session.add(episode)
-        await session.commit()
-        await session.refresh(episode)
-        storage.promote_tmp_to_episode(tmp_dir, episode.id)
-        moved = True
-        return DemoUploadResponse(**_demo_response(episode).model_dump(), has_thumbnail=has_thumbnail, warnings=warnings)
     finally:
         if not moved:
             storage.delete_dir(tmp_dir)

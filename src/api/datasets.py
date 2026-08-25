@@ -66,14 +66,6 @@ def _matches_scripted_export(score: dict, body: DatasetCreateRequest) -> bool:
     return True
 
 
-def _matches_selection(episode_id: str, decision: str | None, body: DatasetCreateRequest) -> bool:
-    if body.selection_mode == "all":
-        return True
-    if body.selection_mode == "exclude_rejected":
-        return decision != "rejected"
-    return episode_id in body.selected_episode_ids
-
-
 async def _get_dataset_or_404(dataset_id: str, session: AsyncSession) -> Dataset:
     dataset = await session.get(Dataset, dataset_id)
     if dataset is None:
@@ -91,18 +83,7 @@ async def create_dataset(
     """Chọn episode TRƯỚC khi đụng tới dataset trùng tên — nếu không có demo
     nào khớp thì trả 422 mà KHÔNG xoá mất dataset cũ (trường hợp overwrite).
     """
-    query = select(Episode)
-    if body.format != "robomimic":
-        query = query.where(Episode.status == DemoStatus.APPROVED)
-    elif body.selection_mode == "exclude_rejected":
-        query = query.where(Episode.status != DemoStatus.REJECTED)
-    elif body.selection_mode == "selected":
-        if not body.selected_episode_ids:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Hãy chọn ít nhất một episode cho chế độ selected",
-            )
-        query = query.where(Episode.id.in_(body.selected_episode_ids))
+    query = select(Episode).where(Episode.status == DemoStatus.APPROVED)
     if body.task_names:
         query = query.where(Episode.task_name.in_(body.task_names))
     if not body.include_failures:
@@ -125,22 +106,18 @@ async def create_dataset(
         if body.data_source != "teleop":
             for score in space.scores():
                 label = labels.get(str(score["episode_id"]))
-                decision = str(label.get("human_decision")) if label else "pending"
-                if not _matches_selection(str(score["episode_id"]), decision, body):
+                if not label or label["human_decision"] != "approved":
                     continue
                 if not _matches_scripted_export(score, body):
                     continue
                 scripted.append({
-                    **(label or {}),
-                    "episode_id": str(score["episode_id"]),
-                    "decision": decision,
+                    **label,
+                    "decision": label["human_decision"],
                     "source_path": str(space.resolve_source(str(score["source"]))),
                     "demo": score["demo"],
                 })
         manual = []
         for episode in episodes:
-            if not _matches_selection(episode.id, episode.status.value, body):
-                continue
             root = storage.episode_dir(episode.id)
             if not (root / storage.ACTIONS_FILENAME).is_file() or not (
                 root / storage.META_FILENAME
@@ -150,7 +127,7 @@ async def create_dataset(
                 "artifact_format": "teleop_dir",
                 "episode_dir": str(root),
                 "episode_id": episode.id,
-                "decision": episode.status.value,
+                "decision": "approved",
                 "reviewer": episode.reviewer_id or "unknown",
                 "reviewed_at": episode.reviewed_at.isoformat() if episode.reviewed_at else "",
                 "note": episode.note,
@@ -163,7 +140,8 @@ async def create_dataset(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    f"Không có {body.data_source} episode hợp lệ khớp bộ lọc export đã chọn"
+                    f"Không có {body.data_source} episode approved có trajectory "
+                    "khớp task và collection batch đã chọn"
                 ),
             )
     else:
@@ -173,7 +151,7 @@ async def create_dataset(
     if not episodes and not scripted:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Không có demo nào khớp điều kiện export đã chọn",
+            detail="Không có demo nào khớp điều kiện (status=approved, task_names, include_failures)",
         )
 
     existing = await session.scalar(select(Dataset).where(Dataset.name == body.name))

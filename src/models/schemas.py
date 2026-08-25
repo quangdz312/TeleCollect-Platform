@@ -446,7 +446,7 @@ DATASET_NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{2,63}$"
 
 
 class DatasetCreateRequest(BaseModel):
-    """Yêu cầu đóng gói một snapshot dataset cho huấn luyện."""
+    """Yêu cầu đóng gói một dataset mới từ các demo `approved`."""
 
     name: str = Field(..., pattern=DATASET_NAME_PATTERN)
     task_names: list[str] = Field(
@@ -466,11 +466,6 @@ class DatasetCreateRequest(BaseModel):
         default="both",
         description="Nguồn episode cho RoboMimic: manual teleop, scripted, hoặc cả hai",
     )
-    selection_mode: Literal["all", "exclude_rejected", "selected"] = Field(
-        default="exclude_rejected",
-        description="all: mọi episode; exclude_rejected: bỏ rejected; selected: chỉ ID đã chọn",
-    )
-    selected_episode_ids: list[str] = Field(default_factory=list, max_length=10000)
     collection_batch_id: str | None = Field(
         default=None,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$",

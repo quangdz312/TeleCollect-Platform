@@ -34,8 +34,6 @@ export default function DatasetsPage() {
   const [format, setFormat] = useState("robomimic");
   const [taskFilter, setTaskFilter] = useState("");
   const [dataSource, setDataSource] = useState<"teleop" | "scripted" | "both">("both");
-  const [selectionMode, setSelectionMode] = useState<"all" | "exclude_rejected" | "selected">("exclude_rejected");
-  const [selectedEpisodeIds, setSelectedEpisodeIds] = useState("");
   const [includeFailures, setIncludeFailures] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [batchId, setBatchId] = useState("lift-scripted-v1.2");
@@ -85,8 +83,6 @@ export default function DatasetsPage() {
         include_failures: includeFailures,
         overwrite,
         data_source: dataSource,
-        selection_mode: selectionMode,
-        selected_episode_ids: selectedEpisodeIds.split(/[\s,]+/).filter(Boolean),
         collection_batch_id: dataSource === "teleop" ? undefined : batchId,
       });
       setInfo(`Building ${created.name}… The page will update when the HDF5 is ready.`);
@@ -121,8 +117,8 @@ export default function DatasetsPage() {
       <div>
         <h1 className="font-heading text-[22px] font-bold tracking-tight">Datasets</h1>
         <p className="mt-0.5 text-sm text-ink-400">
-          An export is an immutable snapshot. Choose all valid episodes, exclude rejected ones,
-          or select individual episodes from Raw Episodes.
+          An export is an immutable snapshot of the approved demonstrations, with each
+          reviewer&apos;s trim applied and their decision recorded alongside every episode.
         </p>
       </div>
 
@@ -171,18 +167,6 @@ export default function DatasetsPage() {
                 <option value="both">Teleop + Scripted</option>
               </Select>
             </Field>
-            <Field label="Episode policy" hint="Review is optional for local exports">
-              <Select value={selectionMode} onChange={(e) => setSelectionMode(e.target.value as "all" | "exclude_rejected" | "selected")}>
-                <option value="all">All valid episodes</option>
-                <option value="exclude_rejected">Exclude rejected</option>
-                <option value="selected">Selected episodes</option>
-              </Select>
-            </Field>
-            {selectionMode === "selected" && (
-              <Field label="Episode IDs" hint="Comma- or space-separated IDs from Raw Episodes">
-                <Input value={selectedEpisodeIds} onChange={(e) => setSelectedEpisodeIds(e.target.value)} />
-              </Field>
-            )}
             <div className="flex flex-col justify-end gap-2 text-xs">
               <label className="flex items-center gap-2">
                 <input
@@ -206,7 +190,7 @@ export default function DatasetsPage() {
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
-              disabled={busy || !taskFilter || (dataSource !== "teleop" && !batchId) || (selectionMode === "selected" && !selectedEpisodeIds.trim())}
+              disabled={busy || !taskFilter || (dataSource !== "teleop" && !batchId)}
               onClick={createExport}
             >
               {busy ? "Exporting…" : "Export dataset"}
@@ -218,8 +202,9 @@ export default function DatasetsPage() {
             )}
           </div>
           <p className="mt-2 text-xs text-ink-400">
-            Mixed exports retain a per-demo source and review-status attribute. Select episodes
-            individually from Raw Episodes; export each task separately because environments differ.
+            The exported HDF5 contains only human-approved demonstrations from the selected
+            source. Mixed exports retain a per-demo source attribute. Export each task separately
+            because every task has different environment metadata and observation semantics.
           </p>
 
           {error && (
