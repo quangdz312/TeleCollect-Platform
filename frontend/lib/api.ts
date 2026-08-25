@@ -691,6 +691,32 @@ export const api = {
       xhr.send(formData);
     }),
 
+  uploadReviewPackage: (params: { package: File; onProgress?: (percent: number) => void }): Promise<Demo> =>
+    new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.set("package", params.package);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", apiUrl("/demos/upload-package"));
+      const token = getToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) params.onProgress?.(Math.round((event.loaded / event.total) * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(toDemo(JSON.parse(xhr.responseText) as BackendDemo)); } catch {
+            reject(new ApiError(xhr.status, "Upload succeeded but the response could not be read"));
+          }
+          return;
+        }
+        try { reject(new ApiError(xhr.status, errorMessage(JSON.parse(xhr.responseText), xhr.statusText))); } catch {
+          reject(new ApiError(xhr.status, errorMessage(xhr.responseText, xhr.statusText)));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError(0, "Network error — could not reach the server"));
+      xhr.send(formData);
+    }),
+
   exports: async () => {
     const page = await request<BackendPage<BackendDataset>>("/datasets?page=1&page_size=100");
     return page.items.map(toExport);
@@ -703,6 +729,8 @@ export const api = {
     include_failures: boolean;
     overwrite: boolean;
     data_source: "teleop" | "scripted" | "both";
+    selection_mode: "all" | "exclude_rejected" | "selected";
+    selected_episode_ids?: string[];
     collection_batch_id?: string;
   }) =>
     toExport(
@@ -715,6 +743,8 @@ export const api = {
           include_failures: body.include_failures,
           overwrite: body.overwrite,
           data_source: body.data_source,
+          selection_mode: body.selection_mode,
+          selected_episode_ids: body.selected_episode_ids || [],
           collection_batch_id: body.collection_batch_id || null,
         }),
       }),
