@@ -44,6 +44,7 @@ export interface RawEpisodePage {
   total_pages: number;
   summary: RawEpisodeSummary;
   available_tasks: string[];
+  available_batches: string[];
 }
 
 export interface RawEpisodeSummary {
@@ -105,6 +106,7 @@ export interface RawEpisodeFilters {
   quality?: RawEpisodeQuality;
   outcome?: "success" | "failure";
   review_status?: RawEpisodeReviewStatus;
+  collection_batch_id?: string;
   search?: string;
   page?: number;
   page_size?: number;

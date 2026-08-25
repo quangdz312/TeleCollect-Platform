@@ -13,6 +13,7 @@ from scripts.evaluate_robomimic import (
     _prepare_state_bank,
     _rollout_with_success_tail,
     _should_keep_video,
+    _write_result,
 )
 from src.models.enums import JobStatus
 from src.models.schemas import EvaluationJobRequest
@@ -118,6 +119,49 @@ def test_evaluation_failure_records_exit_code(tmp_path: Path) -> None:
     assert finished.error == "Evaluation process exited with code 9"
 
 
+def test_failed_evaluation_can_be_retried_and_deleted(tmp_path: Path) -> None:
+    script = tmp_path / "fail.py"
+    script.write_text("raise SystemExit(9)\n", encoding="utf-8")
+    checkpoint = tmp_path / "model.pth"
+    checkpoint.touch()
+    manager = EvaluationJobManager(
+        tmp_path / "training",
+        TrainingJobsStub(checkpoint),  # type: ignore[arg-type]
+        repo_root=tmp_path,
+        python_executable=sys.executable,
+        evaluation_script=script,
+    )
+    failed = _wait(manager, manager.submit(_request()).id)
+
+    retried = manager.retry(failed.id)
+
+    assert retried is not None and retried.id != failed.id
+    assert _wait(manager, retried.id).status == JobStatus.FAILED
+    assert manager.delete(failed.id) is True
+    assert manager.get(failed.id) is None
+
+
+def test_result_writer_retries_windows_file_lock(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "result.json"
+    target.write_text("{}", encoding="utf-8")
+    original_replace = Path.replace
+    attempts = 0
+
+    def flaky_replace(path: Path, destination: Path):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporarily locked")
+        return original_replace(path, destination)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    _write_result(target, {"success_rate": 1.0})
+
+    assert attempts == 3
+    assert json.loads(target.read_text()) == {"success_rate": 1.0}
+
+
 def test_evaluation_can_be_cancelled(tmp_path: Path) -> None:
     script = tmp_path / "slow.py"
     script.write_text("import time; time.sleep(2)\n", encoding="utf-8")
@@ -131,6 +175,9 @@ def test_evaluation_can_be_cancelled(tmp_path: Path) -> None:
         evaluation_script=script,
     )
     created = manager.submit(_request())
+
+    with pytest.raises(ValueError, match="đang chạy"):
+        manager.delete(created.id)
 
     manager.cancel(created.id)
 

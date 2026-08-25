@@ -24,14 +24,38 @@ function CameraFlag({ available, children }: { available: boolean; children: str
   );
 }
 
-export function RawEpisodeTable({ items, loading }: { items: RawEpisode[]; loading: boolean }) {
+export function RawEpisodeTable({
+  items,
+  loading,
+  selectedIds,
+  onToggle,
+  onTogglePage,
+}: {
+  items: RawEpisode[];
+  loading: boolean;
+  selectedIds: Set<string>;
+  onToggle: (episode: RawEpisode) => void;
+  onTogglePage: (episodes: RawEpisode[], selected: boolean) => void;
+}) {
   if (!loading && items.length === 0) return <Empty>No raw episodes match these filters.</Empty>;
+
+  const eligible = items.filter((episode) => episode.review_status === "approved");
+  const allEligibleSelected = eligible.length > 0 && eligible.every((episode) => selectedIds.has(episode.episode_id));
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1280px] text-sm [&_td]:px-2 [&_th]:px-2">
         <thead className="text-left text-xs uppercase tracking-wider text-ink-400">
           <tr>
+            <th className="pb-2">
+              <input
+                aria-label="Select all approved episodes on this page"
+                type="checkbox"
+                checked={allEligibleSelected}
+                disabled={loading || eligible.length === 0}
+                onChange={(event) => onTogglePage(eligible, event.target.checked)}
+              />
+            </th>
             <th className="pb-2">Episode</th>
             <th className="pb-2">Source</th>
             <th className="pb-2">Task</th>
@@ -49,10 +73,20 @@ export function RawEpisodeTable({ items, loading }: { items: RawEpisode[]; loadi
         <tbody className="tabular">
           {loading ? (
             <tr className="border-t border-ink-700/50">
-              <td colSpan={12} className="py-10 text-center text-ink-400">Loading raw episodes…</td>
+              <td colSpan={13} className="py-10 text-center text-ink-400">Loading raw episodes…</td>
             </tr>
           ) : items.map((episode) => (
             <tr key={`${episode.source}:${episode.episode_id}`} className="border-t border-ink-700/50 hover:bg-ink-850/70">
+              <td className="py-3">
+                <input
+                  aria-label={`Select ${episode.display_name}`}
+                  title={episode.review_status === "approved" ? "Select for conversion" : "Only approved episodes can be converted"}
+                  type="checkbox"
+                  checked={selectedIds.has(episode.episode_id)}
+                  disabled={episode.review_status !== "approved"}
+                  onChange={() => onToggle(episode)}
+                />
+              </td>
               <td className="max-w-[260px] py-3 pr-4">
                 <div className="truncate font-medium" title={episode.display_name}>{episode.display_name}</div>
                 <div className="mt-0.5 truncate font-mono text-[11px] text-ink-400" title={episode.episode_id}>

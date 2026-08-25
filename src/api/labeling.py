@@ -157,13 +157,41 @@ async def overview(
 
 
 @router.post("/auto-gate/apply")
-async def apply_auto_gate(_user: User = Depends(reviewer_required)) -> dict[str, Any]:
+async def apply_auto_gate(
+    task: str | None = None,
+    collection_batch_id: str | None = None,
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
     """Apply the conservative gate to unlabeled episodes; human labels are immutable."""
 
     from src.labeling.auto_gate import apply
 
     space = workspace()
-    return {"result": apply(space), "workspace": space.summary()}
+    return {
+        "result": apply(
+            space,
+            task=task,
+            collection_batch_id=collection_batch_id,
+        ),
+        "workspace": space.summary(),
+    }
+
+
+@router.get("/auto-gate/dry-run")
+async def dry_run_auto_gate(
+    task: str | None = None,
+    collection_batch_id: str | None = None,
+    _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    """Preview automatic verdicts without persisting any review decision."""
+
+    from src.labeling.auto_gate import dry_run
+
+    return dry_run(
+        workspace().scores(),
+        task=task,
+        collection_batch_id=collection_batch_id,
+    )
 
 
 @router.get("/diversity")

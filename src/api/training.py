@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -99,6 +99,28 @@ async def cancel_training_job(
     return job
 
 
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_training_job(
+    job_id: str,
+    _user: User = Depends(require_min_role(UserRole.ADMIN)),
+) -> None:
+    related_evaluations = evaluation_manager().list(job_id)
+    if any(item.status in {"pending", "running"} for item in related_evaluations):
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể xóa training job khi evaluation liên quan đang chạy",
+        )
+    try:
+        deleted = job_manager().delete(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy training job")
+    # The training directory owns its evaluations and videos. Refresh the
+    # evaluation registry after the recursive artifact deletion.
+    evaluation_manager().list(job_id)
+
+
 @router.get("/jobs/{job_id}/log", response_class=PlainTextResponse)
 async def get_training_log(
     job_id: str,
@@ -125,6 +147,27 @@ async def get_training_checkpoint(
     if checkpoint is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy checkpoint trong training job")
     return checkpoint
+
+
+@router.get("/jobs/{job_id}/checkpoints/{checkpoint_id}/download")
+async def download_training_checkpoint(
+    job_id: str,
+    checkpoint_id: str,
+    _user: User = Depends(current_user_allow_query_token),
+) -> FileResponse:
+    if job_manager().get(job_id) is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy training job")
+    path = job_manager().checkpoint_path(job_id, checkpoint_id)
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Checkpoint không tồn tại hoặc không thuộc training job này",
+        )
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
 
 
 @router.post(
@@ -179,6 +222,42 @@ async def cancel_evaluation(
     if result is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy evaluation job")
     return result
+
+
+@router.post(
+    "/evaluations/{evaluation_id}/retry",
+    response_model=EvalResultResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_evaluation(
+    evaluation_id: str,
+    _user: User = Depends(require_min_role(UserRole.REVIEWER)),
+) -> EvalResultResponse:
+    try:
+        result = evaluation_manager().retry(evaluation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy evaluation job")
+    return result
+
+
+@router.delete(
+    "/evaluations/{evaluation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_evaluation(
+    evaluation_id: str,
+    _user: User = Depends(require_min_role(UserRole.REVIEWER)),
+) -> Response:
+    try:
+        deleted = evaluation_manager().delete(evaluation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy evaluation job")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/evaluations/{evaluation_id}/log", response_class=PlainTextResponse)

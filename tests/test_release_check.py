@@ -14,7 +14,13 @@ DATASETS = sorted(glob.glob("data/review/datasets/*.hdf5"))
 def episodes():
     if not DATASETS:
         pytest.skip("no reference corpus on this machine")
-    return {episode.task: episode for episode in load_many(DATASETS)}
+    # The corpus can contain intentional failures. Release/lift reference
+    # assertions must select successful examples rather than the last file.
+    return {
+        episode.task: episode
+        for episode in load_many(DATASETS)
+        if episode.recorded_success
+    }
 
 
 def test_threshold_matches_the_robosuite_reach_term():

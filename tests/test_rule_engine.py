@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from src.core.recorder import EpisodeRecorder, TELEOP_SCHEMA_VERSION
+from src.core.recorder import TELEOP_SCHEMA_VERSION, EpisodeRecorder
 from src.labeling.rule_engine import (
     RuleConfig,
     RuleEpisode,
@@ -10,7 +10,6 @@ from src.labeling.rule_engine import (
     load_manual_rule_episode,
 )
 from src.services import storage
-
 
 CONFIG = RuleConfig(stable_tail_frames=3)
 
@@ -180,6 +179,33 @@ def test_square_rule_cannot_evaluate_without_target():
     assert result.results[0].status == "cannot_evaluate"
 
 
+def test_teleop_profile_relaxes_square_orientation_quality_not_goal_state():
+    angle = np.radians(18.0)
+    quat = np.tile(
+        np.array([[np.cos(angle / 2.0), 0.0, 0.0, np.sin(angle / 2.0)]]),
+        (4, 1),
+    )
+    common = {
+        "object_position": np.tile(np.array([[0.2, 0.2, 0.83]]), (4, 1)),
+        "object_quat": quat,
+        "eef_position": np.tile(np.array([[1.0, 1.0, 1.0]]), (4, 1)),
+        "target_position": np.array([0.2, 0.2, 0.8]),
+        "table_height": 0.80,
+    }
+
+    strict = evaluate_rules(RuleEpisode("strict", "square", "scripted", **common), config=CONFIG)
+    tolerant = evaluate_rules(
+        RuleEpisode("tolerant", "square", "manual_teleop", **common), config=CONFIG,
+    )
+
+    assert strict.results[0].status == "pass"
+    assert strict.results[1].status == "warning"
+    assert strict.final_recommendation == "needs_review"
+    assert tolerant.results[0].status == "pass"
+    assert tolerant.results[1].status == "pass"
+    assert tolerant.final_recommendation == "suggest_pass"
+
+
 def test_recorder_writes_privileged_state_schema(storage_dir):
     recorder = EpisodeRecorder(
         episode_id="episode_with_state",
@@ -202,6 +228,7 @@ def test_recorder_writes_privileged_state_schema(storage_dir):
     recorder.finalize()
 
     import json
+
     import pyarrow.parquet as pq
 
     meta = json.loads(storage.meta_path("episode_with_state").read_text(encoding="utf-8"))
@@ -219,6 +246,7 @@ def test_old_manual_episode_without_privileged_state_degrades_to_cannot_evaluate
     episode_dir.mkdir(parents=True)
 
     import json
+
     import pyarrow as pa
     import pyarrow.parquet as pq
 

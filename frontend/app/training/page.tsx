@@ -1,19 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { Alert, Badge, Button, Card, Empty, Field, Input, Select, Stat } from "@/components/ui";
 import {
   api,
-  mediaUrl,
   type DatasetExport,
-  type EvaluationRequest,
-  type EvaluationRun,
   type RunStatus,
   type TrainingRequest,
   type TrainingRun,
 } from "@/lib/api";
-import { bytes, percent, timeAgo } from "@/lib/format";
+import { bytes, timeAgo } from "@/lib/format";
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
   succeeded: "ok",
@@ -56,34 +53,24 @@ export default function TrainingPage() {
   const { user } = useAuth();
   const [datasets, setDatasets] = useState<DatasetExport[]>([]);
   const [runs, setRuns] = useState<TrainingRun[]>([]);
-  const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<TrainingRequest>(INITIAL_FORM);
   const [log, setLog] = useState("");
-  const [evaluationLog, setEvaluationLog] = useState("");
   const [selectedTask, setSelectedTask] = useState("all");
   const [runView, setRunView] = useState<"active" | "archived" | "all">("active");
   const [preferences, setPreferences] = useState<RunPreferences>({ archived: [], pinned: [] });
   const [showAllCheckpoints, setShowAllCheckpoints] = useState(false);
-  const [expandedEvaluationId, setExpandedEvaluationId] = useState<string | null>(null);
-  const [showAllEvaluations, setShowAllEvaluations] = useState(false);
   const [showJobLog, setShowJobLog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [evaluationForm, setEvaluationForm] = useState<EvaluationRequest>({
-    training_run_id: "",
-    checkpoint_id: "",
-    num_rollouts: 20,
-    horizon: 250,
-    seed: 5000,
-    record_videos: 3,
-  });
+  const requestedDatasetApplied = useRef(false);
 
   const canTrain = user?.role === "reviewer" || user?.role === "admin";
   const datasetById = useMemo(
     () => new Map(datasets.map((dataset) => [dataset.id, dataset])),
     [datasets],
   );
+  const selectedTrainingDataset = datasetById.get(form.dataset_id);
   const taskForRun = useCallback(
     (run: TrainingRun) => datasetById.get(run.dataset_id ?? run.config.dataset_id)?.tasks?.[0] ?? "Unknown task",
     [datasetById],
@@ -104,20 +91,14 @@ export default function TrainingPage() {
     () => runs.find((run) => run.id === selectedId) ?? null,
     [runs, selectedId],
   );
-  const selectedEvaluations = useMemo(
-    () => evaluations.filter((item) => item.training_run_id === selectedId),
-    [evaluations, selectedId],
-  );
-  const latestEvaluation = selectedEvaluations[0] ?? null;
   const compactCheckpoints = useMemo(() => {
     const checkpoints = selected?.checkpoints ?? [];
     if (showAllCheckpoints) return checkpoints;
     const important = checkpoints.filter(
-      (checkpoint) => checkpoint.is_best_validation || checkpoint.is_latest || checkpoint.id === evaluationForm.checkpoint_id,
+      (checkpoint) => checkpoint.is_best_validation || checkpoint.is_latest,
     );
     return Array.from(new Map(important.map((checkpoint) => [checkpoint.id, checkpoint])).values());
-  }, [evaluationForm.checkpoint_id, selected?.checkpoints, showAllCheckpoints]);
-  const visibleEvaluations = showAllEvaluations ? selectedEvaluations : selectedEvaluations.slice(0, 5);
+  }, [selected?.checkpoints, showAllCheckpoints]);
 
   useEffect(() => {
     try {
@@ -134,21 +115,34 @@ export default function TrainingPage() {
   }, []);
 
   const load = useCallback(async () => {
-    const [allDatasets, allRuns, allEvaluations] = await Promise.all([
+    const [allDatasets, allRuns] = await Promise.all([
       api.exports(),
       api.runs(),
-      api.evaluations(),
     ]);
     const ready = allDatasets.filter(
       (item) => item.format === "robomimic" && item.status === "ready",
     );
     setDatasets(ready);
     setRuns(allRuns);
-    setEvaluations(allEvaluations);
     setSelectedId((current) => current ?? allRuns[0]?.id ?? null);
-    setForm((current) =>
-      current.dataset_id || !ready.length ? current : { ...current, dataset_id: ready[0].id },
-    );
+    const requestedDatasetId = new URLSearchParams(window.location.search).get("dataset");
+    if (requestedDatasetId && !requestedDatasetApplied.current) {
+      requestedDatasetApplied.current = true;
+      const requestedDataset = ready.find((dataset) => dataset.id === requestedDatasetId);
+      if (requestedDataset) {
+        setForm((current) => ({
+          ...current,
+          dataset_id: requestedDataset.id,
+          name: current.name === INITIAL_FORM.name ? `${requestedDataset.name}-bc-v1` : current.name,
+        }));
+      } else {
+        setError("The requested dataset is unavailable, not ready, or is not a RoboMimic HDF5 dataset.");
+      }
+    } else {
+      setForm((current) =>
+        current.dataset_id || !ready.length ? current : { ...current, dataset_id: ready[0].id },
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -159,32 +153,14 @@ export default function TrainingPage() {
   }, [load, user]);
 
   useEffect(() => {
-    const active =
-      runs.some((run) => run.status === "pending" || run.status === "running") ||
-      evaluations.some((item) => item.status === "pending" || item.status === "running");
+    const active = runs.some((run) => run.status === "pending" || run.status === "running");
     if (!active) return;
     const timer = window.setInterval(() => void load(), 2500);
     return () => window.clearInterval(timer);
-  }, [evaluations, load, runs]);
-
-  useEffect(() => {
-    if (!selected) return;
-    const checkpoints = selected.checkpoints ?? [];
-    const preferred =
-      checkpoints.find((checkpoint) => checkpoint.is_best_validation) ??
-      checkpoints.find((checkpoint) => checkpoint.is_latest) ??
-      checkpoints[0];
-    setEvaluationForm((current) => ({
-      ...current,
-      training_run_id: selected.id,
-      checkpoint_id: preferred?.id ?? "",
-    }));
-  }, [selected?.id, selected?.status]);
+  }, [load, runs]);
 
   useEffect(() => {
     setShowAllCheckpoints(false);
-    setExpandedEvaluationId(null);
-    setShowAllEvaluations(false);
     setShowJobLog(false);
   }, [selectedId]);
 
@@ -212,31 +188,6 @@ export default function TrainingPage() {
       window.clearInterval(timer);
     };
   }, [selected?.status, selectedId]);
-
-  useEffect(() => {
-    if (!latestEvaluation) {
-      setEvaluationLog("");
-      return;
-    }
-    let disposed = false;
-    const refresh = async () => {
-      try {
-        const value = await api.evaluationLog(latestEvaluation.id);
-        if (!disposed) setEvaluationLog(value);
-      } catch {
-        if (!disposed) setEvaluationLog("");
-      }
-    };
-    void refresh();
-    if (latestEvaluation.status !== "pending" && latestEvaluation.status !== "running") {
-      return () => { disposed = true; };
-    }
-    const timer = window.setInterval(() => void refresh(), 2500);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [latestEvaluation?.id, latestEvaluation?.status]);
 
   if (!user) return null;
 
@@ -271,31 +222,33 @@ export default function TrainingPage() {
     }
   }
 
-  async function startEvaluation() {
-    if (!selected) return;
+  async function deleteTraining() {
+    if (!selected || user?.role !== "admin") return;
     setBusy(true);
     setError(null);
     try {
-      await api.createEvaluation(selected.id, {
-        ...evaluationForm,
-        training_run_id: selected.id,
+      const relatedEvaluations = await api.evaluations(selected.id);
+      const checkpointCount = selected.checkpoints?.length ?? 0;
+      const evaluationText = relatedEvaluations.length === 1
+        ? "1 evaluation and its videos"
+        : `${relatedEvaluations.length} evaluations and their videos`;
+      const confirmed = window.confirm(
+        `Delete training run "${selected.name}"?\n\n` +
+        `This permanently deletes ${checkpointCount} checkpoints, the training log, and ${evaluationText}. ` +
+        "The source dataset will not be deleted.",
+      );
+      if (!confirmed) return;
+      await api.deleteRun(selected.id);
+      const deletedId = selected.id;
+      const remaining = runs.filter((run) => run.id !== deletedId);
+      setRuns(remaining);
+      setSelectedId(remaining[0]?.id ?? null);
+      updatePreferences({
+        archived: preferences.archived.filter((id) => id !== deletedId),
+        pinned: preferences.pinned.filter((id) => id !== deletedId),
       });
-      await load();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not start evaluation");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function cancelEvaluation(evaluationId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.cancelEvaluation(evaluationId);
-      await load();
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not cancel evaluation");
+      setError(exc instanceof Error ? exc.message : "Could not delete training run");
     } finally {
       setBusy(false);
     }
@@ -423,6 +376,13 @@ export default function TrainingPage() {
                   </>
                 )}
               </div>
+              {selectedTrainingDataset && (
+                <div className="mt-3">
+                  <Alert tone="info">
+                    Training from <strong>{selectedTrainingDataset.name}</strong> · {selectedTrainingDataset.num_episodes.toLocaleString()} episodes · {selectedTrainingDataset.num_frames.toLocaleString()} frames · {selectedTrainingDataset.tasks.join(", ") || "unknown task"}
+                  </Alert>
+                </div>
+              )}
               {form.normalize_observations && (
                 <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
               )}
@@ -486,7 +446,7 @@ export default function TrainingPage() {
 
         {!selected ? <Empty>Select a training run to see its details.</Empty> : (
           <div className="space-y-5">
-            <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge><Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}</div>}>
+            <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge><Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}>Delete</Button>}</div>}>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Stat label="Epoch" value={`${currentEpoch} / ${totalEpochs}`} />
                 <Stat label="Train loss" value={selected.train_loss == null ? "—" : selected.train_loss.toFixed(6)} />
@@ -500,11 +460,22 @@ export default function TrainingPage() {
             <Card title="Checkpoints" subtitle="Best validation is the checkpoint with the lowest validation loss.">
               {!selected.checkpoints?.length ? <Empty>No checkpoint yet.</Empty> : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">File</th><th className="px-2 py-2">Tags</th></tr></thead>
+                  <table className="w-full min-w-[900px] text-left text-sm">
+                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">Created</th><th className="px-2 py-2">File</th><th className="px-2 py-2">Tags</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
                     <tbody className="divide-y divide-ink-700/60">
                       {compactCheckpoints.map((checkpoint) => (
-                        <tr key={checkpoint.id}><td className="px-2 py-2 tabular">{checkpoint.epoch}</td><td className="px-2 py-2 tabular">{checkpoint.validation_loss == null ? "—" : checkpoint.validation_loss.toFixed(8)}</td><td className="px-2 py-2">{bytes(checkpoint.size_bytes)}</td><td className="max-w-72 truncate px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpoint.filename}</td><td className="px-2 py-2"><div className="flex gap-1">{checkpoint.is_best_validation && <Badge tone="ok">best validation</Badge>}{checkpoint.is_latest && <Badge tone="info">latest</Badge>}</div></td></tr>
+                        <tr key={checkpoint.id}>
+                          <td className="px-2 py-2 tabular">{checkpoint.epoch}</td>
+                          <td className="px-2 py-2 tabular">{checkpoint.validation_loss == null ? "—" : checkpoint.validation_loss.toFixed(8)}</td>
+                          <td className="px-2 py-2">{bytes(checkpoint.size_bytes)}</td>
+                          <td className="px-2 py-2 text-xs text-ink-400">{timeAgo(checkpoint.created_at)}</td>
+                          <td className="max-w-72 truncate px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpoint.filename}</td>
+                          <td className="px-2 py-2"><div className="flex gap-1">{checkpoint.is_best_validation && <Badge tone="ok">best validation</Badge>}{checkpoint.is_latest && <Badge tone="info">latest</Badge>}</div></td>
+                          <td className="px-2 py-2"><div className="flex justify-end gap-2">
+                            <a href={api.checkpointDownloadUrl(selected.id, checkpoint.id)}><Button variant="subtle">Download</Button></a>
+                            {selected.status === "succeeded" && <a href={`/evaluate?run=${encodeURIComponent(selected.id)}&checkpoint=${encodeURIComponent(checkpoint.id)}`}><Button variant="primary">Evaluate</Button></a>}
+                          </div></td>
+                        </tr>
                       ))}
                     </tbody>
                   </table>
@@ -515,101 +486,6 @@ export default function TrainingPage() {
                     <div className="mt-3 text-center"><Button variant="subtle" onClick={() => setShowAllCheckpoints(false)}>Show important only</Button></div>
                   )}
                 </div>
-              )}
-            </Card>
-
-            {selected.status === "succeeded" && Boolean(selected.checkpoints?.length) && (
-              <Card title="Evaluate in simulator" subtitle="Each rollout uses a different seed; the best-validation checkpoint is the default.">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  <Field label="Checkpoint">
-                    <Select value={evaluationForm.checkpoint_id} onChange={(event) => setEvaluationForm({ ...evaluationForm, checkpoint_id: event.target.value })}>
-                      {selected.checkpoints?.map((checkpoint) => (
-                        <option key={checkpoint.id} value={checkpoint.id}>
-                          epoch {checkpoint.epoch}
-                          {checkpoint.is_best_validation ? " · best validation" : ""}
-                          {checkpoint.is_latest ? " · latest" : ""}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <NumberField label="Rollouts" value={evaluationForm.num_rollouts} min={1} onChange={(num_rollouts) => setEvaluationForm({ ...evaluationForm, num_rollouts })} />
-                  <NumberField label="Horizon" value={evaluationForm.horizon ?? 250} min={1} onChange={(horizon) => setEvaluationForm({ ...evaluationForm, horizon })} />
-                  <NumberField label="Start seed" value={evaluationForm.seed} min={0} onChange={(seed) => setEvaluationForm({ ...evaluationForm, seed })} />
-                  <NumberField label="Videos" value={evaluationForm.record_videos} min={0} onChange={(record_videos) => setEvaluationForm({ ...evaluationForm, record_videos })} />
-                </div>
-                <div className="mt-4 flex items-center gap-3">
-                  <Button
-                    variant="primary"
-                    disabled={
-                      busy ||
-                      !evaluationForm.checkpoint_id ||
-                      evaluationForm.record_videos > evaluationForm.num_rollouts
-                    }
-                    onClick={() => void startEvaluation()}
-                  >
-                    Run evaluation
-                  </Button>
-                  <span className="text-xs text-ink-400">
-                    Seeds {evaluationForm.seed}–{evaluationForm.seed + evaluationForm.num_rollouts - 1}
-                  </span>
-                </div>
-                {evaluationForm.record_videos > evaluationForm.num_rollouts && (
-                  <div className="mt-3"><Alert>The video count cannot exceed the rollout count.</Alert></div>
-                )}
-              </Card>
-            )}
-
-            <Card title="Evaluation results">
-              {selectedEvaluations.length === 0 ? <Empty>No evaluation has run for this training run yet.</Empty> : (
-                <div className="space-y-2">
-                  {visibleEvaluations.map((evaluation) => {
-                    const successes = evaluation.episodes.filter((episode) => episode.success).length;
-                    const checkpoint = selected.checkpoints?.find((item) => item.id === evaluation.checkpoint_id);
-                    const expanded = expandedEvaluationId === evaluation.id;
-                    return (
-                      <div key={evaluation.id} className="rounded-lg border border-ink-700/60 bg-ink-850/50 p-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">{checkpoint ? `Epoch ${checkpoint.epoch}` : evaluation.checkpoint_id}</span>
-                              <Badge tone={TONES[evaluation.status]}>{evaluation.status}</Badge>
-                            </div>
-                            <div className="mt-1 text-xs text-ink-400">
-                              {evaluation.task_name} · {evaluation.episodes.length}/{evaluation.num_episodes} rollouts · {timeAgo(evaluation.created_at)}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {evaluation.success_rate != null && (
-                              <div className="text-right">
-                                <div className="text-lg font-semibold text-ok-400">{percent(evaluation.success_rate, 1)}</div>
-                                <div className="text-[11px] text-ink-400">{successes}/{evaluation.episodes.length} successful</div>
-                              </div>
-                            )}
-                            {(evaluation.status === "pending" || evaluation.status === "running") && (
-                              <Button variant="danger" disabled={busy} onClick={() => void cancelEvaluation(evaluation.id)}>Cancel</Button>
-                            )}
-                            <Button variant="subtle" onClick={() => setExpandedEvaluationId(expanded ? null : evaluation.id)}>{expanded ? "Hide" : "View details"}</Button>
-                          </div>
-                        </div>
-                        {expanded && (
-                          <div className="mt-3 border-t border-ink-700/60 pt-3">
-                            {evaluation.mean_episode_length != null && <div className="text-xs text-ink-400">Mean episode length: {evaluation.mean_episode_length.toFixed(1)} steps</div>}
-                            {evaluation.episodes.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{evaluation.episodes.map((episode) => <span key={episode.seed} title={`seed ${episode.seed} · ${episode.steps} steps`} className={`rounded px-2 py-1 text-[11px] ${episode.success ? "bg-ok-600/20 text-ok-400" : "bg-bad-600/20 text-bad-400"}`}>{episode.seed}: {episode.success ? "success" : "fail"}</span>)}</div>}
-                            <EvaluationVideos evaluation={evaluation} />
-                            {evaluation.error && <pre className="mt-3 whitespace-pre-wrap text-xs text-bad-400">{evaluation.error}</pre>}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {selectedEvaluations.length > 5 && <div className="pt-2 text-center"><Button variant="subtle" onClick={() => setShowAllEvaluations((value) => !value)}>{showAllEvaluations ? "Show recent only" : `View all evaluations (${selectedEvaluations.length})`}</Button></div>}
-                </div>
-              )}
-              {latestEvaluation && evaluationLog && expandedEvaluationId === latestEvaluation.id && (
-                <details className="mt-4">
-                  <summary className="cursor-pointer text-xs text-ink-300">Latest evaluation log</summary>
-                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-3 text-[11px] text-ink-300">{evaluationLog}</pre>
-                </details>
               )}
             </Card>
 
@@ -625,28 +501,4 @@ export default function TrainingPage() {
 
 function NumberField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (value: number) => void }) {
   return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
-}
-
-function EvaluationVideos({ evaluation }: { evaluation: EvaluationRun }) {
-  const recorded = evaluation.episodes.filter((episode) => episode.video);
-  if (!recorded.length) return null;
-  return (
-    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {recorded.map((episode) => (
-        <div key={episode.seed}>
-          <video
-            controls
-            muted
-            loop
-            preload="metadata"
-            className="w-full rounded-lg border border-tech-border bg-tech-bg"
-            src={mediaUrl(`/training/evaluations/${evaluation.id}/videos/${episode.video}`)}
-          />
-          <div className="mt-1 text-xs text-ink-400">
-            seed {episode.seed} · {episode.steps} steps · {episode.success ? "success" : "fail"}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }

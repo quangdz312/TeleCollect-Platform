@@ -107,14 +107,19 @@ def evaluate(record: Mapping[str, Any]) -> GateVerdict:
     return GateVerdict("approve", "Success and all strict auto-pass checks passed", audit_rate)
 
 
-def apply(space: Any) -> dict[str, Any]:
+def apply(
+    space: Any,
+    *,
+    task: str | None = None,
+    collection_batch_id: str | None = None,
+) -> dict[str, Any]:
     """Persist automatic labels for currently-unlabelled episodes only."""
 
     labels = space.labels_by_id()
     scores = space.scores()
-    # Deterministic collection replays the same episode for the same seed, so a
-    # repeat carries no new information. This is a property of the corpus rather
-    # than of one record, which is why it is decided here and not in evaluate().
+    # Only an exact initial-state + action fingerprint proves a repeat. A shared
+    # seed is insufficient because quality profiles and sampled perturbations
+    # can produce different trajectories from the same environment seed.
     repeats = duplicate_episode_ids(scores)
     audit_by_task: dict[str, list[Mapping[str, Any]]] = {}
     for record in scores:
@@ -126,23 +131,40 @@ def apply(space: Any) -> dict[str, Any]:
         audit_by_task.setdefault(str(record.get("task", "")), []).append(label)
     disabled_tasks = []
     audit_error_rates: dict[str, float] = {}
-    for task, task_labels in audit_by_task.items():
+    for audit_task, task_labels in audit_by_task.items():
         failures = sum(label.get("human_decision") == "rejected" for label in task_labels)
         rate = failures / len(task_labels)
-        audit_error_rates[task] = rate
+        audit_error_rates[audit_task] = rate
         # One verified false approval is enough to stop that task. Gathering
         # more data must not expose more bad demonstrations while we wait for
         # a statistically convenient sample size.
         if failures > 0 and rate > MAX_AUDIT_ERROR_RATE:
-            disabled_tasks.append(task)
+            disabled_tasks.append(audit_task)
+    scoped_disabled = (
+        disabled_tasks
+        if task is None
+        else [disabled for disabled in disabled_tasks if disabled == task]
+    )
     counts: dict[str, Any] = {
         "approved": 0, "rejected": 0, "audit": 0, "review": 0, "skipped": 0,
         "duplicates": len(repeats),
-        "auto_approve_enabled": not disabled_tasks,
-        "disabled_tasks": disabled_tasks,
+        "auto_approve_enabled": not scoped_disabled,
+        "disabled_tasks": scoped_disabled,
         "audit_error_rates": audit_error_rates,
     }
     for record in scores:
+        if task is not None and str(record.get("task", "")) != task:
+            continue
+        record_provenance = record.get("provenance")
+        record_provenance = (
+            record_provenance if isinstance(record_provenance, Mapping) else {}
+        )
+        if (
+            collection_batch_id is not None
+            and str(record_provenance.get("collection_batch_id", ""))
+            != collection_batch_id
+        ):
+            continue
         episode_id = str(record["episode_id"])
         if episode_id in labels:
             counts["skipped"] += 1
@@ -172,3 +194,39 @@ def apply(space: Any) -> dict[str, Any]:
         labels[episode_id] = {"human_decision": decision}
         counts[decision] = int(counts[decision] or 0) + 1
     return counts
+
+
+def dry_run(
+    records: list[Mapping[str, Any]],
+    *,
+    task: str | None = None,
+    collection_batch_id: str | None = None,
+) -> dict[str, Any]:
+    """Preview gate actions without writing labels or changing workspace state."""
+
+    repeats = duplicate_episode_ids(records)
+    selected = []
+    counts = {"approve": 0, "reject": 0, "review": 0, "audit": 0}
+    for record in records:
+        if task is not None and str(record.get("task", "")) != task:
+            continue
+        provenance = record.get("provenance")
+        provenance = provenance if isinstance(provenance, Mapping) else {}
+        if (
+            collection_batch_id is not None
+            and str(provenance.get("collection_batch_id", "")) != collection_batch_id
+        ):
+            continue
+        episode_id = str(record.get("episode_id", ""))
+        verdict = (
+            GateVerdict("reject", "Repeats an exact trajectory already in the corpus")
+            if episode_id in repeats
+            else evaluate(record)
+        )
+        counts[verdict.action] += 1
+        selected.append({
+            "episode_id": episode_id,
+            "action": verdict.action,
+            "reason": verdict.reason,
+        })
+    return {"counts": counts, "total": len(selected), "episodes": selected}

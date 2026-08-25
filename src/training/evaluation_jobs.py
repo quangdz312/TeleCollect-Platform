@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -257,6 +258,31 @@ class EvaluationJobManager:
             else:
                 self._write(record)
             return self._response(record)
+
+    def retry(self, evaluation_id: str) -> EvalResultResponse | None:
+        with self._lock:
+            record = self._jobs.get(evaluation_id)
+            if record is None:
+                return None
+            if record["status"] in {JobStatus.PENDING, JobStatus.RUNNING}:
+                raise ValueError("Không thể retry evaluation đang chạy")
+            config = EvaluationJobRequest.model_validate(record["config"])
+        return self.submit(config)
+
+    def delete(self, evaluation_id: str) -> bool:
+        with self._lock:
+            record = self._jobs.get(evaluation_id)
+            if record is None:
+                return False
+            if record["status"] in {JobStatus.PENDING, JobStatus.RUNNING}:
+                raise ValueError("Không thể xóa evaluation đang chạy")
+            directory = self._job_dir(record["training_run_id"], evaluation_id)
+            if directory.exists():
+                shutil.rmtree(directory)
+            self._jobs.pop(evaluation_id, None)
+            self._processes.pop(evaluation_id, None)
+            self._futures.pop(evaluation_id, None)
+            return True
 
     def log(self, evaluation_id: str) -> str | None:
         record = self._jobs.get(evaluation_id)

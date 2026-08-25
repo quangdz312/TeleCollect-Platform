@@ -186,6 +186,21 @@ def build_robomimic_hdf5(
     return len(episodes), total
 
 
+def inspect_hdf5_schema(path: Path) -> dict[str, object]:
+    """Return a compact, JSON-safe manifest from the first demonstration."""
+    fields: list[dict[str, object]] = []
+    with h5py.File(path, "r") as handle:
+        data = handle.get("data")
+        demo_names = sorted(data.keys()) if isinstance(data, h5py.Group) else []
+        if demo_names:
+            def visit(name: str, value: h5py.Dataset | h5py.Group) -> None:
+                if isinstance(value, h5py.Dataset):
+                    fields.append({"path": name, "shape": list(value.shape), "dtype": str(value.dtype)})
+            data[demo_names[0]].visititems(visit)
+        masks = sorted(handle["mask"].keys()) if "mask" in handle else []
+    return {"sample_demo": demo_names[0] if demo_names else None, "fields": fields, "masks": masks}
+
+
 async def build_robomimic_dataset(
     dataset_id: str,
     output: Path,
@@ -212,4 +227,5 @@ async def build_robomimic_dataset(
             dataset.num_frames = frames
             dataset.size_bytes = output.stat().st_size
             dataset.zip_path = str(output)
+            dataset.schema_manifest = inspect_hdf5_schema(output)
         await session.commit()

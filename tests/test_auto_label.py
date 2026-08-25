@@ -75,7 +75,7 @@ def test_teleop_explicit_failure_is_reject_recommendation():
     assert result.label == "reject"
 
 
-def test_teleop_dropped_frames_stay_in_review():
+def test_teleop_preview_drops_do_not_gate_synchronized_trajectory():
     from src.services.auto_label import _teleop_quality_gate
 
     result = _teleop_quality_gate(
@@ -83,7 +83,18 @@ def test_teleop_dropped_frames_stay_in_review():
             "privileged_state": {"recorded": True},
             "dropped_stream_frames": 1,
             "overruns": 0,
+            "num_steps": 100,
         }
     )
+    assert result is None
+
+
+def test_teleop_tolerates_small_overrun_ratio_but_reviews_large_ratio():
+    from src.services.auto_label import _teleop_quality_gate
+
+    base = {"privileged_state": {"recorded": True}, "num_steps": 100}
+    assert _teleop_quality_gate(base | {"overruns": 10}) is None
+    result = _teleop_quality_gate(base | {"overruns": 11})
     assert result is not None
     assert result.label == "review"
+    assert result.profile == "teleop_tolerant"

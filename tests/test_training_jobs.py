@@ -232,7 +232,7 @@ async def test_create_job_api_accepts_managed_ready_hdf5(
         username="training-reviewer",
         password_hash=hash_password("password123"),
         display_name="Training Reviewer",
-        role=UserRole.REVIEWER,
+        role=UserRole.ADMIN,
     )
     dataset = Dataset(
         id="dataset-ready",
@@ -265,4 +265,29 @@ async def test_create_job_api_accepts_managed_ready_hdf5(
 
     assert response.status_code == 202
     assert response.json()["dataset_id"] == dataset.id
-    assert _wait(manager, response.json()["id"]).status == JobStatus.SUCCEEDED
+    finished = _wait(manager, response.json()["id"])
+    assert finished.status == JobStatus.SUCCEEDED
+
+    checkpoint_dir = Path(finished.output_dir) / "run" / "models"
+    checkpoint_dir.mkdir(parents=True)
+    (checkpoint_dir / "model_epoch_1.pth").write_bytes(b"checkpoint-bytes")
+    refreshed = manager.get(finished.id)
+    assert refreshed is not None and refreshed.checkpoints
+
+    download = await client.get(
+        f"/api/v1/training/jobs/{finished.id}/checkpoints/{refreshed.checkpoints[0].id}/download",
+        headers=headers,
+    )
+
+    assert download.status_code == 200
+    assert download.content == b"checkpoint-bytes"
+    assert "model_epoch_1.pth" in download.headers["content-disposition"]
+
+    deleted = await client.delete(
+        f"/api/v1/training/jobs/{finished.id}",
+        headers=headers,
+    )
+
+    assert deleted.status_code == 204
+    assert manager.get(finished.id) is None
+    assert not (storage_dir / "training" / finished.id).exists()

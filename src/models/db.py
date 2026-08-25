@@ -147,6 +147,13 @@ class Dataset(Base):
     num_episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     num_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_source: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    collection_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    exporter_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
+    episode_inventory: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    schema_manifest: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    build_spec: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     episode_links: Mapped[list["DatasetEpisode"]] = relationship(
@@ -215,3 +222,17 @@ async def init_db(engine: AsyncEngine | None = None) -> None:
     target = engine or get_engine()
     async with target.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if conn.dialect.name == "sqlite":
+            columns = {row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(datasets)")).all()}
+            additions = {
+                "data_source": "VARCHAR(20) NOT NULL DEFAULT 'unknown'",
+                "collection_batch_id": "VARCHAR(64)",
+                "created_by": "VARCHAR(150)",
+                "exporter_version": "VARCHAR(20) NOT NULL DEFAULT '1.0'",
+                "episode_inventory": "JSON NOT NULL DEFAULT '[]'",
+                "schema_manifest": "JSON NOT NULL DEFAULT '{}'",
+                "build_spec": "JSON NOT NULL DEFAULT '[]'",
+            }
+            for name, definition in additions.items():
+                if name not in columns:
+                    await conn.exec_driver_sql(f"ALTER TABLE datasets ADD COLUMN {name} {definition}")
