@@ -168,6 +168,10 @@ class RobotEnv:
         """
         if self._preview_renderer is None:
             return None
+        # _preview_renderer is only ever created when self._preview_camera is
+        # truthy (see the constructor guard above), so it's guaranteed
+        # non-None here too.
+        assert self._preview_camera is not None
         return self._preview_renderer.render().get(self._preview_camera)
 
     @property

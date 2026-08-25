@@ -14,4 +14,12 @@ eval/
 .dockerignore
 Dockerfile
 docker-compose.yml
+docker-compose.prod.yml
+docker-compose.local.yml
+Caddyfile
+Caddyfile.local
 data/
+backups/
+frontend/
+node_modules/
+.next/

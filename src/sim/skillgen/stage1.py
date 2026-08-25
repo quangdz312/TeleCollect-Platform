@@ -6,12 +6,13 @@ residual wrist error, so every alignment step re-reads the tip's true pose from
 the simulator and corrects the hand target by the leftover tip error.
 """
 import time
+
 import numpy as np
 import robosuite.utils.transform_utils as T
 
 from . import geometry as G
-from .primitives import Servo, grasp_mat, body_geom_names, CLOSE, OPEN
-from .telemetry import StepTelemetry, EpisodeResult
+from .primitives import CLOSE, OPEN, Servo, body_geom_names, grasp_mat
+from .telemetry import EpisodeResult, StepTelemetry
 
 TABLE_TOP = 0.810
 SAFE_Z = 1.26          # hand height that keeps the hung rod clear of the table

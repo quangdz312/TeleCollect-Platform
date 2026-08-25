@@ -165,7 +165,7 @@ export function HandControl({
         );
         setState(next);
         onInput(next.active && next.detected ? next.input : null);
-        onGripper(next.input.gripper > 0);
+        if (next.active && next.detected) onGripper(next.input.gripper > 0);
         draw(canvasRef.current, video, result.landmarks[0]);
         if (frameAt - diagnosticsUpdatedAt.current >= 250) {
           diagnosticsUpdatedAt.current = frameAt;

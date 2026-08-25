@@ -103,6 +103,7 @@ export class TeleopClient {
   private latestImages = new Map<string, ImageBitmap>();
   private latestObs: ObsMessage | null = null;
   private latestStats: StatsMessage | null = null;
+  private cancelled = false;
 
   input: AxisInput = { linear: [0, 0, 0], angular: [0, 0, 0], gripper: 1 };
 
@@ -116,6 +117,7 @@ export class TeleopClient {
 
   async connect(task: string) {
     this.disconnect(true);
+    this.cancelled = false;
     this.taskId = task;
     this.onStatus?.("connecting");
 
@@ -135,6 +137,17 @@ export class TeleopClient {
       }
 
       const created = (await response.json()) as CreatedSession;
+      // A later connect()/disconnect() may have already superseded this call
+      // while the request above was in flight — without this check its
+      // WebSocket would still open and its session would leak, silently
+      // eating one of the server's MAX_CONCURRENT_SESSIONS slots.
+      if (this.cancelled) {
+        await fetch(apiUrl(`/teleop/sessions/${created.session_id}`), {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${this.token}` },
+        }).catch(() => {});
+        return;
+      }
       this.sessionId = created.session_id;
       const separator = created.ws_url.includes("?") ? "&" : "?";
       const ws = new WebSocket(`${wsOrigin()}${created.ws_url}${separator}token=${encodeURIComponent(this.token)}`);
@@ -159,6 +172,7 @@ export class TeleopClient {
   }
 
   disconnect(closeRemote = true) {
+    this.cancelled = true;
     if (closeRemote) this.send({ type: "session", action: "close" });
     this.clearTimer();
     this.ws?.close();

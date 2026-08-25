@@ -295,8 +295,8 @@ def e_skill(episode: EpisodeArrays, config: CheckConfig = DEFAULT_CHECKS) -> Che
         toolhang_moved = horizontal_travel > 0.05
         detail = {
             "was_picked_up": bool(toolhang_lifted and toolhang_moved),
-            "longest_carry_frames": int(0),
-            "longest_contact_frames": int(0),
+            "longest_carry_frames": 0,
+            "longest_contact_frames": 0,
             "required_carry_frames": 0,
             "rose_above_table": toolhang_lifted,
             "max_object_rise_m": max_rise,

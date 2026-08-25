@@ -11,7 +11,10 @@ import numpy as np
 from src.sim.perturbations.variations import CanVariation
 
 
-class CanPhase(str, Enum):
+# See src/sim/tools/base.py ToolStatus for why this stays (str, Enum) instead
+# of enum.StrEnum: their str()/format() output differs, and phase names may
+# already be logged/serialized as plain strings.
+class CanPhase(str, Enum):  # noqa: UP042
     APPROACH_CAN = "approach_can"
     ALIGN_CAN = "align_can"
     DESCEND = "descend"
@@ -337,7 +340,8 @@ class ScriptedCanOperator:
                     gripper = c.closed_gripper
         elif self.phase == CanPhase.GRASP:
             target = eef.copy()
-            if self.phase_steps >= c.grasp_duration: self._transition(CanPhase.LIFT)
+            if self.phase_steps >= c.grasp_duration:
+                self._transition(CanPhase.LIFT)
         elif self.phase == CanPhase.LIFT:
             target = self._grasp_can_position + transport_offset + [0.0, 0.0, c.lift_height]
             if self.phase_steps > max(4, c.phase_timeout // 3) and self._grasp_can_position is not None:
@@ -354,7 +358,8 @@ class ScriptedCanOperator:
                 + transport_offset
                 + [0.0, 0.0, c.bin_approach_height]
             )
-            if self._reached(eef, target): self._transition(CanPhase.DESCEND_INTO_BIN)
+            if self._reached(eef, target):
+                self._transition(CanPhase.DESCEND_INTO_BIN)
         elif self.phase == CanPhase.DESCEND_INTO_BIN:
             target = self._placement_target_position + [
                 0.0,
@@ -383,7 +388,8 @@ class ScriptedCanOperator:
                     self._transition(CanPhase.RETREAT)
         elif self.phase == CanPhase.RETREAT:
             target = self.target_position + [0.0, 0.0, c.retreat_height]
-            if self._reached(eef, target): self._transition(CanPhase.DONE)
+            if self._reached(eef, target):
+                self._transition(CanPhase.DONE)
         else:
             target = eef.copy()
 

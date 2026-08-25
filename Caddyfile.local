@@ -1,0 +1,20 @@
+# Local HTTP smoke-test Caddyfile. Same routing logic as the production
+# Caddyfile, but plain HTTP on localhost — no ACME, no certificate. Used only
+# to verify image build + reverse-proxy routing before DNS/CloudFly exist.
+# See docs/DEPLOYMENT_STAGING.md and docker-compose.local.yml.
+
+:80 {
+	encode gzip
+
+	@ws {
+		path /api/v1/teleop/ws/*
+	}
+	reverse_proxy @ws backend:8000
+
+	@api {
+		path /api/v1/* /health
+	}
+	reverse_proxy @api backend:8000
+
+	reverse_proxy frontend:3000
+}

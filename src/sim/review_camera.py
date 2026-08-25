@@ -41,7 +41,7 @@ _OFFWIDTH = 1280
 _OFFHEIGHT = 960
 
 
-def _pose(target: np.ndarray) -> tuple[np.ndarray, float]:
+def _pose(target: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Camera position and orientation for the review angle about `target`.
 
     Mirrors how MuJoCo resolves a free camera from azimuth/elevation/distance,

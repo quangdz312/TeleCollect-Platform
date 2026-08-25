@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -228,56 +228,73 @@ def _sample_variation(
         raise RuntimeError("Non-clean variation sampling requires a noise RNG")
 
     scale = profile.noise_scale
-    position = tuple(
-        float(value)
-        for value in rng.uniform(-1.0, 1.0, 3) * profile.limits.position_bias_m * scale
+    # Each generator always yields exactly as many floats as the numpy array
+    # it iterates (3 for position/orientation, 6 for the arm terms) — true at
+    # runtime from the fixed `rng.uniform(..., 3|6)` shape, but not something
+    # mypy can derive from a generic generator expression. cast documents the
+    # known-fixed length rather than changing it.
+    position = cast(
+        "tuple[float, float, float]",
+        tuple(
+            float(value)
+            for value in rng.uniform(-1.0, 1.0, 3) * profile.limits.position_bias_m * scale
+        ),
     )
-    orientation = tuple(
-        float(value)
-        for value in rng.uniform(-1.0, 1.0, 3)
-        * profile.limits.orientation_bias_rad
-        * scale
+    orientation = cast(
+        "tuple[float, float, float]",
+        tuple(
+            float(value)
+            for value in rng.uniform(-1.0, 1.0, 3)
+            * profile.limits.orientation_bias_rad
+            * scale
+        ),
     )
-    arm_gain = tuple(
-        float(value)
-        for value in 1.0
-        + rng.uniform(-1.0, 1.0, 6) * profile.limits.arm_gain_delta * scale
+    arm_gain = cast(
+        "tuple[float, float, float, float, float, float]",
+        tuple(
+            float(value)
+            for value in 1.0
+            + rng.uniform(-1.0, 1.0, 6) * profile.limits.arm_gain_delta * scale
+        ),
     )
-    arm_bias = tuple(
-        float(value)
-        for value in rng.uniform(-1.0, 1.0, 6) * profile.limits.arm_bias * scale
+    arm_bias = cast(
+        "tuple[float, float, float, float, float, float]",
+        tuple(
+            float(value)
+            for value in rng.uniform(-1.0, 1.0, 6) * profile.limits.arm_bias * scale
+        ),
     )
     retry_cap = 0 if profile.quality == Quality.POOR else 1
     semantic_fields: dict[str, Any] = {}
     if profile.limits.lift is not None:
-        limits = profile.limits.lift
+        lift_limits = profile.limits.lift
         grasp_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.grasp_xyz_offset_m)
+            * np.asarray(lift_limits.grasp_xyz_offset_m)
             * scale
         )
         grasp_yaw_bias = float(
-            rng.uniform(-1.0, 1.0) * limits.grasp_yaw_bias_rad * scale,
+            rng.uniform(-1.0, 1.0) * lift_limits.grasp_yaw_bias_rad * scale,
         )
         close_timing = int(
             np.rint(
                 rng.uniform(-1.0, 1.0)
-                * limits.gripper_close_timing_steps
+                * lift_limits.gripper_close_timing_steps
                 * scale,
             ),
         )
         lift_height_delta = float(
-            rng.uniform(-1.0, 1.0) * limits.lift_height_delta_m * scale,
+            rng.uniform(-1.0, 1.0) * lift_limits.lift_height_delta_m * scale,
         )
         lateral = rng.uniform(-1.0, 1.0, 2)
         lateral_norm = float(np.linalg.norm(lateral))
         if lateral_norm > 1.0:
             lateral /= lateral_norm
         lift_lateral_offset = tuple(
-            float(value) for value in lateral * limits.lift_lateral_offset_m * scale
+            float(value) for value in lateral * lift_limits.lift_lateral_offset_m * scale
         )
-        retry_cap = limits.regrasp_cap
+        retry_cap = lift_limits.regrasp_cap
         semantic_fields = {
             "grasp_xyz_offset": grasp_offset,
             "grasp_yaw_bias": grasp_yaw_bias,
@@ -287,22 +304,22 @@ def _sample_variation(
             "regrasp_enabled": retry_cap > 0,
         }
     elif profile.limits.can is not None:
-        limits = profile.limits.can
+        can_limits = profile.limits.can
         grasp_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.grasp_xyz_offset_m)
+            * np.asarray(can_limits.grasp_xyz_offset_m)
             * scale
         )
         grasp_yaw_bias = float(
-            rng.uniform(-1.0, 1.0) * limits.grasp_yaw_bias_rad * scale,
+            rng.uniform(-1.0, 1.0) * can_limits.grasp_yaw_bias_rad * scale,
         )
         close_timing = max(
             -1,
             int(
                 np.rint(
                     rng.uniform(-1.0, 1.0)
-                    * limits.gripper_close_timing_steps
+                    * can_limits.gripper_close_timing_steps
                     * scale,
                 ),
             ),
@@ -310,29 +327,29 @@ def _sample_variation(
         transport_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.transport_waypoint_offset_m)
+            * np.asarray(can_limits.transport_waypoint_offset_m)
             * scale
         )
         bin_target_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.bin_target_xyz_offset_m)
+            * np.asarray(can_limits.bin_target_xyz_offset_m)
             * scale
         )
         release_height_offset = float(
-            rng.uniform(-1.0, 1.0) * limits.release_height_offset_m * scale,
+            rng.uniform(-1.0, 1.0) * can_limits.release_height_offset_m * scale,
         )
         release_timing = max(
             -1,
             int(
                 np.rint(
                     rng.uniform(-1.0, 1.0)
-                    * limits.release_timing_steps
+                    * can_limits.release_timing_steps
                     * scale,
                 ),
             ),
         )
-        retry_cap = limits.retry_cap
+        retry_cap = can_limits.retry_cap
         semantic_fields = {
             'can_grasp_xyz_offset': grasp_offset,
             'can_grasp_yaw_bias': grasp_yaw_bias,
@@ -344,22 +361,22 @@ def _sample_variation(
             'retry_enabled': retry_cap > 0,
         }
     elif profile.limits.square is not None:
-        limits = profile.limits.square
+        square_limits = profile.limits.square
         grasp_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.grasp_xyz_offset_m)
+            * np.asarray(square_limits.grasp_xyz_offset_m)
             * scale
         )
         grasp_yaw_bias = float(
-            rng.uniform(-1.0, 1.0) * limits.grasp_yaw_bias_rad * scale,
+            rng.uniform(-1.0, 1.0) * square_limits.grasp_yaw_bias_rad * scale,
         )
         close_timing = max(
             -1,
             int(
                 np.rint(
                     rng.uniform(-1.0, 1.0)
-                    * limits.gripper_close_timing_steps
+                    * square_limits.gripper_close_timing_steps
                     * scale,
                 ),
             ),
@@ -367,37 +384,37 @@ def _sample_variation(
         transport_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.transport_waypoint_offset_m)
+            * np.asarray(square_limits.transport_waypoint_offset_m)
             * scale
         )
         peg_target_offset = tuple(
             float(value)
             for value in rng.uniform(-1.0, 1.0, 3)
-            * np.asarray(limits.peg_target_xyz_offset_m)
+            * np.asarray(square_limits.peg_target_xyz_offset_m)
             * scale
         )
         peg_yaw_bias = float(
-            rng.uniform(-1.0, 1.0) * limits.peg_alignment_yaw_bias_rad * scale,
+            rng.uniform(-1.0, 1.0) * square_limits.peg_alignment_yaw_bias_rad * scale,
         )
         peg_approach_height = float(
             rng.uniform(-1.0, 1.0)
-            * limits.peg_approach_height_offset_m
+            * square_limits.peg_approach_height_offset_m
             * scale,
         )
         insert_depth = float(
-            rng.uniform(-1.0, 1.0) * limits.insert_depth_offset_m * scale,
+            rng.uniform(-1.0, 1.0) * square_limits.insert_depth_offset_m * scale,
         )
         release_timing = max(
             -1,
             int(
                 np.rint(
                     rng.uniform(-1.0, 1.0)
-                    * limits.release_timing_steps
+                    * square_limits.release_timing_steps
                     * scale,
                 ),
             ),
         )
-        retry_cap = limits.retry_cap
+        retry_cap = square_limits.retry_cap
         semantic_fields = {
             'square_grasp_xyz_offset': grasp_offset,
             'square_grasp_yaw_bias': grasp_yaw_bias,

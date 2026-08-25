@@ -312,6 +312,10 @@ async def create_dataset(
     bind = session.bind
     assert isinstance(bind, AsyncEngine)  # session_factory() luôn bind theo engine, không phải connection
     if body.format == "robomimic":
+        # Set unconditionally a few lines above; the ORM column type is
+        # Optional because it's nullable for other dataset states, not
+        # because it can be missing here.
+        assert dataset.zip_path is not None
         background_tasks.add_task(
             build_robomimic_dataset,
             dataset.id,

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.api import training as training_api
+from src.config import get_settings
 from src.models.db import Dataset, User
 from src.models.enums import DatasetStatus, JobStatus, UserRole
 from src.models.schemas import TrainingJobRequest
@@ -291,3 +292,44 @@ async def test_create_job_api_accepts_managed_ready_hdf5(
     assert deleted.status_code == 204
     assert manager.get(finished.id) is None
     assert not (storage_dir / "training" / finished.id).exists()
+
+
+@pytest.mark.asyncio
+async def test_create_job_api_rejects_when_training_disabled(
+    client, db_session, storage_dir: Path, monkeypatch
+) -> None:
+    """CPU staging sets TRAINING_ENABLED=false; the endpoint must refuse
+    before touching TrainingJobManager, never spawn a subprocess and never
+    return a fake success."""
+    user = User(
+        username="training-reviewer-2",
+        password_hash=hash_password("password123"),
+        display_name="Training Reviewer",
+        role=UserRole.REVIEWER,
+    )
+    dataset = Dataset(
+        id="dataset-ready-2",
+        name="lift_export",
+        task_names=["lift_cube"],
+        status=DatasetStatus.READY,
+        zip_path=str(storage_dir / "datasets" / "dataset-ready-2.hdf5"),
+    )
+    db_session.add_all([user, dataset])
+    await db_session.commit()
+    path = storage_dir / "datasets" / "dataset-ready-2.hdf5"
+    path.parent.mkdir(parents=True)
+    path.touch()
+
+    manager = TrainingJobManager(storage_dir / "training")
+    monkeypatch.setattr(training_api, "job_manager", lambda: manager)
+    monkeypatch.setattr(get_settings(), "training_enabled", False)
+    headers = {"Authorization": f"Bearer {create_access_token(user.id, user.role)}"}
+
+    response = await client.post(
+        "/api/v1/training/jobs",
+        json={"dataset_id": dataset.id, "name": "lift_bc"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert manager.list() == []
