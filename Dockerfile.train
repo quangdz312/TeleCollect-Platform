@@ -1,0 +1,83 @@
+# Image chạy trên GPU thuê (RunPod Serverless) — KHÔNG phải image server.
+#
+# Tách hẳn khỏi `Dockerfile`: image này kéo torch bản CUDA nên nặng vài GB,
+# trong khi server chỉ nhận dữ liệu và điều phối, không train.
+#
+# Build và đẩy lên Docker Hub:
+#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v1 .
+#   docker push <tài-khoản>/telecollect-train:v1
+#
+# Đặt tag phiên bản, đừng dùng `latest`: RunPod cache image, `latest` khiến
+# không biết endpoint đang chạy bản nào.
+
+# CUDA 12.4 runtime khớp với bánh xe torch cu124 lấy ở dưới. Bản `runtime`
+# (không phải `devel`) đủ để chạy: `devel` thêm trình biên dịch CUDA ~2 GB mà
+# ta không dùng vì torch đã biên dịch sẵn.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# python3.11: khớp bản của image server, tránh lệch hành vi giữa hai nơi.
+# build-essential + linux-libc-dev: pynput kéo theo evdev, gói này không có
+# bánh xe dựng sẵn và phải biên dịch phần mở rộng C từ linux/input*.h. Thiếu
+# hai gói này thì `pip install -r requirements.txt` hỏng ngay từ đầu.
+# cmake + make: robomimic kéo theo egl_probe, cũng biên dịch bằng C.
+# ffmpeg, libgl1, libglib2.0-0: opencv-python-headless vẫn dlopen() chúng dù
+# tên có chữ "headless"; ffmpeg dùng để ghi video rollout.
+# libosmesa6: rollout lúc train cần dựng ngữ cảnh đồ họa mà máy thuê không có
+# màn hình — OSMesa là backend duy nhất chạy được trong hoàn cảnh đó.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-dev python3.11-venv python3-pip \
+        git build-essential linux-libc-dev cmake make \
+        ffmpeg libgl1 libglib2.0-0 libosmesa6 libglfw3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Venv chứ không phải `pip install --user`: gói cài theo --user nằm trong
+# $HOME của đúng một user và chỉ user đó thấy trên sys.path. Site-packages của
+# venv gắn với prefix của venv nên user nào kích hoạt cũng dùng được.
+RUN python3.11 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+RUN pip install --upgrade pip
+
+WORKDIR /app
+
+# torch lấy từ index riêng của PyTorch, KHÔNG từ PyPI: PyPI trả bản CPU, cài
+# xong `torch.cuda.is_available()` trả False và cả lần thuê GPU thành vô nghĩa.
+# cu124 khớp với image CUDA 12.4 ở trên.
+RUN pip install torch>=2.5.0 torchvision>=0.20.0 \
+        --index-url https://download.pytorch.org/whl/cu124
+
+# Cài dependency trước khi copy mã nguồn: sửa một dòng trong src/ thì Docker
+# vẫn dùng lại được lớp cache này thay vì tải lại vài GB.
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# robomimic 0.5 chỉ có trên GitHub (PyPI dừng ở 0.3.0). `--no-deps` để nó
+# không kéo numpy lên 2.x — numba (qua dvc) và robosuite đều cần bản 1.x mà
+# requirements.txt đã ghim.
+RUN pip install --no-deps \
+        "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5" \
+    && pip install imageio imageio-ffmpeg tensorboard tensorboardX matplotlib \
+    && pip install "numpy>=1.26.0,<2.0.0"
+
+# SDK của RunPod: chỉ image này cần, nên không nằm trong requirements.txt.
+RUN pip install runpod>=1.6.0
+
+# Cùng lý do như image server — xem ghi chú ở `Dockerfile`. MUJOCO_GL chọn
+# backend của MuJoCo, còn PyOpenGL có bộ dò nền riêng mặc định chọn GLX và
+# phải báo riêng, nếu không `import mujoco` lỗi
+# `AttributeError: 'GLXPlatform' object has no attribute 'OSMesa'`.
+ENV MUJOCO_GL=osmesa
+ENV PYOPENGL_PLATFORM=osmesa
+
+# Chỉ copy thứ handler cần. `.dockerignore` đã loại data/, frontend/,
+# local_app/ và tests/ khỏi build context.
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY runpod_handler.py ./
+
+# Chạy bằng root: worker Serverless là container dùng một lần, không phục vụ
+# cổng nào ra ngoài, và ghi vào /tmp lẫn thư mục cache của thư viện.
+CMD ["python", "-u", "runpod_handler.py"]

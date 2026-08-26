@@ -23,3 +23,12 @@ backups/
 frontend/
 node_modules/
 .next/
+
+# Ứng dụng Electron cho máy người dùng: không thuộc image server lẫn image
+# train, và release/win-unpacked nặng hàng GB nên nếu lọt vào build context
+# thì mỗi lần build phải gửi cả đống đó sang Docker daemon.
+local_app/
+
+# Test và tệp đóng gói PyInstaller: image train chỉ cần chạy, không cần test.
+tests/
+*.spec
