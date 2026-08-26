@@ -15,6 +15,21 @@ AutoLabel = Literal["accept", "review", "reject"]
 class AutoLabelResult:
     label: AutoLabel
     reason: str
+    profile: str = "scripted_strict"
+    profile_version: str = "scripted-strict-v1"
+
+
+TELEOP_PROFILE = "teleop_tolerant"
+TELEOP_PROFILE_VERSION = "teleop-tolerant-v1"
+TELEOP_MAX_OVERRUN_RATIO = 0.10
+
+
+def _teleop_result(
+    label: AutoLabel,
+    reason: str,
+    profile_version: str = TELEOP_PROFILE_VERSION,
+) -> AutoLabelResult:
+    return AutoLabelResult(label, reason, TELEOP_PROFILE, profile_version)
 
 
 #: An auto-pass that the gate sampled for human audit is still an auto-pass. The
@@ -63,12 +78,12 @@ def classify_scripted(
 
 def classify_teleop_metadata(metadata: dict) -> AutoLabelResult:
     if metadata.get("partial") or metadata.get("interrupted"):
-        return AutoLabelResult("reject", "Recording is partial or interrupted")
+        return _teleop_result("reject", "Recording is partial or interrupted")
     if metadata.get("task_success") is False:
-        return AutoLabelResult("reject", "Task was marked unsuccessful")
+        return _teleop_result("reject", "Task was marked unsuccessful")
     if metadata.get("task_success") is True:
-        return AutoLabelResult("review", "Success recorded; independent verification is unavailable")
-    return AutoLabelResult("review", "No complete task verdict is available")
+        return _teleop_result("review", "Success recorded; independent verification is unavailable")
+    return _teleop_result("review", "No complete task verdict is available")
 
 
 def _teleop_quality_gate(metadata: dict) -> AutoLabelResult | None:
@@ -76,11 +91,18 @@ def _teleop_quality_gate(metadata: dict) -> AutoLabelResult | None:
 
     privileged = metadata.get("privileged_state")
     if not isinstance(privileged, dict) or not privileged.get("recorded", False):
-        return AutoLabelResult("review", "Privileged state is missing")
-    if int(metadata.get("dropped_stream_frames", 0) or 0) > 0:
-        return AutoLabelResult("review", "Recording contains dropped stream frames")
-    if int(metadata.get("overruns", 0) or 0) > 0:
-        return AutoLabelResult("review", "Control loop contains timing overruns")
+        return _teleop_result("review", "Privileged state is missing")
+    # These are preview frames, not recorder frames. Dropping one must not
+    # reject an otherwise synchronized state/action trajectory.
+    overruns = int(metadata.get("overruns", 0) or 0)
+    steps = int(metadata.get("num_steps", 0) or 0)
+    overrun_ratio = overruns / steps if steps > 0 else (1.0 if overruns else 0.0)
+    if overrun_ratio > TELEOP_MAX_OVERRUN_RATIO:
+        return _teleop_result(
+            "review",
+            f"Control-loop overrun ratio {overrun_ratio:.1%} exceeds teleop limit "
+            f"{TELEOP_MAX_OVERRUN_RATIO:.0%}",
+        )
     return None
 
 
@@ -138,9 +160,9 @@ def classify_teleop_episode(episode_dir: Path) -> AutoLabelResult:
     try:
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return AutoLabelResult("review", "Recording metadata is missing or unreadable")
+        return _teleop_result("review", "Recording metadata is missing or unreadable")
     if not isinstance(metadata, dict):
-        return AutoLabelResult("review", "Recording metadata has an invalid format")
+        return _teleop_result("review", "Recording metadata has an invalid format")
     basic = classify_teleop_metadata(metadata)
     if basic.label != "review" or metadata.get("task_success") is not True:
         return basic
@@ -152,11 +174,17 @@ def classify_teleop_episode(episode_dir: Path) -> AutoLabelResult:
     try:
         evaluation = _teleop_rule_evaluation(episode_dir, metadata)
     except Exception:
-        return AutoLabelResult("review", "Teleop state could not be evaluated by task rules")
+        return _teleop_result("review", "Teleop state could not be evaluated by task rules")
     if evaluation is None:
-        return AutoLabelResult("review", "Teleop state trace is incomplete")
+        return _teleop_result("review", "Teleop state trace is incomplete")
     if evaluation.final_recommendation == "auto_reject":
-        return AutoLabelResult("reject", "Shared task rule detected a hard failure")
+        return _teleop_result(
+            "reject", "Shared task rule detected a hard failure", evaluation.rule_version,
+        )
     if evaluation.final_recommendation == "needs_review":
-        return AutoLabelResult("review", "Shared task rules require human review")
-    return AutoLabelResult("accept", "Task rules and recording quality checks passed")
+        return _teleop_result(
+            "review", "Teleop-tolerant task rules require human review", evaluation.rule_version,
+        )
+    return _teleop_result(
+        "accept", "Teleop-tolerant task rules and recording checks passed", evaluation.rule_version,
+    )

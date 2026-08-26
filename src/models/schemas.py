@@ -251,6 +251,8 @@ class DemoResponse(BaseModel):
 
     auto_label: Literal["accept", "review", "reject"] = "review"
     auto_label_reason: str = ""
+    auto_label_profile: Literal["scripted_strict", "teleop_tolerant"] = "teleop_tolerant"
+    auto_label_profile_version: str = ""
 
     created_at: datetime
 
@@ -288,7 +290,7 @@ class RawEpisodeResponse(BaseModel):
 
     episode_id: str = Field(..., min_length=1)
     display_name: str = ""
-    source: Literal["teleop", "scripted"]
+    source: Literal["teleop", "scripted", "unknown"]
     task: str = Field(..., min_length=1)
     created_at: datetime | None = None
 
@@ -328,6 +330,7 @@ class RawEpisodePageResponse(BaseModel):
     total_pages: int = Field(..., ge=0)
     summary: RawEpisodeSummaryResponse
     available_tasks: list[str] = Field(default_factory=list)
+    available_batches: list[str] = Field(default_factory=list)
 
 
 class RawArtifactResponse(BaseModel):
@@ -471,6 +474,11 @@ class DatasetCreateRequest(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$",
         description="Chỉ export scripted episodes thuộc đúng collection batch này",
     )
+    episode_ids: list[str] = Field(
+        default_factory=list,
+        max_length=500,
+        description="Nếu có, chỉ export đúng các raw episode ID đã chọn thủ công",
+    )
 
 
 class DatasetResponse(BaseModel):
@@ -486,9 +494,22 @@ class DatasetResponse(BaseModel):
     num_episodes: int
     num_frames: int
     size_bytes: int | None = None
+    data_source: Literal["teleop", "scripted", "both", "unknown"] = "unknown"
+    collection_batch_id: str | None = None
+    created_by: str | None = None
+    exporter_version: str = "1.0"
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DatasetEpisodeSnapshot(BaseModel):
+    episode_id: str
+    source: Literal["teleop", "scripted"]
+    task: str
+    outcome: Literal["success", "failure", "unknown"] = "unknown"
+    frames: int = Field(default=0, ge=0)
+    review_status: str = "approved"
 
 
 class DatasetDetailResponse(DatasetResponse):
@@ -496,7 +517,12 @@ class DatasetDetailResponse(DatasetResponse):
     sách demo đã đóng băng vào dataset."""
 
     error_message: str | None = None
-    episodes: list[DemoResponse] = Field(default_factory=list)
+    episodes: list[DatasetEpisodeSnapshot] = Field(default_factory=list)
+    schema_manifest: dict[str, object] = Field(default_factory=dict)
+
+
+class DatasetRetryRequest(BaseModel):
+    pass
 
 
 class ScriptedRunRequest(BaseModel):

@@ -162,6 +162,8 @@ def _demo_response(episode: Episode) -> DemoResponse:
         update={
             "auto_label": recommendation.label,
             "auto_label_reason": recommendation.reason,
+            "auto_label_profile": recommendation.profile,
+            "auto_label_profile_version": recommendation.profile_version,
         }
     )
 

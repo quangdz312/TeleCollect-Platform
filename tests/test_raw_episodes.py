@@ -176,6 +176,7 @@ async def test_raw_list_combines_teleop_and_scripted(client, db_session, raw_wor
         "archived": 0,
     }
     assert body["available_tasks"] == ["can", "lift_cube"]
+    assert body["available_batches"] == ["batch-1"]
     assert by_id["lift_clean_seed0.hdf5::demo_0"]["task"] == "lift_cube"
 
 
@@ -212,6 +213,10 @@ async def test_raw_list_filters_and_paginates(client, db_session, raw_workspace)
         f"{API}?source=scripted&page=2&page_size=1",
         headers=_auth_headers(reviewer),
     )
+    batch = await client.get(
+        f"{API}?collection_batch_id=batch-1",
+        headers=_auth_headers(reviewer),
+    )
 
     assert filtered.status_code == 200
     assert [item["episode_id"] for item in filtered.json()["items"]] == [
@@ -221,6 +226,10 @@ async def test_raw_list_filters_and_paginates(client, db_session, raw_workspace)
     assert page.json()["total"] == 2
     assert page.json()["total_pages"] == 2
     assert len(page.json()["items"]) == 1
+    assert batch.status_code == 200
+    assert [item["episode_id"] for item in batch.json()["items"]] == [
+        "lift_clean_seed0.hdf5::demo_0"
+    ]
 
 
 @pytest.mark.asyncio

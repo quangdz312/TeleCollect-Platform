@@ -86,7 +86,7 @@ export function ScriptedCollector() {
         <Stat label="Pending" value={config?.workspace.pending ?? 0} tone="warn" />
       </div>
       <Card title="Scripted collection" subtitle="Generate scripted episodes and send them to the review queue.">
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_140px_140px_140px_auto] md:items-end">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(280px,1fr)_220px_140px_120px_120px_auto] lg:items-end">
           <Field label="Task">
             <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
               {config?.tasks.map((item) => (
@@ -94,8 +94,11 @@ export function ScriptedCollector() {
               ))}
             </Select>
           </Field>
-          <Field label="Collection batch" hint="Reuse one id across the clean/good/medium runs of a dataset">
+          <Field label="Collection batch">
             <Input
+              id="collection-batch"
+              aria-describedby="collection-batch-hint"
+              className="font-mono"
               value={batchId}
               disabled={running}
               onChange={(event) => setBatchId(event.target.value)}
@@ -130,13 +133,19 @@ export function ScriptedCollector() {
           </Field>
           <Button
             variant="primary"
+            className="w-full whitespace-nowrap sm:col-span-2 lg:col-span-1 lg:w-auto"
             disabled={running || !config || !/^\d+$/.test(episodeCount) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(batchId)}
             onClick={startRun}
           >
             {running ? `Running ${Math.round((job?.progress ?? 0) * 100)}%` : "Start collection"}
           </Button>
         </div>
-        <Alert tone="info">Noise decreases across phases; some non-clean episodes carry at most one controlled semantic fault. The auto-gate settles the clear-cut cases and leaves the uncertain ones for review.</Alert>
+        <div id="collection-batch-hint" className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-400">
+          <span className="rounded bg-ink-850 px-2 py-1 font-semibold text-ink-300">Collection batch</span>
+          <span>Reuse the same ID for clean, good, and medium runs that belong to one dataset.</span>
+          <span className="font-mono text-ink-300">Example: lift-scripted-v1.2</span>
+        </div>
+        <div className="mt-3"><Alert tone="info">Noise decreases across phases; some non-clean episodes carry at most one controlled semantic fault. The auto-gate settles the clear-cut cases and leaves the uncertain ones for review.</Alert></div>
         {job && (
           <div className="mt-4 rounded-lg border border-ink-700/60 bg-ink-850/60 p-3 text-xs">
             <div className="mb-2 flex items-center justify-between">

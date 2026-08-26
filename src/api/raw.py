@@ -469,6 +469,7 @@ def _matches(
     quality: RawQuality | None,
     outcome: RawOutcome | None,
     review_status: RawReviewStatus | None,
+    collection_batch_id: str | None,
     search: str | None,
 ) -> bool:
     if task is not None and episode.task != _canonical_task(task):
@@ -478,6 +479,8 @@ def _matches(
     if outcome is not None and episode.recorded_success != (outcome == "success"):
         return False
     if review_status is not None and episode.review_status != review_status:
+        return False
+    if collection_batch_id is not None and episode.collection_batch_id != collection_batch_id:
         return False
     if search is not None:
         needle = search.casefold()
@@ -513,6 +516,7 @@ async def list_raw_episodes(
     quality: RawQuality | None = None,
     outcome: RawOutcome | None = None,
     review_status: RawReviewStatus | None = None,
+    collection_batch_id: str | None = Query(default=None, min_length=1, max_length=64),
     search: str | None = Query(default=None, min_length=1, max_length=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -521,6 +525,11 @@ async def list_raw_episodes(
 ) -> RawEpisodePageResponse:
     all_items = await _all_episodes(session, source)
     available_tasks = sorted({episode.task for episode in all_items})
+    available_batches = sorted({
+        episode.collection_batch_id
+        for episode in all_items
+        if episode.collection_batch_id is not None
+    })
     items = [
         episode
         for episode in all_items
@@ -530,6 +539,7 @@ async def list_raw_episodes(
             quality=quality,
             outcome=outcome,
             review_status=review_status,
+            collection_batch_id=collection_batch_id,
             search=search,
         )
     ]
@@ -554,6 +564,7 @@ async def list_raw_episodes(
         total_pages=math.ceil(total / page_size) if total else 0,
         summary=summary,
         available_tasks=available_tasks,
+        available_batches=available_batches,
     )
 
 

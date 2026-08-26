@@ -1,4 +1,5 @@
 from src.labeling.auto_gate import apply, evaluate
+from src.labeling.duplicates import FINGERPRINT_VERSION
 
 
 def _record(**overrides):
@@ -101,8 +102,8 @@ def test_repeated_seed_is_rejected_without_touching_the_first_one():
 
         def scores(self):
             return [
-                {**_record(episode_id="lift::0"), "provenance": {"environment_seed": 4}},
-                {**_record(episode_id="lift::1"), "provenance": {"environment_seed": 4}},
+                {**_record(episode_id="lift::0"), "trajectory_fingerprint": f"{FINGERPRINT_VERSION}:same", "provenance": {"environment_seed": 4}},
+                {**_record(episode_id="lift::1"), "trajectory_fingerprint": f"{FINGERPRINT_VERSION}:same", "provenance": {"environment_seed": 4}},
             ]
 
         def append_label(self, episode_id, **kwargs):
@@ -114,6 +115,29 @@ def test_repeated_seed_is_rejected_without_touching_the_first_one():
     assert counts["duplicates"] == 1
     rejected = [item for item in space.appended if item[1]["decision"] == "rejected"]
     assert [item[0] for item in rejected] == ["lift::1"]
+
+
+def test_repeated_seed_with_no_fingerprint_is_not_rejected_as_duplicate():
+    class Space:
+        def __init__(self):
+            self.appended = []
+
+        def labels_by_id(self):
+            return {}
+
+        def scores(self):
+            return [
+                {**_record(episode_id="lift::0"), "provenance": {"environment_seed": 4}},
+                {**_record(episode_id="lift::1"), "provenance": {"environment_seed": 4}},
+            ]
+
+        def append_label(self, episode_id, **kwargs):
+            self.appended.append((episode_id, kwargs))
+
+    space = Space()
+    counts = apply(space)
+    assert counts["duplicates"] == 0
+    assert not [item for item in space.appended if item[1]["decision"] == "rejected"]
 
 
 def test_apply_never_overwrites_existing_human_label():

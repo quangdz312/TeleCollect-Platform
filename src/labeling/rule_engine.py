@@ -14,6 +14,20 @@ import numpy as np
 
 RuleStatus = Literal["pass", "fail", "cannot_evaluate", "warning"]
 Recommendation = Literal["suggest_pass", "auto_reject", "needs_review"]
+RuleProfileName = Literal["scripted_strict", "teleop_tolerant"]
+
+
+@dataclass(frozen=True)
+class RuleProfile:
+    name: RuleProfileName
+    square_angle_tolerance_deg: float = 15.0
+
+
+SCRIPTED_STRICT_PROFILE = RuleProfile("scripted_strict")
+TELEOP_TOLERANT_PROFILE = RuleProfile(
+    "teleop_tolerant",
+    square_angle_tolerance_deg=20.0,
+)
 
 
 @dataclass(frozen=True)
@@ -50,8 +64,15 @@ DEFAULT_RULE_CONFIG = RuleConfig()
 RULE_ENGINE_NAME = "telecollect-task-rules"
 
 
-def rule_version(config: RuleConfig = DEFAULT_RULE_CONFIG) -> str:
-    payload = json.dumps(asdict(config), sort_keys=True)
+def profile_for_source(source: str) -> RuleProfile:
+    return TELEOP_TOLERANT_PROFILE if source == "manual_teleop" else SCRIPTED_STRICT_PROFILE
+
+
+def rule_version(
+    config: RuleConfig = DEFAULT_RULE_CONFIG,
+    profile: RuleProfile = SCRIPTED_STRICT_PROFILE,
+) -> str:
+    payload = json.dumps({"config": asdict(config), "profile": asdict(profile)}, sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
     return f"{RULE_ENGINE_NAME}-{digest}"
 
@@ -97,6 +118,7 @@ class RuleEvaluation:
     episode_id: str
     task: str
     rule_version: str
+    rule_profile: RuleProfileName
     final_recommendation: Recommendation
     mode: Literal["shadow"] = "shadow"
     results: list[RuleResult] = field(default_factory=list)
@@ -110,6 +132,7 @@ class RuleEvaluation:
             "episode_id": self.episode_id,
             "task": self.task,
             "rule_version": self.rule_version,
+            "rule_profile": self.rule_profile,
             "final_recommendation": self.final_recommendation,
             "mode": self.mode,
             "results": [
@@ -130,14 +153,20 @@ def evaluate_rules(
     episode: RuleEpisode,
     *,
     config: RuleConfig = DEFAULT_RULE_CONFIG,
+    profile: RuleProfile | None = None,
 ) -> RuleEvaluation:
+    selected_profile = profile or profile_for_source(episode.source)
+    quality_config = replace(
+        config,
+        square_angle_tolerance_deg=selected_profile.square_angle_tolerance_deg,
+    )
     task = _normalize_task(episode.task)
     if task == "lift":
         results = _lift_rules(episode, config)
     elif task == "can":
         results = _can_rules(episode, config)
     elif task == "square":
-        results = _square_rules(episode, config)
+        results = _square_rules(episode, quality_config)
     elif task == "tool_hang":
         results = _tool_hang_rules(episode)
     else:
@@ -152,7 +181,8 @@ def evaluate_rules(
     return RuleEvaluation(
         episode_id=episode.episode_id,
         task=task,
-        rule_version=rule_version(config),
+        rule_version=rule_version(config, selected_profile),
+        rule_profile=selected_profile.name,
         final_recommendation=_recommend(results),
         results=results,
     )
@@ -435,32 +465,37 @@ def _square_rules(episode: RuleEpisode, config: RuleConfig) -> list[RuleResult]:
     height_limit = episode.table_height + config.square_height_clearance_m
     released = float(np.linalg.norm(final - eef[-1])) >= config.release_distance_m
     angle_error = _square_angle_error_deg(episode.object_quat)
-    angle_ok = angle_error is None or angle_error <= config.square_angle_tolerance_deg
-    passed = (
+    goal_passed = (
         bool(np.all(xy_error < config.square_xy_tolerance_m))
         and final[2] < height_limit
         and released
-        and angle_ok
     )
+    angle_ok = angle_error is None or angle_error <= config.square_angle_tolerance_deg
     return [
         RuleResult(
             "square.goal_state",
-            "pass" if passed else "fail",
+            "pass" if goal_passed else "fail",
             measured_values={
                 "final_position": final.tolist(),
                 "target_position": target.tolist(),
                 "xy_error_m": xy_error.tolist(),
                 "height_m": float(final[2]),
                 "released": released,
-                "angle_error_deg": angle_error,
             },
             thresholds={
                 "xy_tolerance_m": config.square_xy_tolerance_m,
                 "height_limit_m": height_limit,
                 "release_distance_m": config.release_distance_m,
-                "angle_tolerance_deg": config.square_angle_tolerance_deg,
             },
-        )
+        ),
+        RuleResult(
+            "square.orientation_quality",
+            "pass" if angle_ok else "warning",
+            severity="quality",
+            measured_values={"angle_error_deg": angle_error},
+            thresholds={"angle_tolerance_deg": config.square_angle_tolerance_deg},
+            message="square orientation exceeds the quality profile" if not angle_ok else "",
+        ),
     ]
 
 

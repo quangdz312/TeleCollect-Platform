@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .checks import DEFAULT_CHECKS, CheckConfig, CheckResult, hard_checks
+from .duplicates import FINGERPRINT_VERSION, trajectory_fingerprint
 from .features import EpisodeArrays
 from .penalties import (
     DEFAULT_PENALTIES,
@@ -62,6 +63,7 @@ class ScorerConfig:
                 },
                 "trim": asdict(self.trim),
                 "relative_cohort": RELATIVE_COHORT_VERSION,
+                "trajectory_fingerprint": FINGERPRINT_VERSION,
             },
             sort_keys=True,
         )
@@ -114,6 +116,7 @@ class EpisodeScore:
     raw_features: RawPenaltyFeatures
     trim: TrimSuggestion
     scorer_version: str
+    trajectory_fingerprint: str | None = None
     provenance: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -165,6 +168,7 @@ class EpisodeScore:
             "trim_head_frames": self.trim.trimmed_head,
             "trim_tail_frames": self.trim.trimmed_tail,
             "scorer_version": self.scorer_version,
+            "trajectory_fingerprint": self.trajectory_fingerprint,
             "provenance": dict(self.provenance),
         }
 
@@ -269,6 +273,11 @@ def score_episodes(
                 raw_features=raw,
                 trim=trim,
                 scorer_version=version,
+                trajectory_fingerprint=trajectory_fingerprint(
+                    episode.task,
+                    episode.initial_state,
+                    episode.actions,
+                ),
                 provenance=episode.provenance,
             ),
         )

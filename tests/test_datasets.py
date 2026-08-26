@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
-from src.models.db import Dataset, Episode, Task, User
+from src.models.db import Dataset, DatasetEpisode, Episode, Task, User
 from src.models.enums import DemoOutcome, DemoStatus, UserRole
 from src.services import storage
 from src.services.security import create_access_token, hash_password
@@ -235,6 +236,74 @@ async def test_selection_task_names_filters_correctly(
     assert episode_ids == {pick_demo["id"]}
 
 
+@pytest.mark.asyncio
+async def test_explicit_episode_ids_export_only_selected_approved_demo(
+    client, db_session, storage_dir, operator, reviewer
+):
+    await _create_task(db_session, "pick_place")
+    selected = Episode(
+        task_name="pick_place",
+        operator_id=operator.id,
+        reviewer_id=reviewer.id,
+        reviewed_at=datetime.now(UTC),
+        status=DemoStatus.APPROVED,
+        outcome=DemoOutcome.SUCCESS,
+        num_frames=12,
+    )
+    unselected = Episode(
+        task_name="pick_place",
+        operator_id=operator.id,
+        reviewer_id=reviewer.id,
+        reviewed_at=datetime.now(UTC),
+        status=DemoStatus.APPROVED,
+        outcome=DemoOutcome.SUCCESS,
+        num_frames=8,
+    )
+    db_session.add_all([selected, unselected])
+    await db_session.commit()
+    await db_session.refresh(selected)
+    await db_session.refresh(unselected)
+
+    # Raw ZIP chỉ copy artifact; vài byte giả là đủ và giúp test không phụ thuộc ffmpeg.
+    for episode in (selected, unselected):
+        directory = storage.episode_dir(episode.id)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / storage.FRONT_FILENAME).write_bytes(b"test-video")
+
+    response = await client.post(
+        API,
+        json={"name": "manual-selection", "episode_ids": [selected.id]},
+        headers=_auth_headers(reviewer),
+    )
+
+    assert response.status_code == 202, response.text
+    dataset = await _wait_ready(client, _auth_headers(reviewer), response.json()["id"])
+    assert dataset["status"] == "ready"
+    linked_ids = set(
+        await db_session.scalars(
+            select(DatasetEpisode.episode_id).where(
+                DatasetEpisode.dataset_id == response.json()["id"]
+            )
+        )
+    )
+    assert linked_ids == {selected.id}
+    assert unselected.id not in linked_ids
+
+
+@pytest.mark.asyncio
+async def test_explicit_episode_ids_reject_unknown_or_ineligible_demo(
+    client, db_session, storage_dir, reviewer
+):
+    response = await client.post(
+        API,
+        json={"name": "invalid-selection", "episode_ids": ["missing-episode"]},
+        headers=_auth_headers(reviewer),
+    )
+
+    assert response.status_code == 422
+    assert "không tồn tại hoặc không đủ điều kiện" in response.json()["detail"]
+
+
 # --- duplicate name / overwrite ----------------------------------------------------------
 
 
@@ -341,6 +410,53 @@ async def test_download_while_building_returns_409(client, db_session, storage_d
 
     resp = await client.get(f"{API}/{dataset.id}/download", headers=_auth_headers(reviewer))
     assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dataset_list_filters_and_detail_expose_provenance(client, db_session, reviewer):
+    first = Dataset(
+        name="lift-teleop-v1", task_names=["lift_cube"], include_failures=False,
+        status="ready", data_source="teleop", created_by="reviewer1",
+        collection_batch_id=None, exporter_version="1.0",
+        episode_inventory=[{
+            "episode_id": "episode-1", "source": "teleop", "task": "lift_cube",
+            "outcome": "success", "frames": 42, "review_status": "approved",
+        }],
+        schema_manifest={"fields": [{"path": "actions", "shape": [42, 7], "dtype": "float32"}]},
+    )
+    second = Dataset(
+        name="square-scripted-v1", task_names=["square"], include_failures=True,
+        status="failed", data_source="scripted", created_by="reviewer1",
+    )
+    db_session.add_all([first, second])
+    await db_session.commit()
+
+    listed = await client.get(
+        f"{API}?search=lift&status=ready&source=teleop",
+        headers=_auth_headers(reviewer),
+    )
+    detail = await client.get(f"{API}/{first.id}", headers=_auth_headers(reviewer))
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["name"] == "lift-teleop-v1"
+    assert detail.status_code == 200
+    assert detail.json()["created_by"] == "reviewer1"
+    assert detail.json()["episodes"][0]["episode_id"] == "episode-1"
+    assert detail.json()["schema_manifest"]["fields"][0]["path"] == "actions"
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_non_failed_dataset(client, db_session, reviewer):
+    dataset = Dataset(name="ready-dataset", task_names=[], status="ready")
+    db_session.add(dataset)
+    await db_session.commit()
+
+    response = await client.post(
+        f"{API}/{dataset.id}/retry", json={}, headers=_auth_headers(reviewer),
+    )
+
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

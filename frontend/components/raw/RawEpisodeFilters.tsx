@@ -11,6 +11,7 @@ export interface RawFiltersValue {
   quality: RawEpisodeQuality | "";
   outcome: "success" | "failure" | "";
   reviewStatus: RawEpisodeReviewStatus | "";
+  collectionBatch: string;
   search: string;
 }
 
@@ -22,6 +23,7 @@ export function RawEpisodeFilters({
   onApplySearch,
   onReset,
   tasks,
+  batches,
 }: {
   value: RawFiltersValue;
   searchDraft: string;
@@ -30,6 +32,7 @@ export function RawEpisodeFilters({
   onApplySearch: () => void;
   onReset: () => void;
   tasks: string[];
+  batches: string[];
 }) {
   return (
     <div className="space-y-4">
@@ -53,13 +56,14 @@ export function RawEpisodeFilters({
         </div>
       </form>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Field label="Source">
           <Select
             value={value.source}
             onChange={(event) => onChange({
               source: event.target.value as RawFiltersValue["source"],
               task: "",
+              collectionBatch: event.target.value === "teleop" ? "" : value.collectionBatch,
             })}
           >
             <option value="">All sources</option>
@@ -74,6 +78,15 @@ export function RawEpisodeFilters({
           >
             <option value="">All tasks</option>
             {tasks.map((task) => <option key={task} value={task}>{task}</option>)}
+          </Select>
+        </Field>
+        <Field label="Collection batch">
+          <Select
+            value={value.collectionBatch}
+            onChange={(event) => onChange({ collectionBatch: event.target.value })}
+          >
+            <option value="">All collection batches</option>
+            {batches.map((batch) => <option key={batch} value={batch}>{batch}</option>)}
           </Select>
         </Field>
         <Field label="Quality">

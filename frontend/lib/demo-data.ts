@@ -239,6 +239,10 @@ function buildStore(): Store {
       path: "data/exports/v1",
       dvc_hash: "9f1c4b7e2a6d05c38e4417ab9c2f6d81",
       status: "ready",
+      data_source: "both",
+      collection_batch_id: null,
+      created_by: "demo-admin",
+      exporter_version: "1.0",
     },
     {
       id: "exp-002",
@@ -258,6 +262,10 @@ function buildStore(): Store {
       path: "data/exports/pick-place-only",
       dvc_hash: "3ba0e51d7c9482f6015d7ee4a8b3c020",
       status: "ready",
+      data_source: "teleop",
+      collection_batch_id: null,
+      created_by: "demo-admin",
+      exporter_version: "1.0",
     },
     {
       id: "exp-003",
@@ -272,6 +280,10 @@ function buildStore(): Store {
       path: "data/exports/v1-rlds",
       dvc_hash: null,
       status: "ready",
+      data_source: "both",
+      collection_batch_id: null,
+      created_by: "demo-admin",
+      exporter_version: "1.0",
     },
   ];
 

@@ -87,6 +87,7 @@ class EpisodeArrays:
     action_high: np.ndarray = field(default_factory=lambda: np.full(7, 1.0))
     num_samples_attr: int = -1
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    initial_state: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.float64))
 
     @property
     def episode_id(self) -> str:
@@ -215,6 +216,11 @@ def load_episodes(
             next_observations = demo["next_obs"]
             object_state = np.asarray(observations["object"], dtype=np.float64)
             next_object_state = np.asarray(next_observations["object"], dtype=np.float64)
+            initial_state = (
+                np.asarray(demo["states"][0], dtype=np.float64)
+                if "states" in demo and demo["states"].shape[0] > 0
+                else np.empty(0, dtype=np.float64)
+            )
             layout = _object_layout(resolved_task, object_state.shape[1])
             if layout is None:
                 raise EpisodeLoadError(f"{source}::{name}: unsupported task {resolved_task!r}")
@@ -257,6 +263,7 @@ def load_episodes(
                     control_hz=control_hz,
                     num_samples_attr=int(_attr(demo, "num_samples", -1)),
                     provenance=_provenance(data, demo),
+                    initial_state=initial_state,
                 ),
             )
     return episodes

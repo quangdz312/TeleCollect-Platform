@@ -52,6 +52,8 @@ export interface Demo {
   has_trajectory?: boolean;
   auto_label?: AutoLabel;
   auto_label_reason?: string;
+  auto_label_profile?: "scripted_strict" | "teleop_tolerant";
+  auto_label_profile_version?: string;
 }
 
 export interface DemoPage {
@@ -105,6 +107,36 @@ export interface DatasetExport {
   dvc_hash: string | null;
   status: string;
   error_message?: string | null;
+  data_source: "teleop" | "scripted" | "both" | "unknown";
+  collection_batch_id: string | null;
+  created_by: string | null;
+  exporter_version: string;
+}
+
+export interface DatasetEpisodeSnapshot {
+  episode_id: string;
+  source: "teleop" | "scripted" | "unknown";
+  task: string;
+  outcome: "success" | "failure" | "unknown";
+  frames: number;
+  review_status: string;
+}
+
+export interface DatasetDetail extends DatasetExport {
+  episodes: DatasetEpisodeSnapshot[];
+  schema_manifest: {
+    sample_demo?: string | null;
+    fields?: { path: string; shape: number[]; dtype: string }[];
+    masks?: string[];
+  };
+}
+
+export interface DatasetPage {
+  items: DatasetExport[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface TrainingRun {
@@ -232,6 +264,8 @@ type BackendDemo = {
   created_at: string;
   auto_label: AutoLabel;
   auto_label_reason: string;
+  auto_label_profile?: "scripted_strict" | "teleop_tolerant";
+  auto_label_profile_version?: string;
 };
 
 type BackendPage<T> = {
@@ -270,6 +304,12 @@ type BackendDataset = {
   size_bytes: number | null;
   created_at: string;
   error_message?: string | null;
+  data_source: "teleop" | "scripted" | "both" | "unknown";
+  collection_batch_id: string | null;
+  created_by: string | null;
+  exporter_version: string;
+  episodes?: DatasetEpisodeSnapshot[];
+  schema_manifest?: DatasetDetail["schema_manifest"];
 };
 
 const configuredOrigin =
@@ -421,6 +461,8 @@ function toDemo(demo: BackendDemo): Demo {
     has_trajectory: demo.has_trajectory,
     auto_label: demo.auto_label || "review",
     auto_label_reason: demo.auto_label_reason || "",
+    auto_label_profile: demo.auto_label_profile,
+    auto_label_profile_version: demo.auto_label_profile_version,
   };
 }
 
@@ -473,7 +515,15 @@ function toExport(dataset: BackendDataset): DatasetExport {
     dvc_hash: null,
     status: dataset.status,
     error_message: dataset.error_message,
+    data_source: dataset.data_source,
+    collection_batch_id: dataset.collection_batch_id,
+    created_by: dataset.created_by,
+    exporter_version: dataset.exporter_version,
   };
+}
+
+function toDatasetDetail(dataset: BackendDataset): DatasetDetail {
+  return { ...toExport(dataset), episodes: dataset.episodes ?? [], schema_manifest: dataset.schema_manifest ?? {} };
 }
 
 /** Client-side poll cadence for `building` datasets — backend gives no SLA, just a reasonable default. */
@@ -695,6 +745,16 @@ export const api = {
     const page = await request<BackendPage<BackendDataset>>("/datasets?page=1&page_size=100");
     return page.items.map(toExport);
   },
+  datasetPage: async (filters: {
+    search?: string; status?: string; task?: string; source?: string; page?: number; page_size?: number;
+  } = {}): Promise<DatasetPage> => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    const page = await request<BackendPage<BackendDataset>>(`/datasets?${query}`);
+    return { ...page, items: page.items.map(toExport) };
+  },
 
   createExport: async (body: {
     name: string;
@@ -704,6 +764,7 @@ export const api = {
     overwrite: boolean;
     data_source: "teleop" | "scripted" | "both";
     collection_batch_id?: string;
+    episode_ids?: string[];
   }) =>
     toExport(
       await request<BackendDataset>("/datasets", {
@@ -716,11 +777,17 @@ export const api = {
           overwrite: body.overwrite,
           data_source: body.data_source,
           collection_batch_id: body.collection_batch_id || null,
+          episode_ids: body.episode_ids ?? [],
         }),
       }),
     ),
 
   exportInfo: async (id: string) => toExport(await request<BackendDataset>(`/datasets/${id}`)),
+  datasetDetail: async (id: string) => toDatasetDetail(await request<BackendDataset>(`/datasets/${id}`)),
+  retryExport: async (id: string) => toExport(await request<BackendDataset>(`/datasets/${id}/retry`, {
+    method: "POST", body: JSON.stringify({}),
+  })),
+  datasetDownloadUrl: (id: string) => mediaUrl(`/datasets/${encodeURIComponent(id)}/download`),
   deleteExport: (id: string) => request<void>(`/datasets/${id}`, { method: "DELETE" }),
 
   dvc: async () => ({
@@ -731,11 +798,15 @@ export const api = {
   runs: () => request<TrainingRun[]>("/training/jobs"),
   run: (id: string) => request<TrainingRun>(`/training/jobs/${id}`),
   runLog: (id: string) => request<string>(`/training/jobs/${id}/log`),
+  checkpointDownloadUrl: (runId: string, checkpointId: string) =>
+    mediaUrl(`/training/jobs/${encodeURIComponent(runId)}/checkpoints/${encodeURIComponent(checkpointId)}/download`),
   runHistory: async (_id: string): Promise<Record<string, number>[]> => [],
   createRun: (body: TrainingRequest) =>
     request<TrainingRun>("/training/jobs", { method: "POST", body: JSON.stringify(body) }),
   cancelRun: (id: string) =>
     request<TrainingRun>(`/training/jobs/${id}/cancel`, { method: "POST" }),
+  deleteRun: (id: string) =>
+    request<void>(`/training/jobs/${id}`, { method: "DELETE" }),
   evaluations: (trainingRunId?: string) => {
     const query = trainingRunId
       ? `?training_run_id=${encodeURIComponent(trainingRunId)}`
@@ -749,6 +820,10 @@ export const api = {
     }),
   cancelEvaluation: (id: string) =>
     request<EvaluationRun>(`/training/evaluations/${id}/cancel`, { method: "POST" }),
+  retryEvaluation: (id: string) =>
+    request<EvaluationRun>(`/training/evaluations/${id}/retry`, { method: "POST" }),
+  deleteEvaluation: (id: string) =>
+    request<void>(`/training/evaluations/${id}`, { method: "DELETE" }),
   evaluationLog: (id: string) => request<string>(`/training/evaluations/${id}/log`),
   evals: async (_training_run_id?: string): Promise<EvalRun[]> => [],
   createEval: async (_body: Record<string, unknown>): Promise<EvalRun> => {

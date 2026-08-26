@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -352,6 +353,22 @@ class TrainingJobManager:
             else:
                 self._write(record)
             return self._response(record)
+
+    def delete(self, job_id: str) -> bool:
+        """Delete one finished job and its managed artifacts."""
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return False
+            if record["status"] in {JobStatus.PENDING, JobStatus.RUNNING}:
+                raise ValueError("Không thể xóa training job đang chạy")
+            job_dir = self._job_dir(job_id)
+            if job_dir.exists():
+                shutil.rmtree(job_dir)
+            self._jobs.pop(job_id, None)
+            self._processes.pop(job_id, None)
+            self._futures.pop(job_id, None)
+            return True
 
     def log(self, job_id: str) -> str | None:
         if job_id not in self._jobs:

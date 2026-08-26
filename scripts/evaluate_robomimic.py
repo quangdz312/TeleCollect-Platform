@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 import os
 import random
 import sys
@@ -51,7 +52,16 @@ def _write_result(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    # Windows can briefly lock result.json while the API polls it. Retry the
+    # atomic replace instead of aborting an otherwise healthy evaluation.
+    for attempt in range(10):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _install_egl_probe_fallback() -> bool:

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -12,50 +12,30 @@ import {
   Input,
   Select,
 } from "@/components/ui";
-import { api, type DatasetExport, type Summary } from "@/lib/api";
+import { api, type DatasetExport, type DatasetPage } from "@/lib/api";
 import { labeling, type TaskOption } from "@/lib/labeling";
 import { bytes, timeAgo } from "@/lib/format";
-
-const EXPORT_POLL_INTERVAL_MS = 750;
-const EXPORT_POLL_LIMIT = 160;
-
-function delay(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
 
 export default function DatasetsPage() {
   const { user } = useAuth();
   const [exports, setExports] = useState<DatasetExport[]>([]);
+  const [datasetPage, setDatasetPage] = useState<DatasetPage | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [listTaskFilter, setListTaskFilter] = useState("");
+  const [listPage, setListPage] = useState(1);
   const [tasks, setTasks] = useState<TaskOption[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [dvc, setDvc] = useState<{ available: boolean; reason?: string } | null>(null);
-
-  const [name, setName] = useState("v1");
-  const [format, setFormat] = useState("robomimic");
-  const [taskFilter, setTaskFilter] = useState("");
-  const [dataSource, setDataSource] = useState<"teleop" | "scripted" | "both">("both");
-  const [includeFailures, setIncludeFailures] = useState(false);
-  const [overwrite, setOverwrite] = useState(false);
-  const [batchId, setBatchId] = useState("lift-scripted-v1.2");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [e, s, d, scripted] = await Promise.all([
-      api.exports(),
-      api.summary(),
-      api.dvc(),
+    const [e, scripted] = await Promise.all([
+      api.datasetPage({ search, status: statusFilter, source: sourceFilter, task: listTaskFilter, page: listPage, page_size: 20 }),
       labeling.config().catch(() => null),
     ]);
-    setExports(e);
+    setDatasetPage(e);
+    setExports(e.items);
     setTasks(scripted?.tasks ?? []);
-    setSummary(scripted ? {
-      ...s,
-      approved_successes: s.approved_successes + scripted.workspace.approved_successes,
-    } : s);
-    setDvc(d);
-  }, []);
+  }, [listPage, listTaskFilter, search, sourceFilter, statusFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -69,158 +49,23 @@ export default function DatasetsPage() {
   }, [exports, load, user]);
 
   if (!user) return null;
-  const canExport = user.role === "reviewer" || user.role === "admin";
-
-  async function createExport() {
-    setBusy(true);
-    setError(null);
-    setInfo(null);
-    try {
-      const created = await api.createExport({
-        name,
-        format,
-        tasks: taskFilter ? [taskFilter] : [],
-        include_failures: includeFailures,
-        overwrite,
-        data_source: dataSource,
-        collection_batch_id: dataSource === "teleop" ? undefined : batchId,
-      });
-      setInfo(`Building ${created.name}… The page will update when the HDF5 is ready.`);
-      await load();
-      let completed = created;
-      for (let attempt = 0; attempt < EXPORT_POLL_LIMIT && completed.status === "building"; attempt += 1) {
-        await delay(EXPORT_POLL_INTERVAL_MS);
-        completed = await api.exportInfo(created.id);
-        setExports((current) => current.map((item) => item.id === completed.id ? completed : item));
-      }
-      if (completed.status === "failed") {
-        throw new Error(completed.error_message || `Export ${completed.name} failed.`);
-      }
-      if (completed.status !== "ready") {
-        setInfo(`Export ${completed.name} is still building. Its status will continue updating below.`);
-        return;
-      }
-      setInfo(
-        `Exported ${completed.num_episodes} episodes / ${completed.num_frames.toLocaleString()} frames ` +
-          `(${bytes(completed.size_bytes)})` +
-          (completed.dvc_hash ? ` · DVC ${completed.dvc_hash.slice(0, 12)}` : ""),
-      );
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Export failed");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="font-heading text-[22px] font-bold tracking-tight">Datasets</h1>
         <p className="mt-0.5 text-sm text-ink-400">
-          An export is an immutable snapshot of the approved demonstrations, with each
-          reviewer&apos;s trim applied and their decision recorded alongside every episode.
+          Browse and inspect immutable datasets after conversion.
         </p>
       </div>
 
-      {canExport && (
-        <Card
-          title="New export"
-          subtitle={
-            summary
-              ? `${summary.approved_successes} approved successes are eligible right now`
-              : undefined
-          }
-        >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <Field label="Name" hint="Becomes the directory and the DVC-tracked version">
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-            <Field label="Collection batch" hint="Only applies to scripted episodes">
-              <Input
-                value={batchId}
-                disabled={dataSource === "teleop"}
-                onChange={(e) => setBatchId(e.target.value)}
-              />
-            </Field>
-            <Field label="Format">
-              <Select value={format} onChange={(e) => setFormat(e.target.value)}>
-                <option value="robomimic">RoboMimic (HDF5)</option>
-              </Select>
-            </Field>
-            <Field label="Task" hint="RoboMimic BC requires one environment per dataset">
-              <Select value={taskFilter} onChange={(e) => setTaskFilter(e.target.value)}>
-                <option value="">Select a task…</option>
-                {tasks.map((task) => (
-                  <option key={task.task} value={task.task}>
-                    {task.tool_label ?? task.task}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Data source" hint="Export one source or mix both">
-              <Select
-                value={dataSource}
-                onChange={(e) => setDataSource(e.target.value as "teleop" | "scripted" | "both")}
-              >
-                <option value="teleop">Teleop only</option>
-                <option value="scripted">Scripted only</option>
-                <option value="both">Teleop + Scripted</option>
-              </Select>
-            </Field>
-            <div className="flex flex-col justify-end gap-2 text-xs">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={includeFailures}
-                  onChange={(e) => setIncludeFailures(e.target.checked)}
-                />
-                Include approved failures
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={overwrite}
-                  onChange={(e) => setOverwrite(e.target.checked)}
-                />
-                Overwrite if it exists
-              </label>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button
-              variant="primary"
-              disabled={busy || !taskFilter || (dataSource !== "teleop" && !batchId)}
-              onClick={createExport}
-            >
-              {busy ? "Exporting…" : "Export dataset"}
-            </Button>
-            {dvc && (
-              <Badge tone={dvc.available ? "ok" : "neutral"}>
-                DVC {dvc.available ? "tracking enabled" : (dvc.reason ?? "unavailable")}
-              </Badge>
-            )}
-          </div>
-          <p className="mt-2 text-xs text-ink-400">
-            The exported HDF5 contains only human-approved demonstrations from the selected
-            source. Mixed exports retain a per-demo source attribute. Export each task separately
-            because every task has different environment metadata and observation semantics.
-          </p>
-
-          {error && (
-            <div className="mt-3">
-              <Alert>{error}</Alert>
-            </div>
-          )}
-          {info && (
-            <div className="mt-3">
-              <Alert tone="ok">{info}</Alert>
-            </div>
-          )}
-        </Card>
-      )}
-
-      <Card title="Exports">
+      <Card title="Exports" subtitle={datasetPage ? `${datasetPage.total} datasets` : undefined}>
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Search"><Input value={search} onChange={(event) => { setSearch(event.target.value); setListPage(1); }} placeholder="Dataset name" /></Field>
+          <Field label="Status"><Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setListPage(1); }}><option value="">All statuses</option><option value="building">Building</option><option value="ready">Ready</option><option value="failed">Failed</option></Select></Field>
+          <Field label="Source"><Select value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setListPage(1); }}><option value="">All sources</option><option value="teleop">Teleop</option><option value="scripted">Scripted</option><option value="both">Mixed</option><option value="unknown">Unknown (legacy)</option></Select></Field>
+          <Field label="Task"><Select value={listTaskFilter} onChange={(event) => { setListTaskFilter(event.target.value); setListPage(1); }}><option value="">All tasks</option>{tasks.map((task) => <option key={task.task} value={task.task}>{task.tool_label ?? task.task}</option>)}</Select></Field>
+        </div>
         {exports.length === 0 ? (
           <Empty>No datasets exported yet.</Empty>
         ) : (
@@ -237,13 +82,13 @@ export default function DatasetsPage() {
                   <th className="pb-2 text-right">Size</th>
                   <th className="pb-2">DVC hash</th>
                   <th className="pb-2">Created</th>
-                  {user.role === "admin" && <th className="pb-2" />}
+                  <th className="pb-2" />
                 </tr>
               </thead>
               <tbody className="tabular">
                 {exports.map((item) => (
                   <tr key={item.id} className="border-t border-ink-700/50">
-                    <td className="py-2 font-medium">{item.name}</td>
+                    <td className="py-2 font-medium"><Link href={`/datasets/${item.id}`} className="text-accent-500 hover:underline">{item.name}</Link><div className="text-[11px] font-normal text-ink-400">{item.data_source}</div></td>
                     <td className="py-2">
                       <Badge tone="info">{item.format}</Badge>
                     </td>
@@ -260,9 +105,11 @@ export default function DatasetsPage() {
                       {item.dvc_hash ? item.dvc_hash.slice(0, 16) : "—"}
                     </td>
                     <td className="py-2 text-xs text-ink-400">{timeAgo(item.created_at)}</td>
-                    {user.role === "admin" && (
-                      <td className="py-2 text-right">
-                        <Button
+                    <td className="py-2 text-right"><div className="flex justify-end gap-1">
+                        <Link href={`/datasets/${item.id}`}><Button variant="subtle">Open</Button></Link>
+                        {item.status === "ready" && <a href={api.datasetDownloadUrl(item.id)}><Button variant="subtle">Download</Button></a>}
+                        {item.status === "failed" && <Button variant="subtle" onClick={async () => { await api.retryExport(item.id); await load(); }}>Retry</Button>}
+                        {user.role === "admin" && <Button
                           variant="ghost"
                           onClick={async () => {
                             if (!confirm(`Delete export ${item.name}?`)) return;
@@ -271,15 +118,15 @@ export default function DatasetsPage() {
                           }}
                         >
                           Delete
-                        </Button>
-                      </td>
-                    )}
+                        </Button>}
+                      </div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        {datasetPage && datasetPage.total_pages > 1 && <div className="mt-4 flex items-center justify-between"><Button variant="subtle" disabled={listPage <= 1} onClick={() => setListPage((value) => value - 1)}>Previous</Button><span className="text-xs text-ink-400">Page {listPage} / {datasetPage.total_pages}</span><Button variant="subtle" disabled={listPage >= datasetPage.total_pages} onClick={() => setListPage((value) => value + 1)}>Next</Button></div>}
       </Card>
 
       <Card title="Version control">

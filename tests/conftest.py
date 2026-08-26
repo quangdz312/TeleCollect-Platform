@@ -19,6 +19,13 @@ from src.main import app
 from src.models.db import enable_sqlite_foreign_keys, get_session, init_db, session_factory
 
 
+@pytest.fixture(autouse=True)
+def isolate_self_review_policy(monkeypatch):
+    """Tests start from the documented secure default, independent of local .env."""
+
+    monkeypatch.setattr(get_settings(), "allow_self_review", False)
+
+
 @pytest_asyncio.fixture
 async def test_engine() -> AsyncEngine:
     """SQLite in-memory riêng cho mỗi test — StaticPool giữ 1 connection duy nhất
