@@ -39,6 +39,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rollout-episodes", type=int, default=5)
     parser.add_argument("--rollout-horizon", type=int, default=500)
     parser.add_argument(
+        "--wandb-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Gửi metrics RoboMimic và artifacts lên Weights & Biases",
+    )
+    parser.add_argument("--wandb-project", default="telecollect-robot-learning")
+    parser.add_argument("--wandb-entity", default=None)
+    parser.add_argument(
         "--policy",
         choices=("bc", "bc-rnn"),
         default="bc",
@@ -78,6 +86,9 @@ def main() -> int:
             rollout_every_n_epochs=args.rollout_every_n_epochs,
             rollout_episodes=args.rollout_episodes,
             rollout_horizon=args.rollout_horizon,
+            wandb_enabled=args.wandb_enabled,
+            wandb_project=args.wandb_project,
+            wandb_entity=args.wandb_entity,
         )
     except (OSError, KeyError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc

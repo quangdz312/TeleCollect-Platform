@@ -320,6 +320,11 @@ class RawEpisodeSummaryResponse(BaseModel):
     approved: int = Field(..., ge=0)
     rejected: int = Field(..., ge=0)
     archived: int = Field(..., ge=0)
+    by_task: dict[str, int] = Field(default_factory=dict)
+    by_quality: dict[str, int] = Field(default_factory=dict)
+    by_batch: dict[str, int] = Field(default_factory=dict)
+    by_day: dict[str, dict[str, int]] = Field(default_factory=dict)
+    undated: int = Field(default=0, ge=0)
 
 
 class RawEpisodePageResponse(BaseModel):
@@ -587,6 +592,14 @@ class TrainingJobRequest(BaseModel):
     rollout_every_n_epochs: int = Field(default=20, ge=1, le=10_000)
     rollout_episodes: int = Field(default=5, ge=1, le=200)
     rollout_horizon: int = Field(default=500, ge=1, le=20_000)
+    wandb_enabled: bool = False
+    wandb_project: str = Field(
+        default="telecollect-robot-learning",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    wandb_entity: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class TrainingCheckpointResponse(BaseModel):

@@ -189,6 +189,9 @@ export interface TrainingRequest {
   rollout_every_n_epochs: number;
   rollout_episodes: number;
   rollout_horizon: number;
+  wandb_enabled: boolean;
+  wandb_project: string;
+  wandb_entity: string | null;
 }
 
 export interface EvaluationEpisode {

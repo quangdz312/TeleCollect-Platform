@@ -94,6 +94,21 @@ python -m scripts.seed_demos --reset      # sinh 40 demo mẫu, mất 1–2 phú
 python -m pytest -q
 ```
 
+### Theo dõi training với Weights & Biases (tùy chọn)
+
+W&B chỉ cần trên máy chạy training, không cần cho API hoặc teleoperation.
+
+```bash
+python -m pip install -r requirements-train.txt
+wandb login
+python scripts/train_robomimic_bc.py --dataset data/datasets/example.hdf5 \
+  --wandb-enabled --wandb-project telecollect-robot-learning
+```
+
+RoboMimic sẽ gửi train/validation/rollout metrics lên W&B. Sau khi training
+hoàn tất, TeleCollect cũng upload dataset HDF5 và checkpoint `.pth` làm W&B
+Artifacts. Có thể tắt toàn bộ bằng `--no-wandb-enabled` (mặc định).
+
 ### Biến môi trường
 
 `src/config.py` là nguồn sự thật; `.env.example` chép lại kèm chú thích. Chỉ

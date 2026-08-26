@@ -57,6 +57,11 @@ export interface RawEpisodeSummary {
   approved: number;
   rejected: number;
   archived: number;
+  by_task: Record<string, number>;
+  by_quality: Record<string, number>;
+  by_batch: Record<string, number>;
+  by_day: Record<string, { teleop: number; scripted: number }>;
+  undated: number;
 }
 
 export interface RawArtifact {
