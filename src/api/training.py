@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,14 +13,20 @@ from src.models.enums import DatasetStatus, UserRole
 from src.models.schemas import (
     EvalResultResponse,
     EvaluationJobRequest,
+    MachineLogRequest,
     TrainingCheckpointResponse,
     TrainingJobRequest,
     TrainingJobResponse,
 )
 from src.services import storage
-from src.services.security import current_user_allow_query_token, require_min_role
+from src.services.security import (
+    current_machine_job,
+    current_user_allow_query_token,
+    require_min_role,
+)
 from src.training.evaluation_jobs import EvaluationJobManager
 from src.training.jobs import TrainingJobManager
+from src.training.runpod_runner import RunPodRunner
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -35,7 +41,9 @@ def _require_training_enabled() -> None:
 
 @lru_cache
 def job_manager() -> TrainingJobManager:
-    return TrainingJobManager(Path(get_settings().storage_dir) / "training")
+    settings = get_settings()
+    runner = RunPodRunner() if settings.training_runner == "runpod" else None
+    return TrainingJobManager(Path(settings.storage_dir) / "training", runner=runner)
 
 
 @lru_cache
@@ -177,6 +185,52 @@ async def download_training_checkpoint(
         media_type="application/octet-stream",
         filename=path.name,
     )
+
+
+# --- Endpoint máy ------------------------------------------------------------
+# Ba endpoint dưới đây do MÁY GPU THUÊ gọi, không phải người dùng. Chúng xác
+# thực bằng token máy (`current_machine_job`) chỉ dùng được cho đúng một
+# `job_id`, nên máy thuê không chạm được sang job khác và không mượn được quyền
+# của người bấm Train. KHÔNG gắn `current_machine_job` lên endpoint nào khác.
+
+
+@router.get("/jobs/{job_id}/dataset")
+async def machine_download_dataset(
+    job_id: str = Depends(current_machine_job),
+) -> FileResponse:
+    path = job_manager().dataset_path(job_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dataset của training job")
+    return FileResponse(
+        path, media_type="application/octet-stream", filename=path.name
+    )
+
+
+@router.post("/jobs/{job_id}/log", status_code=status.HTTP_204_NO_CONTENT)
+async def machine_append_log(
+    body: MachineLogRequest,
+    job_id: str = Depends(current_machine_job),
+) -> Response:
+    if not job_manager().append_log(job_id, body.text):
+        raise HTTPException(status_code=404, detail="Không tìm thấy training job")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/jobs/{job_id}/artifacts", status_code=status.HTTP_204_NO_CONTENT)
+async def machine_upload_artifact(
+    file: UploadFile = File(...),
+    job_id: str = Depends(current_machine_job),
+) -> Response:
+    path = job_manager().artifact_path(job_id, file.filename or "")
+    if path is None:
+        raise HTTPException(
+            status_code=422, detail="Tên checkpoint không hợp lệ cho training job này"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        while chunk := await file.read(1024 * 1024):
+            handle.write(chunk)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

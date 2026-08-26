@@ -555,6 +555,12 @@ class ScriptedLabelRequest(BaseModel):
     blind: bool = True
 
 
+class MachineLogRequest(BaseModel):
+    """Một lô log máy GPU thuê đẩy về giữa chừng lần train."""
+
+    text: str = Field(max_length=1_000_000)
+
+
 class TrainingJobRequest(BaseModel):
     """Cấu hình một lần chạy RoboMimic BC hoặc BC-RNN.
 

@@ -10,12 +10,14 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.config import get_settings
 from src.models.enums import JobStatus
 from src.models.schemas import (
     TrainingCheckpointResponse,
@@ -97,6 +99,56 @@ def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[
     return sorted(found, key=lambda item: (item["epoch"], item["filename"]), reverse=True)
 
 
+def build_training_command(
+    config: dict[str, Any],
+    *,
+    python_executable: str,
+    training_script: str,
+    dataset_path: str,
+    output_dir: str,
+) -> list[str]:
+    """Dựng dòng lệnh gọi `train_robomimic_bc.py`.
+
+    Hàm thuần, tách khỏi `TrainingJobManager` vì handler chạy trên máy GPU thuê
+    (`runpod_handler.py`) phải dựng ĐÚNG dòng lệnh này. Viết lại lần hai ở đó
+    thì thêm một cờ mới vào `TrainingJobRequest` là chắc chắn quên một chỗ.
+    """
+    command = [
+        python_executable,
+        training_script,
+        "--dataset", dataset_path,
+        "--output-dir", output_dir,
+        "--name", str(config["name"]),
+        "--policy", str(config["policy"]),
+        "--epochs", str(config["epochs"]),
+        "--batch-size", str(config["batch_size"]),
+        "--num-workers", str(config["num_workers"]),
+        "--device", str(config["device"]),
+        "--learning-rate", str(config["learning_rate"]),
+        "--seed", str(config["seed"]),
+        "--sequence-length", str(config["sequence_length"]),
+        "--rnn-hidden-dim", str(config["rnn_hidden_dim"]),
+        "--rnn-layers", str(config["rnn_layers"]),
+        "--observation-profile", str(config["observation_profile"]),
+        (
+            "--normalize-observations"
+            if config.get("normalize_observations")
+            else "--no-normalize-observations"
+        ),
+        "--rollout-enabled" if config.get("rollout_enabled") else "--no-rollout-enabled",
+        "--rollout-every-n-epochs", str(config["rollout_every_n_epochs"]),
+        "--rollout-episodes", str(config["rollout_episodes"]),
+        "--rollout-horizon", str(config["rollout_horizon"]),
+        "--wandb-enabled" if config.get("wandb_enabled") else "--no-wandb-enabled",
+        "--wandb-project", str(config.get("wandb_project", "telecollect-robot-learning")),
+    ]
+    if config.get("wandb_entity"):
+        command.extend(["--wandb-entity", str(config["wandb_entity"])])
+    if config.get("save_every_n_epochs") is not None:
+        command.extend(["--save-every-n-epochs", str(config["save_every_n_epochs"])])
+    return command
+
+
 class TrainingJobManager:
     """Run training outside the API event loop and persist every state change.
 
@@ -112,7 +164,11 @@ class TrainingJobManager:
         repo_root: Path | None = None,
         python_executable: str | None = None,
         training_script: Path | None = None,
+        runner: Any | None = None,
     ) -> None:
+        # `runner=None` giữ nguyên đường subprocess cũ. Truyền `RunPodRunner`
+        # vào để huấn luyện trên GPU thuê thay vì trên máy chạy backend.
+        self.runner = runner
         self.root = root.resolve()
         self.repo_root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
         self.python_executable = python_executable or sys.executable
@@ -181,6 +237,7 @@ class TrainingJobManager:
             "error": None,
             "checkpoints": [],
             "cancel_requested": False,
+            "runner_state": {},
         }
         with self._lock:
             self._jobs[job_id] = record
@@ -189,41 +246,13 @@ class TrainingJobManager:
         return self._response(record)
 
     def _command(self, record: dict[str, Any]) -> list[str]:
-        config = record["config"]
-        command = [
-            self.python_executable,
-            str(self.training_script),
-            "--dataset", str(record["dataset_path"]),
-            "--output-dir", str(record["output_dir"]),
-            "--name", str(config["name"]),
-            "--policy", str(config["policy"]),
-            "--epochs", str(config["epochs"]),
-            "--batch-size", str(config["batch_size"]),
-            "--num-workers", str(config["num_workers"]),
-            "--device", str(config["device"]),
-            "--learning-rate", str(config["learning_rate"]),
-            "--seed", str(config["seed"]),
-            "--sequence-length", str(config["sequence_length"]),
-            "--rnn-hidden-dim", str(config["rnn_hidden_dim"]),
-            "--rnn-layers", str(config["rnn_layers"]),
-            "--observation-profile", str(config["observation_profile"]),
-            (
-                "--normalize-observations"
-                if config.get("normalize_observations")
-                else "--no-normalize-observations"
-            ),
-            "--rollout-enabled" if config.get("rollout_enabled") else "--no-rollout-enabled",
-            "--rollout-every-n-epochs", str(config["rollout_every_n_epochs"]),
-            "--rollout-episodes", str(config["rollout_episodes"]),
-            "--rollout-horizon", str(config["rollout_horizon"]),
-            "--wandb-enabled" if config.get("wandb_enabled") else "--no-wandb-enabled",
-            "--wandb-project", str(config.get("wandb_project", "telecollect-robot-learning")),
-        ]
-        if config.get("wandb_entity"):
-            command.extend(["--wandb-entity", str(config["wandb_entity"])])
-        if config.get("save_every_n_epochs") is not None:
-            command.extend(["--save-every-n-epochs", str(config["save_every_n_epochs"])])
-        return command
+        return build_training_command(
+            record["config"],
+            python_executable=self.python_executable,
+            training_script=str(self.training_script),
+            dataset_path=str(record["dataset_path"]),
+            output_dir=str(record["output_dir"]),
+        )
 
     def _run(self, job_id: str) -> None:
         with self._lock:
@@ -234,6 +263,9 @@ class TrainingJobManager:
             record["status"] = JobStatus.RUNNING
             record["started_at"] = _now()
             self._write(record)
+        if self.runner is not None:
+            self._run_remote(job_id)
+            return
         log_path = self._job_dir(job_id) / "stdout.log"
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -277,6 +309,78 @@ class TrainingJobManager:
         finally:
             with self._lock:
                 self._processes.pop(job_id, None)
+
+    def _run_remote(self, job_id: str) -> None:
+        """Giao job cho `self.runner` rồi hỏi trạng thái tới khi kết thúc.
+
+        Chạy trong cùng executor một worker như đường subprocess, nên hai job
+        không tranh nhau. Log và checkpoint KHÔNG đi qua đây — máy GPU tự đẩy
+        về ba endpoint máy, `_refresh()` nhặt được ngay khi file rơi vào
+        `output_dir`.
+        """
+        settings = get_settings()
+        deadline = time.monotonic() + settings.runpod_max_hours * 3600
+        try:
+            with self._lock:
+                record = self._jobs[job_id]
+                if record["cancel_requested"]:
+                    self._finish_cancelled(record)
+                    return
+                state = self.runner.start(record)
+                record["runner_state"] = state
+                self._write(record)
+            while True:
+                time.sleep(settings.runpod_poll_interval_s)
+                with self._lock:
+                    record = self._jobs[job_id]
+                    if record["cancel_requested"]:
+                        break
+                    snapshot = dict(record)
+                result = self.runner.poll(snapshot)
+                status = result["status"]
+                if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
+                    with self._lock:
+                        record = self._jobs[job_id]
+                        record["status"] = status
+                        record["finished_at"] = _now()
+                        record["error"] = result.get("error")
+                        self._write(record)
+                    return
+                if time.monotonic() > deadline:
+                    # Trần thời gian: job vẫn chạy nhưng đã vượt ngân sách. Hủy
+                    # bên RunPod trước rồi mới đánh dấu thất bại, nếu không
+                    # worker cứ chạy tiếp và hóa đơn cứ tăng.
+                    with self._lock:
+                        snapshot = dict(self._jobs[job_id])
+                    self._safe_cancel(snapshot)
+                    with self._lock:
+                        record = self._jobs[job_id]
+                        record["status"] = JobStatus.FAILED
+                        record["finished_at"] = _now()
+                        record["error"] = (
+                            f"Job vượt trần {settings.runpod_max_hours} giờ và đã bị hủy"
+                        )
+                        self._write(record)
+                    return
+            with self._lock:
+                snapshot = dict(self._jobs[job_id])
+            self._safe_cancel(snapshot)
+            with self._lock:
+                self._finish_cancelled(self._jobs[job_id])
+        except Exception as exc:  # ranh giới mạng: mọi lỗi phải nằm lại trong job
+            with self._lock:
+                record = self._jobs[job_id]
+                record["status"] = JobStatus.FAILED
+                record["finished_at"] = _now()
+                record["error"] = str(exc)
+                self._write(record)
+
+    def _safe_cancel(self, record: dict[str, Any]) -> None:
+        """Hủy phía nhà cung cấp; lỗi ở đây không được che mất kết quả job."""
+        try:
+            self.runner.cancel(record)
+        except Exception:
+            pass
 
     def _finish_cancelled(self, record: dict[str, Any]) -> None:
         # A user may cancel while optional post-training work (for example,
@@ -390,6 +494,44 @@ class TrainingJobManager:
             self._futures.pop(job_id, None)
             return True
 
+    def dataset_path(self, job_id: str) -> Path | None:
+        """File HDF5 của job, để máy GPU thuê tải về."""
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return None
+            path = Path(record["dataset_path"])
+            return path if path.is_file() else None
+
+    def append_log(self, job_id: str, text: str) -> bool:
+        """Nối log máy GPU đẩy về vào đúng file mà `_refresh()` đang đọc."""
+        with self._lock:
+            if job_id not in self._jobs:
+                return False
+        path = self._job_dir(job_id) / "stdout.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(text)
+        return True
+
+    def artifact_path(self, job_id: str, filename: str) -> Path | None:
+        """Vị trí ghi một checkpoint máy GPU đẩy về.
+
+        `filename` đến từ máy thuê nên KHÔNG được tin: chỉ nhận `.pth` và bắt
+        buộc kết quả nằm trong `output_dir` — chặn `../` thoát ra ngoài.
+        """
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return None
+        if not filename.endswith(".pth"):
+            return None
+        output_dir = Path(record["output_dir"]).resolve()
+        path = (output_dir / filename).resolve()
+        if not path.is_relative_to(output_dir):
+            return None
+        return path
+
     def log(self, job_id: str) -> str | None:
         if job_id not in self._jobs:
             return None
@@ -427,5 +569,9 @@ class TrainingJobManager:
 
     @staticmethod
     def _response(record: dict[str, Any]) -> TrainingJobResponse:
-        public = {key: value for key, value in record.items() if key not in {"dataset_path", "cancel_requested"}}
+        public = {
+            key: value
+            for key, value in record.items()
+            if key not in {"dataset_path", "cancel_requested", "runner_state"}
+        }
         return TrainingJobResponse.model_validate(public)

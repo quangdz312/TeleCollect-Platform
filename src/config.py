@@ -140,6 +140,37 @@ class Settings(BaseSettings):
     `false` qua `.env.production` — endpoint tạo job trả 403 thay vì spawn
     subprocess rồi lỗi giữa chừng."""
 
+    training_runner: Literal["local", "runpod"] = "local"
+    """Nơi chạy training job.
+
+    `local` — `subprocess` trên chính máy chạy backend. Đường mặc định, dùng ở
+    máy dev có GPU rời.
+
+    `runpod` — gọi RunPod Serverless thuê GPU theo giây. Dùng trên server
+    staging vì server không có GPU. Cần `runpod_api_key`, `runpod_endpoint_id`
+    và `public_base_url`."""
+
+    runpod_api_key: str = ""
+    """BÍ MẬT. Khóa RunPod (Settings -> API Keys, quyền Read/Write)."""
+
+    runpod_endpoint_id: str = ""
+    """Endpoint Serverless đã trỏ tới image train của dự án."""
+
+    runpod_poll_interval_s: float = Field(default=10.0, ge=1.0)
+    """Nhịp hỏi trạng thái job trên RunPod. Mỗi lần hỏi là một request tính phí
+    nên đừng hạ quá thấp."""
+
+    runpod_max_hours: float = Field(default=1.0, gt=0.0)
+    """Trần thời gian một job chạy trên GPU thuê — chặn hóa đơn khi job treo."""
+
+    public_base_url: str = ""
+    """URL server nhìn từ internet, để máy GPU thuê gọi ngược về tải dataset và
+    đẩy checkpoint. Bắt buộc khi `training_runner=runpod`; localhost không dùng
+    được vì máy thuê nằm ở mạng khác."""
+
+    machine_token_secret: str = ""
+    """BÍ MẬT. Khóa ký token máy. Rỗng thì dùng chung `jwt_secret`."""
+
     def data_dirs(self) -> list[Path]:
         """Những thư mục ứng dụng cần có sẵn để ghi được dữ liệu.
 

@@ -28,6 +28,8 @@ MAX_PASSWORD_LENGTH = 72
 
 TokenType = Literal["access", "refresh"]
 
+MACHINE_TOKEN_TYPE = "machine"
+
 ROLE_RANK: dict[UserRole, int] = {
     UserRole.OPERATOR: 1,
     UserRole.REVIEWER: 2,
@@ -161,6 +163,71 @@ async def current_user_allow_query_token(
         raise _UNAUTHORIZED
     payload = _decode_typed_token(resolved_token, "access")
     return await _load_active_user(payload, session)
+
+
+def _machine_secret() -> str:
+    """Khóa ký token máy. Rỗng thì dùng chung `jwt_secret`."""
+    settings = get_settings()
+    return settings.machine_token_secret or settings.jwt_secret
+
+
+def create_machine_token(job_id: str, expires_in: timedelta) -> str:
+    """Ký token cho MỘT training job chạy trên máy GPU thuê.
+
+    Token này KHÔNG gắn với user nào và không có `sub`, nên `current_user` từ
+    chối nó — máy thuê không mượn được quyền của người bấm Train. Chiều ngược
+    lại cũng chặn: access token của user không có `job_id` nên
+    `current_machine_job` từ chối.
+
+    `expires_in` phải dài hơn thời gian train tối đa (`runpod_max_hours`):
+    token chết giữa chừng thì máy GPU train xong nhưng không đẩy được
+    checkpoint về, mất trắng cả lần chạy.
+    """
+    now = datetime.now(UTC)
+    payload: dict[str, Any] = {
+        "job_id": job_id,
+        "type": MACHINE_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + expires_in,
+    }
+    return jwt.encode(payload, _machine_secret(), algorithm="HS256")
+
+
+def decode_machine_token(token: str) -> str:
+    """Trả `job_id` trong token máy; ném 401 nếu sai chữ ký, hết hạn, hoặc sai loại."""
+    try:
+        payload = jwt.decode(token, _machine_secret(), algorithms=["HS256"])
+    except jwt.PyJWTError as exc:
+        raise _UNAUTHORIZED from exc
+    job_id = payload.get("job_id")
+    if payload.get("type") != MACHINE_TOKEN_TYPE or not job_id:
+        raise _UNAUTHORIZED
+    return str(job_id)
+
+
+def current_machine_job(
+    job_id: str,
+    token: str | None = Depends(oauth2_scheme),
+) -> str:
+    """Dependency FastAPI cho ba endpoint mà máy GPU thuê gọi ngược về server:
+    tải dataset, đẩy log, đẩy checkpoint.
+
+    CHỈ dùng cho ba endpoint đó. Token máy không tra CSDL và không có user, nên
+    gắn nhầm dependency này lên một endpoint người dùng sẽ bỏ qua toàn bộ kiểm
+    tra vai trò.
+
+    Token phải mang đúng `job_id` của đường dẫn: token của job A gọi sang job B
+    bị từ chối, nên một máy thuê bị chiếm quyền cũng chỉ chạm được đúng job của
+    nó.
+    """
+    if not token:
+        raise _UNAUTHORIZED
+    if decode_machine_token(token) != job_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token máy không khớp training job",
+        )
+    return job_id
 
 
 def require_min_role(
