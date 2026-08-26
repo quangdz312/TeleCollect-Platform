@@ -216,7 +216,11 @@ class TrainingJobManager:
             "--rollout-every-n-epochs", str(config["rollout_every_n_epochs"]),
             "--rollout-episodes", str(config["rollout_episodes"]),
             "--rollout-horizon", str(config["rollout_horizon"]),
+            "--wandb-enabled" if config.get("wandb_enabled") else "--no-wandb-enabled",
+            "--wandb-project", str(config.get("wandb_project", "telecollect-robot-learning")),
         ]
+        if config.get("wandb_entity"):
+            command.extend(["--wandb-entity", str(config["wandb_entity"])])
         if config.get("save_every_n_epochs") is not None:
             command.extend(["--save-every-n-epochs", str(config["save_every_n_epochs"])])
         return command
@@ -275,6 +279,22 @@ class TrainingJobManager:
                 self._processes.pop(job_id, None)
 
     def _finish_cancelled(self, record: dict[str, Any]) -> None:
+        # A user may cancel while optional post-training work (for example,
+        # W&B artifact upload) is running. Preserve a completed model as a
+        # successful training run so its local checkpoints remain evaluable.
+        expected_epochs = int(record.get("config", {}).get("epochs", 0))
+        output_dir = Path(record["output_dir"])
+        training_completed = (
+            expected_epochs > 0
+            and int(record.get("epoch", 0)) >= expected_epochs
+            and any(output_dir.rglob("*.pth"))
+        )
+        if training_completed:
+            record["status"] = JobStatus.SUCCEEDED
+            record["cancel_requested"] = False
+            record["finished_at"] = _now()
+            self._write(record)
+            return
         record["status"] = JobStatus.CANCELLED
         record["finished_at"] = _now()
         self._write(record)

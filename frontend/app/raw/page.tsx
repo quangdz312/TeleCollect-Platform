@@ -64,6 +64,7 @@ export default function RawEpisodesPage() {
   const [summary, setSummary] = useState<RawEpisodeSummary>({
     total: 0, teleop: 0, scripted: 0, successes: 0, failures: 0,
     pending: 0, approved: 0, rejected: 0, archived: 0,
+    by_task: {}, by_quality: {}, by_batch: {}, by_day: {}, undated: 0,
   });
   const [tasks, setTasks] = useState<string[]>([]);
   const [batches, setBatches] = useState<string[]>([]);

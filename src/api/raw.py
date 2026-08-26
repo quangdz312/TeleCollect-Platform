@@ -223,13 +223,21 @@ def _scripted_episode(
     control_hz_value = provenance.get("control_hz", 20.0)
     control_hz = float(control_hz_value) if isinstance(control_hz_value, (int, float)) else 20.0
     length = int(record.get("length") or 0)
+    created_at = None
+    try:
+        source_path = workspace().resolve_source(str(record.get("source") or ""))
+        created_at = datetime.fromtimestamp(source_path.stat().st_mtime, UTC)
+    except (FileNotFoundError, OSError, ValueError):
+        # Legacy score records do not carry a timestamp. Keeping it unknown is
+        # safer than inventing a collection date when the source artifact is gone.
+        pass
 
     return RawEpisodeResponse(
         episode_id=str(record["episode_id"]),
         display_name=str(record.get("display_name") or record.get("demo") or record["episode_id"]),
         source="scripted",
         task=_canonical_task(str(record["task"])),
-        created_at=None,
+        created_at=created_at,
         length=length,
         duration_s=length / control_hz,
         control_hz=control_hz,
@@ -555,6 +563,39 @@ async def list_raw_episodes(
         approved=sum(item.review_status == "approved" for item in items),
         rejected=sum(item.review_status == "rejected" for item in items),
         archived=sum(item.review_status == "archived" for item in items),
+        by_task={
+            task_name: sum(item.task == task_name for item in items)
+            for task_name in sorted({item.task for item in items})
+        },
+        by_quality={
+            quality: sum(item.quality == quality for item in items)
+            for quality in ("clean", "good", "medium", "poor")
+        },
+        by_batch={
+            batch: sum(item.collection_batch_id == batch for item in items)
+            for batch in sorted({
+                item.collection_batch_id
+                for item in items
+                if item.collection_batch_id is not None
+            })
+        },
+        by_day={
+            day: {
+                source: sum(
+                    item.created_at is not None
+                    and item.created_at.date().isoformat() == day
+                    and item.source == source
+                    for item in items
+                )
+                for source in ("teleop", "scripted")
+            }
+            for day in sorted({
+                item.created_at.date().isoformat()
+                for item in items
+                if item.created_at is not None
+            })
+        },
+        undated=sum(item.created_at is None for item in items),
     )
     return RawEpisodePageResponse(
         items=items[start : start + page_size],

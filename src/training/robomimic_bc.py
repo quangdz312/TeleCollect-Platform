@@ -43,6 +43,9 @@ class BCTrainingPlan:
     rollout_every_n_epochs: int = 20
     rollout_episodes: int = 5
     rollout_horizon: int = 500
+    wandb_enabled: bool = False
+    wandb_project: str = "telecollect-robot-learning"
+    wandb_entity: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -70,6 +73,9 @@ def inspect_training_dataset(
     rollout_every_n_epochs: int = 20,
     rollout_episodes: int = 5,
     rollout_horizon: int = 500,
+    wandb_enabled: bool = False,
+    wandb_project: str = "telecollect-robot-learning",
+    wandb_entity: str | None = None,
 ) -> tuple[BCTrainingPlan, ValidationResult]:
     if policy not in {"bc", "bc-rnn"}:
         raise ValueError(f"Policy không được hỗ trợ: {policy}")
@@ -119,6 +125,9 @@ def inspect_training_dataset(
         rollout_every_n_epochs=rollout_every_n_epochs,
         rollout_episodes=rollout_episodes,
         rollout_horizon=rollout_horizon,
+        wandb_enabled=wandb_enabled,
+        wandb_project=wandb_project,
+        wandb_entity=wandb_entity,
     ), result
 
 
@@ -141,7 +150,10 @@ def make_robomimic_config(plan: BCTrainingPlan):
     config.experiment.rollout.terminate_on_success = True
     config.experiment.render_video = False
     config.experiment.logging.log_tb = True
-    config.experiment.logging.log_wandb = False
+    # RoboMimic reports per-epoch train / validation / rollout metrics to W&B.
+    # Keeping this opt-in avoids making a W&B account a runtime requirement.
+    config.experiment.logging.log_wandb = plan.wandb_enabled
+    config.experiment.logging.wandb_proj_name = plan.wandb_project
     config.experiment.save.enabled = True
     config.experiment.save.every_n_epochs = (
         plan.save_every_n_epochs or max(1, plan.epochs // 5)
@@ -179,10 +191,60 @@ def make_robomimic_config(plan: BCTrainingPlan):
     return config
 
 
+def _log_wandb_artifacts(plan: BCTrainingPlan) -> None:
+    """Upload immutable training inputs and output checkpoints after a run.
+
+    RoboMimic owns the live metric logging. This separate, best-effort run
+    records the input dataset and generated checkpoints without turning a
+    successful local training job into a failure when W&B is unavailable.
+    """
+    if not plan.wandb_enabled:
+        return
+    try:
+        import wandb
+
+        with wandb.init(
+            project=plan.wandb_project,
+            entity=plan.wandb_entity,
+            name=f"{plan.name}-artifacts",
+            job_type="artifact",
+            config=plan.to_dict(),
+        ) as run:
+            dataset = wandb.Artifact(
+                name=f"{plan.name}-dataset",
+                type="dataset",
+                metadata={
+                    "format": "robomimic-hdf5",
+                    "source_path": plan.dataset,
+                    "train_demos": plan.train_demos,
+                    "valid_demos": plan.valid_demos,
+                },
+            )
+            dataset.add_file(plan.dataset, name=Path(plan.dataset).name)
+            run.log_artifact(dataset)
+
+            checkpoints = sorted(Path(plan.output_dir).rglob("*.pth"))
+            if checkpoints:
+                model = wandb.Artifact(
+                    name=f"{plan.name}-checkpoints",
+                    type="model",
+                    metadata={"policy": plan.policy, "dataset": Path(plan.dataset).name},
+                )
+                for checkpoint in checkpoints:
+                    model.add_file(
+                        str(checkpoint),
+                        name=str(checkpoint.relative_to(plan.output_dir)),
+                    )
+                run.log_artifact(model)
+    except Exception as exc:  # W&B must not invalidate completed local training.
+        print(f"W&B artifact upload skipped: {exc}")
+
+
 def run_training(plan: BCTrainingPlan) -> None:
     config = make_robomimic_config(plan)
     try:
         import torch
+        import robomimic.macros as robomimic_macros
         from robomimic.scripts.train import train
         from robomimic.utils import torch_utils
     except ImportError as exc:
@@ -198,4 +260,8 @@ def run_training(plan: BCTrainingPlan) -> None:
         device = torch.device("cuda")
     else:
         device = torch_utils.get_torch_device(try_to_use_cuda=True)
+    if plan.wandb_enabled and plan.wandb_entity:
+        # RoboMimic reads this global when it initializes its W&B logger.
+        robomimic_macros.WANDB_ENTITY = plan.wandb_entity
     train(config, device=device)
+    _log_wandb_artifacts(plan)
