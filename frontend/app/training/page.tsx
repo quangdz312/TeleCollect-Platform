@@ -40,6 +40,9 @@ const INITIAL_FORM: TrainingRequest = {
   rollout_every_n_epochs: 20,
   rollout_episodes: 5,
   rollout_horizon: 500,
+  wandb_enabled: false,
+  wandb_project: "telecollect-robot-learning",
+  wandb_entity: null,
 };
 
 const RUN_PREFERENCES_KEY = "training-run-preferences-v1";
@@ -48,6 +51,16 @@ type RunPreferences = {
   archived: string[];
   pinned: string[];
 };
+
+function wandbProjectUrl(run: TrainingRun): string | null {
+  const config = run.config;
+  if (!config.wandb_enabled || typeof config.wandb_entity !== "string" || !config.wandb_entity) {
+    return null;
+  }
+  const project = typeof config.wandb_project === "string" ? config.wandb_project : "";
+  if (!project) return null;
+  return `https://wandb.ai/${encodeURIComponent(config.wandb_entity)}/${encodeURIComponent(project)}`;
+}
 
 export default function TrainingPage() {
   const { user } = useAuth();
@@ -104,6 +117,7 @@ export default function TrainingPage() {
     );
     return Array.from(new Map(important.map((checkpoint) => [checkpoint.id, checkpoint])).values());
   }, [selected?.checkpoints, showAllCheckpoints]);
+  const selectedWandbUrl = selected ? wandbProjectUrl(selected) : null;
 
   useEffect(() => {
     try {
@@ -387,6 +401,22 @@ export default function TrainingPage() {
                     <NumberField label="Training rollout horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} />
                   </>
                 )}
+                <Field label="Weights & Biases">
+                  <Select value={form.wandb_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, wandb_enabled: event.target.value === "yes" })}>
+                    <option value="no">Disabled</option>
+                    <option value="yes">Track this run</option>
+                  </Select>
+                </Field>
+                {form.wandb_enabled && (
+                  <>
+                    <Field label="W&B project">
+                      <Input value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
+                    </Field>
+                    <Field label="W&B entity" hint="Your W&B username or team name">
+                      <Input value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
+                    </Field>
+                  </>
+                )}
               </div>
               {selectedTrainingDataset && (
                 <div className="mt-3">
@@ -397,6 +427,9 @@ export default function TrainingPage() {
               )}
               {form.normalize_observations && (
                 <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
+              )}
+              {form.wandb_enabled && !form.wandb_entity && (
+                <div className="mt-3"><Alert tone="info">Enter a W&B entity to enable the Open W&B button for this run.</Alert></div>
               )}
               <div className="mt-4 flex items-center gap-3">
                 <Button variant="primary" disabled={busy || !trainingEnabled || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
@@ -458,7 +491,7 @@ export default function TrainingPage() {
 
         {!selected ? <Empty>Select a training run to see its details.</Empty> : (
           <div className="space-y-5">
-            <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge><Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}>Delete</Button>}</div>}>
+            <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge>{selectedWandbUrl && <Button variant="success" onClick={() => window.open(selectedWandbUrl, "_blank", "noopener,noreferrer")}>Open W&B</Button>}<Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}>Delete</Button>}</div>}>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Stat label="Epoch" value={`${currentEpoch} / ${totalEpochs}`} />
                 <Stat label="Train loss" value={selected.train_loss == null ? "—" : selected.train_loss.toFixed(6)} />

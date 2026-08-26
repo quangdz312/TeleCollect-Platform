@@ -164,7 +164,9 @@ async def test_raw_list_combines_teleop_and_scripted(client, db_session, raw_wor
     assert by_id[teleop.id]["cameras"] == {"front": True, "birdview": True, "wrist": True}
     assert by_id["lift_clean_seed0.hdf5::demo_0"]["source"] == "scripted"
     assert by_id["lift_clean_seed0.hdf5::demo_0"]["quality"] == "clean"
-    assert body["summary"] == {
+    summary = body["summary"]
+    by_day = summary.pop("by_day")
+    assert summary == {
         "total": 3,
         "teleop": 1,
         "scripted": 2,
@@ -174,7 +176,13 @@ async def test_raw_list_combines_teleop_and_scripted(client, db_session, raw_wor
         "approved": 2,
         "rejected": 0,
         "archived": 0,
+        "by_task": {"can": 1, "lift_cube": 2},
+        "by_quality": {"clean": 1, "good": 0, "medium": 0, "poor": 1},
+        "by_batch": {"batch-1": 1},
+        "undated": 1,
     }
+    assert sum(day["teleop"] for day in by_day.values()) == 1
+    assert sum(day["scripted"] for day in by_day.values()) == 1
     assert body["available_tasks"] == ["can", "lift_cube"]
     assert body["available_batches"] == ["batch-1"]
     assert by_id["lift_clean_seed0.hdf5::demo_0"]["task"] == "lift_cube"
