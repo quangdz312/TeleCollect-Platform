@@ -151,54 +151,81 @@ phí.** Các lần sau nhanh hơn nhiều.
 
 ---
 
-## E6. Cấu hình server
+## E6. Triển khai lên server
 
-### Tìm thư mục triển khai
+Đường dẫn lấy từ `docs/DEPLOYMENT_STAGING.md` — không cần dò nữa:
 
-`ls ~` của user `deploy` trống nên chưa biết compose file nằm đâu. Chạy trước:
+| Đường dẫn | Chứa gì |
+|---|---|
+| `/srv/telecollect/app` | Mã nguồn, chỗ chạy `docker compose` |
+| `/srv/telecollect/secrets/.env.production` | Cấu hình bí mật, quyền 600 |
+| `/srv/telecollect/data` | Dữ liệu, gắn vào `/app/data` trong container |
+
+### 1. Lấy mã nguồn mới
 
 ```bash
-docker inspect app-backend-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-docker inspect app-backend-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+cd /srv/telecollect/app
+git pull origin main
 ```
 
-Lệnh đầu cho biết chỗ sửa `.env`, lệnh sau cho biết dataset nằm ở đâu trên máy chủ.
+### 2. Thêm cấu hình
 
-### Thêm cấu hình
+```bash
+sudo nano /srv/telecollect/secrets/.env.production
+```
 
-Vào thư mục vừa tìm được, thêm vào `.env`:
+Sửa hai dòng đã có sẵn (đang là `false`):
+
+```
+TRAINING_ENABLED=true
+NEXT_PUBLIC_TRAINING_ENABLED=true
+```
+
+**Phải sửa cả hai.** Dòng đầu cho backend nhận job, dòng sau cho giao diện hiện
+nút Train — chỉ sửa một cái thì trang Training vẫn báo "chưa khả dụng".
+
+Thêm mới sáu dòng:
 
 ```
 TRAINING_RUNNER=runpod
-TRAINING_ENABLED=true
-RUNPOD_API_KEY=rpa_...
-RUNPOD_ENDPOINT_ID=abc123def456
+RUNPOD_API_KEY=<khóa lấy ở E1>
+RUNPOD_ENDPOINT_ID=y21vsntfwzoglp
 RUNPOD_MAX_HOURS=1
-PUBLIC_BASE_URL=https://<tên miền server>
-MACHINE_TOKEN_SECRET=<chuỗi ngẫu nhiên>
+PUBLIC_BASE_URL=https://<PROJECT_DOMAIN đang dùng>
+MACHINE_TOKEN_SECRET=<sinh bằng lệnh dưới>
 ```
 
-Sinh chuỗi ngẫu nhiên cho dòng cuối:
+Sinh khóa ký token máy:
 
 ```bash
 openssl rand -hex 32
 ```
 
-**`PUBLIC_BASE_URL` phải là địa chỉ truy cập được từ internet.** Máy GPU thuê
-nằm ở mạng khác nên `localhost` hay IP nội bộ đều không dùng được. Nếu server
-đang chạy qua Caddy với tên miền thì điền đúng tên miền đó, kèm `https://`.
+`PUBLIC_BASE_URL` lấy đúng giá trị `PROJECT_DOMAIN` đang có trong file đó, thêm
+`https://` ở đầu. Máy GPU thuê nằm ở mạng khác nên phải là địa chỉ truy cập
+được từ internet — `localhost` hay IP nội bộ đều vô dụng.
 
-### Khởi động lại
-
-```bash
-docker compose up -d backend
-```
-
-Kiểm tra:
+### 3. Dựng lại và khởi động
 
 ```bash
-docker compose logs backend --tail 30
+cd /srv/telecollect/app
+docker compose   --env-file /srv/telecollect/secrets/.env.production   -f docker-compose.prod.yml build
+
+docker compose   --env-file /srv/telecollect/secrets/.env.production   -f docker-compose.prod.yml up -d
 ```
+
+Frontend phải dựng lại chứ không chỉ khởi động lại: `NEXT_PUBLIC_*` được nhúng
+vào lúc build, đổi giá trị mà không build lại thì giao diện vẫn dùng giá trị cũ.
+
+### 4. Kiểm tra
+
+```bash
+docker compose   --env-file /srv/telecollect/secrets/.env.production   -f docker-compose.prod.yml ps
+
+docker compose   --env-file /srv/telecollect/secrets/.env.production   -f docker-compose.prod.yml logs backend --tail=50
+```
+
+Ba container phải `Up`, backend `healthy`.
 
 ---
 

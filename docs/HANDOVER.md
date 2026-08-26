@@ -147,6 +147,38 @@ còn lại vẫn chạy. Cài bằng `choco install ffmpeg` trên Windows.
 
 **Tải lên chỉ nhận video.** Ai đã có sẵn dữ liệu robomimic thì không đưa vào được.
 
+### Câu hỏi thiết kế đã xem xét
+
+**Có nên gộp trang Review và trang Raw không?** Đã đọc mã nguồn và kết luận
+**không**. Hai trang trông giống nhau nhưng làm hai việc khác hẳn:
+
+| | Review | Raw |
+|---|---|---|
+| Nguồn dữ liệu | Bảng `episodes` (chỉ teleop) | **Cả teleop lẫn scripted** |
+| Hành động | approve / reject / trim / gắn nhãn | quality / tags / archive / export |
+| Bản chất | Phán quyết một episode đạt hay không | Tổ chức kho dữ liệu |
+
+`_resolve_source()` trong `src/api/raw.py` cho thấy Raw đọc hai kho: bảng
+`episodes` cho teleop và tệp điểm số cho scripted. Gộp lại thì Review phải hiểu
+cả dữ liệu scripted, mà scripted không có khái niệm approve/reject của người
+chấm — trang gộp sẽ đầy điều kiện "nếu teleop thì hiện nút này".
+
+`RawEpisodeManagement` còn được thiết kế là **lớp phủ**: tệp gốc và bản ghi
+nguồn giữ nguyên bất biến, thay đổi quản lý nằm ở bảng riêng có `version` chống
+ghi đè. Gộp vào Review sẽ phá kiến trúc đó.
+
+**Nhưng cảm giác trùng lặp là có thật, và nằm ở chỗ khác:** cả `Episode.note`
+(Review) lẫn `RawEpisodeManagement.note` (Raw) đều tồn tại trên cùng một episode
+teleop. Người kiểm duyệt ghi ở một chỗ, người quản lý dữ liệu ghi ở chỗ kia, và
+hai bên không thấy ghi chú của nhau.
+
+Ba việc nên làm thay vì gộp trang:
+
+- Nối hai trang bằng liên kết hai chiều theo `episode_id`
+- Hiển thị chéo, chỉ đọc: Raw hiện trạng thái duyệt, Review hiện nhãn chất lượng
+- Xử lý hai ô ghi chú — gộp làm một, hoặc đặt tên rõ ("Ghi chú kiểm duyệt" và
+  "Ghi chú quản lý")
+
 ### Bẫy môi trường
 
 **Máy Windows có hai GPU** cần đặt biến môi trường chọn card rời **trước khi** tạo

@@ -4,10 +4,22 @@ Tài liệu giao việc. Viết cho người code tiếp — mô tả **kiến t
 yêu cầu, cách nghiệm thu** cho từng phần. Không chứa code hoàn chỉnh, chỉ chứa
 chữ ký hàm và hình dạng dữ liệu để hai đầu khớp nhau.
 
-**Trạng thái: A, B, D đã cài đặt xong** trên nhánh `feat/runpod-training`
-(439 test đạt, tăng từ 385). Còn lại **C** (dựng container image) và **E** (tạo
-endpoint trên RunPod rồi triển khai) — hai phần này cần tài khoản Docker Hub và
-RunPod nên phải làm thủ công trên web.
+**Trạng thái: A, B, C, D xong. E còn bước triển khai.**
+
+| Phần | Trạng thái |
+|---|---|
+| A — Backend hai chế độ | Xong, 439 test đạt |
+| B — Handler máy GPU | Xong, chưa chạy thử với GPU thật |
+| C — Container image | Xong — `pakerpp/telecollect-train:v1` trên Docker Hub, Public |
+| D — Token máy | Xong |
+| E — Endpoint + triển khai | Endpoint đã tạo (`y21vsntfwzoglp`), **chưa cấu hình server** |
+
+Đã chạy thử trên RunPod thật với payload giả: worker dựng trong 12.5 giây,
+handler được gọi và trả đúng lỗi thiết kế (`Thiếu trường: config`). Chứng tỏ
+image kéo về được, Python khởi động được, handler hoạt động. Chi phí ~0.002 USD.
+
+**Chưa chạy thử đầu cuối với GPU và dữ liệu thật** — xem `docs/runpod-setup.md`
+mục E6 để triển khai.
 
 ---
 
