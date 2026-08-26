@@ -4,8 +4,8 @@
 # trong khi server chỉ nhận dữ liệu và điều phối, không train.
 #
 # Build và đẩy lên Docker Hub:
-#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v1 .
-#   docker push <tài-khoản>/telecollect-train:v1
+#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v2 .
+#   docker push <tài-khoản>/telecollect-train:v2
 #
 # Đặt tag phiên bản, đừng dùng `latest`: RunPod cache image, `latest` khiến
 # không biết endpoint đang chạy bản nào.
@@ -57,13 +57,21 @@ RUN pip install -r requirements.txt
 # robomimic 0.5 chỉ có trên GitHub (PyPI dừng ở 0.3.0). `--no-deps` để nó
 # không kéo numpy lên 2.x — numba (qua dvc) và robosuite đều cần bản 1.x mà
 # requirements.txt đã ghim.
+#
+# Nhưng `--no-deps` bỏ luôn cả phụ thuộc thật sự cần, nên phải cài tay:
+# `robomimic/utils/file_utils.py` import `huggingface_hub` ngay ở đầu module,
+# nên thiếu nó thì `from robomimic.scripts.train import train` hỏng và job
+# thất bại với mã 1 trước cả epoch đầu tiên (đã gặp trên image v1).
+# Danh sách này lấy từ phần hướng dẫn cài tay trong `requirements-train.txt`.
 RUN pip install --no-deps \
         "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5" \
     && pip install imageio imageio-ffmpeg tensorboard tensorboardX matplotlib \
+    && pip install huggingface-hub diffusers transformers safetensors \
     && pip install "numpy>=1.26.0,<2.0.0"
 
-# SDK của RunPod: chỉ image này cần, nên không nằm trong requirements.txt.
-RUN pip install runpod>=1.6.0
+# SDK của RunPod và W&B: chỉ image này cần, nên không nằm trong requirements.txt.
+# `wandb` đến từ PR #29 — image v1 dựng trước đó nên không có, bật W&B sẽ hỏng.
+RUN pip install runpod>=1.6.0 wandb>=0.19.0
 
 # Cùng lý do như image server — xem ghi chú ở `Dockerfile`. MUJOCO_GL chọn
 # backend của MuJoCo, còn PyOpenGL có bộ dò nền riêng mặc định chọn GLX và
