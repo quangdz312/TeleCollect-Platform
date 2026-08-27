@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TeleCollect Local</title><link rel="stylesheet" href="/style.css"></head>
+<body><header><strong>TC&nbsp; TeleCollect Local</strong><nav><a href="#collect">Collect</a><a href="#library">Library</a><a href="#export">Export HDF5</a><a href="#settings">Settings</a></nav></header>
+<main><section id="home"><h1>Local data collection</h1><p>Your simulator, videos, episodes and exports stay on this computer.</p><div class="stats" id="stats"></div></section>
+<section id="collect"><h2>Collect</h2><p>Choose a task. The collector opens in its own GPU-enabled window.</p><div id="tasks" class="cards"></div></section>
+<section id="library"><h2>Library</h2><p>Rejecting an episode only excludes it from the default local export; it never deletes the recording.</p><div id="episodes"></div></section>
+<section id="export"><h2>Export RoboMimic HDF5</h2><label>Name <input id="export-name" value="local-dataset"></label><label>Policy <select id="export-mode"><option value="exclude_rejected">Exclude rejected</option><option value="all">All episodes</option><option value="selected">Selected episodes</option></select></label><button id="export-button">Export HDF5</button><p id="export-result"></p></section>
+<section id="settings"><h2>Settings</h2><p id="data-dir"></p></section></main><script src="/app.js"></script></body></html>

@@ -102,19 +102,27 @@ def _write_scripted_workspace(root: Path) -> None:
     import h5py
     import numpy as np
 
+    # A complete demo, not a stub: importing a batch rescores the whole corpus,
+    # so every file here has to be loadable by `src.labeling.features`.
     with h5py.File(datasets / "lift_clean_seed0.hdf5", "w") as handle:
         demo = handle.create_group("data").create_group("demo_0")
+        demo.attrs["telecollect_task"] = "lift"
+        demo.attrs["telecollect_requested_quality"] = "clean"
+        demo.attrs["num_samples"] = 90
+        demo.attrs["success"] = True
         demo.create_dataset("actions", data=np.arange(630, dtype=float).reshape(90, 7) / 100)
         demo.create_dataset("rewards", data=np.linspace(0, 1, 90))
+        demo.create_dataset("dones", data=np.zeros(90, dtype=np.int64))
         demo.create_dataset("states", data=np.zeros((90, 12)))
-        obs = demo.create_group("obs")
-        obs.create_dataset("robot0_eef_pos", data=np.zeros((90, 3)))
-        obs.create_dataset("robot0_eef_quat", data=np.zeros((90, 4)))
-        obs.create_dataset("robot0_joint_pos", data=np.zeros((90, 7)))
-        obs.create_dataset("robot0_joint_vel", data=np.zeros((90, 7)))
-        obs.create_dataset("robot0_gripper_qpos", data=np.zeros((90, 2)))
-        obs.create_dataset("robot0_gripper_qvel", data=np.zeros((90, 2)))
-        obs.create_dataset("object", data=np.zeros((90, 14)))
+        for group_name in ("obs", "next_obs"):
+            obs = demo.create_group(group_name)
+            obs.create_dataset("robot0_eef_pos", data=np.zeros((90, 3)))
+            obs.create_dataset("robot0_eef_quat", data=np.zeros((90, 4)))
+            obs.create_dataset("robot0_joint_pos", data=np.zeros((90, 7)))
+            obs.create_dataset("robot0_joint_vel", data=np.zeros((90, 7)))
+            obs.create_dataset("robot0_gripper_qpos", data=np.zeros((90, 2)))
+            obs.create_dataset("robot0_gripper_qvel", data=np.zeros((90, 2)))
+            obs.create_dataset("object", data=np.zeros((90, 14)))
     videos = root / "videos"
     videos.mkdir()
     (videos / "lift_clean_seed0__demo_0.mp4").write_bytes(b"scripted-video")
@@ -447,3 +455,246 @@ async def test_raw_detail_returns_404(client, db_session, raw_workspace):
     response = await client.get(f"{API}/missing", headers=_auth_headers(reviewer))
 
     assert response.status_code == 404
+
+
+# --- Đợt thu ----------------------------------------------------------------
+
+BATCHES = "/api/v1/raw/batches"
+
+
+@pytest.mark.asyncio
+async def test_batches_require_reviewer(client, db_session, raw_workspace):
+    operator = await _create_user(db_session, "batch_operator", UserRole.OPERATOR)
+
+    response = await client.get(BATCHES, headers=_auth_headers(operator))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_batch_seen_only_in_provenance_still_shows_up(
+    client, db_session, raw_workspace
+):
+    """Đợt thu cũ chưa ai đặt tên vẫn phải hiện, nếu không là mất dữ liệu."""
+    reviewer = await _create_user(db_session, "batch_reader", UserRole.REVIEWER)
+
+    response = await client.get(BATCHES, headers=_auth_headers(reviewer))
+
+    assert response.status_code == 200
+    batches = response.json()
+    assert [item["id"] for item in batches] == ["batch-1"]
+    batch = batches[0]
+    assert batch["named"] is False
+    assert batch["name"] == "batch-1"
+    assert batch["episodes"] == 1
+    assert batch["scripted"] == 1
+    assert batch["teleop"] == 0
+    assert batch["approved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_naming_a_batch_keeps_its_existing_episodes(
+    client, db_session, raw_workspace
+):
+    """Đặt tên cho đợt đã có dữ liệu không được làm số liệu về 0."""
+    reviewer = await _create_user(db_session, "batch_namer", UserRole.REVIEWER)
+    headers = _auth_headers(reviewer)
+
+    created = await client.post(
+        BATCHES,
+        headers=headers,
+        json={"id": "batch-1", "name": "Lift đợt 1", "task_name": "lift"},
+    )
+
+    assert created.status_code == 201
+    body = created.json()
+    assert body["named"] is True
+    assert body["name"] == "Lift đợt 1"
+    assert body["episodes"] == 1
+    assert body["approved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_creating_the_same_batch_twice_conflicts(
+    client, db_session, raw_workspace
+):
+    reviewer = await _create_user(db_session, "batch_dup", UserRole.REVIEWER)
+    headers = _auth_headers(reviewer)
+    payload = {"id": "batch-1", "name": "Lần đầu"}
+    assert (await client.post(BATCHES, headers=headers, json=payload)).status_code == 201
+
+    again = await client.post(BATCHES, headers=headers, json=payload)
+
+    assert again.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_renames_a_batch(client, db_session, raw_workspace):
+    reviewer = await _create_user(db_session, "batch_editor", UserRole.REVIEWER)
+    headers = _auth_headers(reviewer)
+    await client.post(BATCHES, headers=headers, json={"id": "batch-1", "name": "Cũ"})
+
+    response = await client.patch(
+        f"{BATCHES}/batch-1", headers=headers, json={"name": "Mới", "description": "ghi chú"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Mới"
+    assert response.json()["description"] == "ghi chú"
+
+
+@pytest.mark.asyncio
+async def test_archived_batch_hidden_unless_asked_for(client, db_session, raw_workspace):
+    reviewer = await _create_user(db_session, "batch_archiver", UserRole.REVIEWER)
+    headers = _auth_headers(reviewer)
+    await client.post(BATCHES, headers=headers, json={"id": "batch-1", "name": "Xong"})
+    await client.patch(f"{BATCHES}/batch-1", headers=headers, json={"archived": True})
+
+    hidden = await client.get(BATCHES, headers=headers)
+    shown = await client.get(f"{BATCHES}?include_archived=true", headers=headers)
+
+    assert hidden.json() == []
+    assert [item["id"] for item in shown.json()] == ["batch-1"]
+
+
+@pytest.mark.asyncio
+async def test_update_unknown_batch_is_404(client, db_session, raw_workspace):
+    reviewer = await _create_user(db_session, "batch_missing", UserRole.REVIEWER)
+
+    response = await client.patch(
+        f"{BATCHES}/nope", headers=_auth_headers(reviewer), json={"name": "x"}
+    )
+
+    assert response.status_code == 404
+
+
+# --- importing a batch folder from the desktop app ---------------------------
+
+
+def _app_batch_zip(tmp_path: Path, *, source: str = "lift_clean_seed77.hdf5") -> bytes:
+    """The zip a person makes from `<app workspace>/batches/<name>/`."""
+
+    from tests.test_batch_import import _archive, _episode_dir
+    import zipfile
+
+    staging = tmp_path / "app-batch"
+    root = staging / "Lift v9"
+    root.mkdir(parents=True)
+    (root / "batch.json").write_text(
+        json.dumps({"id": "abc", "name": "Lift v9", "task": "lift"}), encoding="utf-8",
+    )
+    _episode_dir(root, "lift_101", source=source, demo="demo_0")
+    _episode_dir(root, "lift_102", source=source, demo="demo_1")
+
+    archive_path = tmp_path / "app-batch.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for path in sorted(staging.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(staging).as_posix())
+    return archive_path.read_bytes()
+
+
+IMPORT_API = "/api/v1/raw/batches/{}/import"
+
+
+@pytest.mark.asyncio
+async def test_batch_import_requires_reviewer(client, db_session, raw_workspace, tmp_path):
+    operator = await _create_user(db_session, "import_operator", UserRole.OPERATOR)
+
+    response = await client.post(
+        IMPORT_API.format("lift-v9"),
+        headers=_auth_headers(operator),
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_batch_import_creates_the_batch_and_lists_its_episodes(
+    client, db_session, raw_workspace, tmp_path,
+):
+    reviewer = await _create_user(db_session, "import_reviewer", UserRole.REVIEWER)
+
+    response = await client.post(
+        IMPORT_API.format("lift-v9"),
+        headers=_auth_headers(reviewer),
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["episodes"] == 2
+    assert body["videos"] == 2
+    assert body["sources"] == ["lift_clean_seed77.hdf5"]
+    assert body["skipped"] == []
+    # The batch did not exist beforehand; batch.json supplied name and task.
+    assert body["batch"]["name"] == "Lift v9"
+    assert body["batch"]["task_name"] == "lift"
+    assert body["batch"]["named"] is True
+
+    listed = await client.get(
+        f"{API}?collection_batch_id=lift-v9", headers=_auth_headers(reviewer),
+    )
+    assert listed.status_code == 200
+    assert {item["episode_id"] for item in listed.json()["items"]} == {
+        "lift_clean_seed77.hdf5::demo_0",
+        "lift_clean_seed77.hdf5::demo_1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_batch_import_refuses_an_unsafe_batch_id(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """The id becomes part of a dataset filename."""
+
+    reviewer = await _create_user(db_session, "import_unsafe", UserRole.REVIEWER)
+
+    response = await client.post(
+        IMPORT_API.format("../escape"),
+        headers=_auth_headers(reviewer),
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+
+    assert response.status_code in {404, 422}
+
+
+@pytest.mark.asyncio
+async def test_batch_import_rejects_a_collection_run_already_present(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """`lift_clean_seed0.hdf5` is already in the fixture workspace."""
+
+    reviewer = await _create_user(db_session, "import_clash", UserRole.REVIEWER)
+
+    response = await client.post(
+        IMPORT_API.format("lift-v9"),
+        headers=_auth_headers(reviewer),
+        files={
+            "archive": (
+                "batch.zip",
+                _app_batch_zip(tmp_path, source="lift_clean_seed0.hdf5"),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "already in the workspace" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_batch_import_rejects_a_file_that_is_not_a_zip(
+    client, db_session, raw_workspace,
+):
+    reviewer = await _create_user(db_session, "import_garbage", UserRole.REVIEWER)
+
+    response = await client.post(
+        IMPORT_API.format("lift-v9"),
+        headers=_auth_headers(reviewer),
+        files={"archive": ("batch.zip", b"not a zip at all", "application/zip")},
+    )
+
+    assert response.status_code == 422
+    assert "zip" in response.json()["detail"].lower()

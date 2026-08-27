@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { SynchronizedPlayback } from "@/components/raw/SynchronizedPlayback";
 import { SignalTimeline } from "@/components/raw/SignalTimeline";
+import { VerdictPanel } from "@/components/raw/VerdictPanel";
 import { Alert, Badge, Button, Card, Empty, Stat } from "@/components/ui";
 import { bytes, duration, timeAgo } from "@/lib/format";
 import { RawApiError, rawApi, type RawEpisodeDetail as Detail } from "@/lib/raw";
@@ -110,9 +111,16 @@ export function RawEpisodeDetail({ episodeId }: { episodeId: string }) {
         <Stat label="Storage" value={episode.size_bytes === null ? "—" : bytes(episode.size_bytes)} hint="Episode-level size when available" />
       </div>
 
-      <Card title="Camera playback" subtitle="Shared transport keeps the available camera views on one episode clock.">
-        <SynchronizedPlayback episode={episode} onTimeChange={setPlaybackTime} seekRequest={seekRequest} />
-      </Card>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Card title="Camera playback" subtitle="Shared transport keeps the available camera views on one episode clock.">
+          <SynchronizedPlayback episode={episode} onTimeChange={setPlaybackTime} seekRequest={seekRequest} />
+        </Card>
+        <VerdictPanel
+          episode={episode}
+          reviewer={user.username}
+          onDecided={load}
+        />
+      </div>
 
       <Card title="Raw signal timeline" subtitle="Inspect actions and observations against the same clock as camera playback.">
         <SignalTimeline

@@ -24,6 +24,12 @@ from src.models.schemas import (
     TrainingJobRequest,
     TrainingJobResponse,
 )
+from src.training.runpod_runner import RunPodError
+
+# Số lần hỏi trạng thái hỏng liên tiếp trước khi coi là mất liên lạc thật.
+# Với `runpod_poll_interval_s` mặc định 10 giây thì đây là khoảng 5 phút —
+# đủ dài để đi qua một lần rớt mạng, đủ ngắn để không treo job hàng giờ.
+_MAX_POLL_FAILURES = 30
 
 _EPOCH_BLOCK = re.compile(
     r"(?P<kind>Train|Validation) Epoch (?P<epoch>\d+)\s*\n(?P<body>\{.*?\})",
@@ -329,6 +335,7 @@ class TrainingJobManager:
                 state = self.runner.start(record)
                 record["runner_state"] = state
                 self._write(record)
+            poll_failures = 0
             while True:
                 time.sleep(settings.runpod_poll_interval_s)
                 with self._lock:
@@ -336,7 +343,20 @@ class TrainingJobManager:
                     if record["cancel_requested"]:
                         break
                     snapshot = dict(record)
-                result = self.runner.poll(snapshot)
+                try:
+                    result = self.runner.poll(snapshot)
+                except RunPodError as exc:
+                    # Hỏi trạng thái hỏng KHÔNG có nghĩa là training hỏng: máy
+                    # GPU vẫn chạy và vẫn đẩy log về. Một lần rớt TLS mà đánh
+                    # dấu thất bại là vứt cả lần chạy đã trả tiền — đã gặp với
+                    # `_ssl.c:999 handshake timed out` trong khi job về đích.
+                    poll_failures += 1
+                    if poll_failures < _MAX_POLL_FAILURES:
+                        continue
+                    raise RunPodError(
+                        f"Mất liên lạc với RunPod sau {poll_failures} lần hỏi: {exc}"
+                    ) from exc
+                poll_failures = 0
                 status = result["status"]
                 if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
                     with self._lock:

@@ -327,6 +327,58 @@ class RawEpisodeSummaryResponse(BaseModel):
     undated: int = Field(default=0, ge=0)
 
 
+class CollectionBatchResponse(BaseModel):
+    """Một đợt thu, kèm số liệu đủ để dựng thẻ batch ở trang Raw episodes."""
+
+    id: str
+    name: str
+    task_name: str | None = None
+    description: str = ""
+    archived: bool = False
+    created_at: datetime | None = None
+    # False khi đợt thu chỉ tồn tại trong provenance của episode mà chưa ai tạo
+    # bản ghi mô tả. Giao diện dùng cờ này để mời người dùng đặt tên.
+    named: bool = True
+    episodes: int = Field(default=0, ge=0)
+    teleop: int = Field(default=0, ge=0)
+    scripted: int = Field(default=0, ge=0)
+    pending: int = Field(default=0, ge=0)
+    approved: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+
+
+class CollectionBatchCreateRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    name: str = Field(..., min_length=1, max_length=150)
+    task_name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str = Field(default="", max_length=2000)
+
+
+class CollectionBatchUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    task_name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    archived: bool | None = None
+
+
+class CollectionBatchImportSkip(BaseModel):
+    episode: str
+    reason: str
+
+
+class CollectionBatchImportResponse(BaseModel):
+    """Kết quả nạp một zip thư mục batch từ app vào workspace review."""
+
+    batch: CollectionBatchResponse
+    episodes: int = Field(default=0, ge=0)
+    videos: int = Field(default=0, ge=0)
+    #: Tên các file collection đã dựng lại trong `data/review/datasets`.
+    sources: list[str] = Field(default_factory=list)
+    # Nạp một phần vẫn là thành công, nhưng phải nói rõ bỏ sót cái gì thay vì
+    # im lặng đánh rơi bản ghi.
+    skipped: list[CollectionBatchImportSkip] = Field(default_factory=list)
+
+
 class RawEpisodePageResponse(BaseModel):
     items: list[RawEpisodeResponse]
     total: int = Field(..., ge=0)

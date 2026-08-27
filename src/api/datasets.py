@@ -22,13 +22,26 @@ cơ chế `?token=` như `GET /demos/{id}/playback` (client tải file trực ti
 qua link, không phải lúc nào cũng gắn được header `Authorization`).
 """
 
+import asyncio
 import json
 import logging
 import math
+import uuid
 from pathlib import Path
 
 import h5py
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -44,8 +57,11 @@ from src.models.schemas import (
     DemoResponse,
     PaginatedResponse,
 )
+from src.api.demos import UploadTooLargeError, _save_upload_chunked
+from src.config import get_settings
 from src.services import storage
 from src.services.dataset_builder import build_dataset
+from src.services.dataset_upload import DatasetUploadError, probe_robomimic
 from src.services.robomimic_dataset_builder import build_robomimic_dataset
 from src.services.security import current_user, current_user_allow_query_token, require_min_role
 from src.services.streaming import stream_file_range
@@ -326,6 +342,100 @@ async def create_dataset(
     else:
         background_tasks.add_task(build_dataset, dataset.id, session_factory(bind))
 
+    return DatasetResponse.model_validate(dataset)
+
+
+@router.post(
+    "/uploads", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED,
+)
+async def upload_dataset(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    overwrite: bool = Form(default=False),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_min_role(UserRole.REVIEWER)),
+) -> DatasetResponse:
+    """Nhận một file RoboMimic HDF5 dựng sẵn ở nơi khác và cho train luôn.
+
+    Khác `POST /datasets`: không có background build, vì file đã ở đúng định
+    dạng đích. Đổi lại nó cũng KHÔNG đi qua cổng review — không có episode nào
+    trong hệ thống để đối chiếu — nên `data_source` ghi là `unknown` và
+    `episode_inventory` để trống thay vì bịa ra danh sách.
+    """
+
+    dataset_name = name.strip()
+    if not dataset_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Dataset cần một cái tên",
+        )
+
+    settings = get_settings()
+    # Ghi thẳng vào vị trí cuối cùng theo `dataset.id` (UUID sinh nội bộ) để
+    # không phải chép lại một file có thể tới vài GB.
+    dataset_id = str(uuid.uuid4())
+    destination = storage.dataset_hdf5_path(dataset_id)
+    try:
+        try:
+            await _save_upload_chunked(
+                file, destination, settings.max_upload_mb * 1024 * 1024,
+            )
+        except UploadTooLargeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc),
+            ) from exc
+
+        try:
+            probe = await asyncio.to_thread(probe_robomimic, destination)
+        except DatasetUploadError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc),
+            ) from exc
+
+        existing = await session.scalar(
+            select(Dataset).where(Dataset.name == dataset_name),
+        )
+        if existing is not None:
+            if not overwrite:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Dataset '{dataset_name}' đã tồn tại",
+                )
+            old_path = (
+                Path(existing.zip_path)
+                if existing.zip_path
+                else storage.dataset_zip_path(existing.id)
+            )
+            await session.delete(existing)
+            await session.commit()
+            old_path.unlink(missing_ok=True)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+    dataset = Dataset(
+        id=dataset_id,
+        name=dataset_name,
+        task_names=probe.tasks,
+        include_failures=True,  # Không biết file đã lọc gì, nên không hứa là đã lọc.
+        status=DatasetStatus.READY,
+        zip_path=str(destination),
+        size_bytes=destination.stat().st_size,
+        num_episodes=probe.episodes,
+        num_frames=probe.frames,
+        data_source="unknown",
+        created_by=user.display_name or user.username,
+        exporter_version="upload",
+        schema_manifest={
+            "format": "robomimic-hdf5",
+            "action_dim": probe.action_dim,
+            "env_name": probe.env_name,
+            "uploaded": True,
+        },
+    )
+    session.add(dataset)
+    await session.commit()
+    await session.refresh(dataset)
     return DatasetResponse.model_validate(dataset)
 
 

@@ -1,0 +1,602 @@
+<title>TeleCollect Deck</title>
+<style>
+  :root {
+    --ink: #0F172A;
+    --ink-2: #1E293B;
+    --body: #334155;
+    --muted: #475569;
+    --line: #E2E8F0;
+    --wash: #F1F5F9;
+    --paper: #F8FAFC;
+    --card: #FFFFFF;
+    --accent: #9A3412;
+    --accent-soft: #FEF3EC;
+    --blue: #2563EB;
+    --blue-soft: #F0F9FF;
+    --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.05);
+  }
+  :root:not([data-theme="light"]) { color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #F1F5F9; --ink-2: #E2E8F0; --body: #CBD5E1; --muted: #94A3B8;
+      --line: #334155; --wash: #1E293B; --paper: #0B1220; --card: #131C2E;
+      --accent: #FB923C; --accent-soft: #2A1710; --blue: #60A5FA; --blue-soft: #10203A;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #F1F5F9; --ink-2: #E2E8F0; --body: #CBD5E1; --muted: #94A3B8;
+    --line: #334155; --wash: #1E293B; --paper: #0B1220; --card: #131C2E;
+    --accent: #FB923C; --accent-soft: #2A1710; --blue: #60A5FA; --blue-soft: #10203A;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--body);
+    font-family: 'Inter', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- Sân khấu: mỗi slide là khung 16:9 co theo bề rộng cửa sổ ---- */
+  .deck { width: 100%; }
+  .slide {
+    position: relative;
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto 28px;
+    aspect-ratio: 16 / 9;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    container-type: size;
+  }
+  /* cqh = 1% chiều cao slide → chữ co giãn theo khung, không theo cửa sổ */
+  .pad { position: absolute; inset: 0; padding: 7cqh 6cqw; display: flex; flex-direction: column; }
+
+  .eyebrow {
+    font-size: 2.1cqh; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 1.6cqh;
+  }
+  h1 { font-size: 9cqh; line-height: 1.04; margin: 0; color: var(--ink); font-weight: 800; letter-spacing: -.02em; }
+  h2 { font-size: 6.4cqh; line-height: 1.1; margin: 0 0 1cqh; color: var(--ink); font-weight: 800; letter-spacing: -.015em; }
+  .sub { font-size: 2.9cqh; line-height: 1.45; color: var(--muted); margin: 0 0 3.4cqh; max-width: 72ch; }
+  p { margin: 0; }
+  .num { position: absolute; right: 5cqw; bottom: 4cqh; font-size: 2cqh; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .grid { display: grid; gap: 2.4cqh 2.2cqw; }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+
+  .card {
+    background: var(--wash); border: 1px solid var(--line); border-radius: 10px;
+    padding: 3cqh 2cqw; display: flex; flex-direction: column; gap: 1.4cqh;
+  }
+  .card h3 { margin: 0; font-size: 3.1cqh; color: var(--ink); font-weight: 700; line-height: 1.2; }
+  .card p { font-size: 2.45cqh; line-height: 1.5; color: var(--body); }
+  .tag {
+    align-self: flex-start; font-size: 1.9cqh; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--accent); background: var(--accent-soft);
+    padding: .5cqh 1cqw; border-radius: 4px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 2.4cqh; }
+  th {
+    text-align: left; font-weight: 700; color: var(--ink); font-size: 2.1cqh;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 1.4cqh 1.2cqw; border-bottom: 2px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 1.5cqh 1.2cqw; border-bottom: 1px solid var(--line); color: var(--body); line-height: 1.35; vertical-align: top; }
+  td.k { color: var(--ink); font-weight: 700; white-space: nowrap; }
+  td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .note {
+    margin-top: auto; padding: 2cqh 2cqw; border-left: 3px solid var(--accent);
+    background: var(--accent-soft); border-radius: 0 8px 8px 0;
+    font-size: 2.5cqh; line-height: 1.45; color: var(--ink-2);
+  }
+  .note b { color: var(--ink); }
+  .note.blue { border-left-color: var(--blue); background: var(--blue-soft); }
+
+
+  /* Icon SVG ve tay: stroke an theo currentColor nen tu doi mau theo theme.
+     Khong dung emoji vi moi he dieu hanh render mot kieu va net khong dong bo. */
+  .ico {
+    width: 5.4cqh; height: 5.4cqh; flex: none; color: var(--accent);
+    stroke: currentColor; stroke-width: 1.6; fill: none;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .card .ico { margin-bottom: .4cqh; }
+  .chead { display: flex; align-items: center; gap: 1.1cqw; }
+  .chead .ico { margin-bottom: 0; width: 4.2cqh; height: 4.2cqh; }
+  .chead h3 { margin: 0; }
+  .step .ico { width: 4.4cqh; height: 4.4cqh; align-self: center; margin-bottom: .3cqh; }
+  .note .ico { width: 3.4cqh; height: 3.4cqh; vertical-align: -.7cqh; margin-right: .5cqw; }
+
+  .flow { display: flex; align-items: stretch; gap: 1.2cqw; }
+  .step {
+    flex: 1; background: var(--wash); border: 1px solid var(--line); border-radius: 10px;
+    padding: 2.6cqh 1.4cqw; text-align: center; display: flex; flex-direction: column; gap: .9cqh; justify-content: center;
+  }
+  .step .lab { font-size: 3cqh; font-weight: 800; color: var(--ink); }
+  .step .det { font-size: 2.1cqh; color: var(--muted); line-height: 1.35; }
+  .arrow { align-self: center; font-size: 3.4cqh; color: var(--accent); font-weight: 700; }
+
+  .bars { display: flex; flex-direction: column; gap: 1.5cqh; }
+  .bar { display: grid; grid-template-columns: 12cqw 1fr; align-items: center; gap: 1.2cqw; }
+  .bar .bl { font-size: 2.3cqh; font-weight: 700; color: var(--ink); }
+  .bar .track { display: flex; gap: .5cqw; align-items: center; }
+  .seg { height: 3.4cqh; border-radius: 3px; display: flex; align-items: center; padding-left: .6cqw;
+         font-size: 1.9cqh; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+
+  .center { justify-content: center; align-items: center; text-align: center; }
+  .cover { background: var(--ink); }
+  .cover h1, .cover .sub, .cover .eyebrow { color: #fff; }
+  .cover .sub { color: #94A3B8; max-width: 60ch; }
+  .cover .eyebrow { color: #FB923C; }
+  .rule { width: 8cqw; height: 3px; background: var(--accent); border-radius: 2px; margin: 3cqh 0; }
+
+  .foot { margin-top: auto; display: flex; gap: 2cqw; align-items: baseline; font-size: 2.2cqh; color: var(--muted); }
+  .foot b { color: var(--ink); }
+
+  /* ---- Chế độ trình chiếu: một slide chiếm trọn màn hình ---- */
+  body.present { background: #000; overflow: hidden; }
+  body.present .slide { display: none; margin: 0; border-radius: 0; border: none; max-width: none; box-shadow: none; }
+  body.present .slide.on { display: block; }
+  body.present .deck {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  }
+  body.present .slide.on {
+    width: min(100vw, calc(100vh * 16 / 9));
+    height: min(100vh, calc(100vw * 9 / 16));
+  }
+
+  .hud {
+    position: fixed; right: 16px; bottom: 14px; z-index: 50;
+    display: flex; gap: 8px; align-items: center;
+    font-size: 13px; color: var(--muted);
+  }
+  .hud button {
+    font: inherit; font-weight: 600; color: var(--ink); background: var(--card);
+    border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; cursor: pointer;
+  }
+  .hud button:hover { background: var(--wash); }
+  body.present .hud { color: #64748B; }
+  body.present .hud button { background: #131C2E; color: #E2E8F0; border-color: #334155; }
+
+  @media print {
+    body { background: #fff; }
+    .hud { display: none; }
+    .slide { break-after: page; margin: 0; border: none; border-radius: 0; box-shadow: none; max-width: none; }
+    body.present .slide { display: block !important; width: auto; height: auto; }
+  }
+</style>
+
+<div class="deck">
+
+  <!-- 1 · Bìa -->
+  <section class="slide cover">
+    <div class="pad center">
+      <div class="eyebrow">VinUniversity · AI in Action · Team NEURA</div>
+      <h1>TeleCollect</h1>
+      <div class="rule"></div>
+      <p class="sub">Nền tảng thu thập, kiểm duyệt và huấn luyện dữ liệu biểu diễn<br>cho imitation learning — vận hành chỉ với webcam và trình duyệt.</p>
+    </div>
+  </section>
+
+  <!-- 2 · Vấn đề -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Vấn đề</div>
+      <h2>Nút thắt của imitation learning nằm ở dữ liệu</h2>
+      <p class="sub">Imitation learning là phương pháp hiệu quả nhất hiện nay để robot tiếp thu kỹ năng mới. Nhưng phương pháp này đòi hỏi khối lượng dữ liệu rất lớn, trong khi phần lớn dữ liệu thu được không đạt chuẩn sử dụng.</p>
+
+      <div class="grid g3" style="flex:1">
+        <div class="card">
+          <span class="tag">01</span>
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z"/><path d="M3 12l9 4.5L21 12"/><path d="M3 16.5 12 21l9-4.5"/></svg><h3>Nhu cầu dữ liệu lớn</h3></div>
+          <p>Mỗi nhiệm vụ đơn giản cần hàng trăm lần biểu diễn. Thu thủ công có tốc độ thấp, trong khi thiết bị chuyên dụng có chi phí cao.</p>
+        </div>
+        <div class="card">
+          <span class="tag">02</span>
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4Z"/></svg><h3>Khó sàng lọc chất lượng</h3></div>
+          <p>Thao tác hụt, robot đánh rơi vật thể, người điều khiển mỏi tay. Quan sát trực tiếp không đủ để phân biệt bản ghi đạt chuẩn, mà dữ liệu lỗi đưa vào huấn luyện sẽ làm sai lệch mô hình.</p>
+        </div>
+        <div class="card">
+          <span class="tag">03</span>
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="5" width="6" height="6" rx="1"/><rect x="5" y="14" width="6" height="6" rx="1"/><path d="M16 15h5M18.5 12.5v5" opacity=".55"/></svg><h3>Công cụ phân mảnh</h3></div>
+          <p>Mỗi nhóm tự xây dựng riêng công cụ điều khiển, kiểm duyệt và đóng gói. Công sức bị lặp lại, tiêu chuẩn không thống nhất, kết quả khó tái sử dụng giữa các nhóm.</p>
+        </div>
+      </div>
+
+      <div class="note">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 1.9V16h5.2v-.2c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z"/></svg><b>Đối tượng chịu ảnh hưởng:</b> các nhóm nghiên cứu robot và sinh viên không đủ ngân sách cho thiết bị haptic và hạ tầng GPU riêng — cũng chính là nhóm có nhu cầu tiếp cận lớn nhất.
+      </div>
+      <div class="num">02</div>
+    </div>
+  </section>
+
+  <!-- 3 · Giải pháp -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Giải pháp</div>
+      <h2>Một quy trình khép kín thay cho ba công cụ tách rời</h2>
+      <p class="sub">TeleCollect hợp nhất thu thập dữ liệu, kiểm duyệt chất lượng và huấn luyện vào một nền tảng duy nhất, cho phép dữ liệu lưu chuyển liền mạch qua toàn bộ quy trình.</p>
+
+      <div class="flow" style="margin-bottom:3cqh">
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+          <div class="lab">Thu</div>
+          <div class="det">Điều khiển bằng cử chỉ bàn tay qua webcam, hoặc sinh tự động hàng loạt bằng script</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16 9.5"/></svg>
+          <div class="lab">Duyệt</div>
+          <div class="det">Hệ thống chấm điểm tự động, chỉ chuyển cho người kiểm duyệt các trường hợp không đủ căn cứ quyết định</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+          <div class="lab">Đóng gói</div>
+          <div class="det">Dữ liệu đạt chuẩn được kết xuất thành dataset HDF5 theo định dạng robomimic</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg>
+          <div class="lab">Huấn luyện</div>
+          <div class="det">Huấn luyện trên GPU thuê theo giờ, không cần đầu tư hạ tầng riêng</div>
+        </div>
+      </div>
+
+      <div class="grid g2" style="flex:1">
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="5"/><circle cx="12" cy="10" r="1.6"/><path d="M6 20h12M9 20l.6-3M15 20l-.6-3"/></svg><h3>Hạ rào cản xuống webcam và trình duyệt</h3></div>
+          <p>Không yêu cầu thiết bị haptic hay hạ tầng GPU. Bàn tay người dùng đóng vai trò thiết bị điều khiển, còn GPU được thuê theo giờ và chỉ tính phí khi sử dụng.</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h6"/><path d="M15 12h6"/><path d="M12 4v16"/><path d="m9.5 9.5 2.5 2.5 2.5-2.5"/></svg><h3>Kiểm duyệt nằm trên đường đi của dữ liệu</h3></div>
+          <p>Kiểm duyệt là một khâu trong quy trình, không phải bước làm sạch bổ sung về sau. Bản ghi không đạt bị loại trước khi vào tập huấn luyện.</p>
+        </div>
+      </div>
+      <div class="num">03</div>
+    </div>
+  </section>
+
+  <!-- 4 · Robot & Task -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Bối cảnh</div>
+      <h2>Cánh tay Panda và bốn nhiệm vụ</h2>
+
+      <div class="grid g3" style="margin-bottom:2.6cqh">
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="19" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><path d="m6.4 17.6 4.2-4.2M13.4 10.6l4.2-4.2"/></svg><h3>7 khớp xoay</h3></div>
+          <p>Dư một bậc tự do cho phép thay đổi tư thế cánh tay trong khi đầu kẹp giữ nguyên vị trí, thuận lợi khi thao tác trong không gian hẹp.</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v7a5 5 0 0 0 10 0V4"/><path d="M7 20V15M17 20v-5"/><path d="M9.5 20h5"/></svg><h3>Đầu kẹp hai ngón</h3></div>
+          <p>Hai ngón song song với hai trạng thái đóng và mở, thu gọn bài toán điều khiển đầu kẹp về một chiều.</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V7"/><path d="m8.5 10.5 3.5-3.5 3.5 3.5"/><path d="M4 20h16"/><circle cx="12" cy="20" r="1.4"/></svg><h3>Ra lệnh theo tư thế</h3></div>
+          <p>Lệnh được đưa ở mức vị trí và hướng của đầu kẹp; hệ thống tự giải bài toán động học ngược cho cả 7 khớp.</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Nhiệm vụ</th><th>Phải làm gì</th><th>Thành công khi</th><th>Giới hạn</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">Nâng khối</td><td>Gắp khối lập phương trên bàn và nhấc lên</td><td>Khối cao hơn mặt bàn 4 cm</td><td class="n">500 bước</td></tr>
+          <tr><td class="k">Nhặt &amp; đặt lon</td><td>Gắp lon và thả vào đúng vị trí khay</td><td>Lon nằm gọn trong khay đích</td><td class="n">400 bước</td></tr>
+          <tr><td class="k">Lắp đai ốc</td><td>Gắp đai ốc vuông và xỏ chính xác vào chốt</td><td>Đai ốc đã xuống hoàn toàn chốt</td><td class="n">500 bước</td></tr>
+          <tr><td class="k">Treo dụng cụ</td><td>Dựng khung móc vào đế, sau đó treo cờ-lê lên móc</td><td>Hoàn thành cả hai chặng</td><td class="n">1500 bước</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.5"/></svg><b>Độ khó tăng dần:</b> nhiệm vụ cuối yêu cầu dung sai <b>1,25 mm</b>, nhỏ hơn bề dày một đồng xu, và phải hoàn thành chính xác hai chặng liên tiếp.
+      </div>
+      <div class="num">04</div>
+    </div>
+  </section>
+
+  <!-- 5 · Vai trò -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Phân quyền</div>
+      <h2>Ba vai trò kế thừa, kiểm soát tại tầng API</h2>
+      <p class="sub">Quyền được kiểm tra tại máy chủ thay vì tại giao diện, nên việc ẩn thao tác trên màn hình không phải là cơ chế bảo vệ.</p>
+
+      <table style="margin-bottom:2.6cqh">
+        <thead><tr><th>Vai trò</th><th>Làm được gì</th><th>Phạm vi</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Operator</td><td>Thu demo, chỉnh sửa bản ghi</td><td>Chỉ bản ghi của chính mình</td></tr>
+          <tr><td class="k">Reviewer</td><td>Gán nhãn, cắt, duyệt hoặc từ chối, mở lại, đóng gói dataset</td><td>Mọi bản ghi trong hệ thống</td></tr>
+          <tr><td class="k">Admin</td><td>Toàn bộ quyền của Reviewer và quản trị người dùng</td><td>Toàn hệ thống</td></tr>
+        </tbody>
+      </table>
+
+      <div class="flow" style="flex:1">
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+          <div class="lab">operator</div>
+          <div class="det">Thu thập dữ liệu</div>
+        </div>
+        <div class="arrow">⊂</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5"/><path d="M17.5 19a6 6 0 0 0-2.2-4.6"/></svg>
+          <div class="lab">reviewer</div>
+          <div class="det">Kiểm duyệt và đóng gói</div>
+        </div>
+        <div class="arrow">⊂</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3.5M15.5 12v2.5"/></svg>
+          <div class="lab">admin</div>
+          <div class="det">Quản trị hệ thống</div>
+        </div>
+      </div>
+
+      <div class="note blue">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 1.9V16h5.2v-.2c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z"/></svg>Quan hệ giữa ba vai trò là <b>bao hàm</b> chứ không song song: quyền cấp trên chứa trọn quyền cấp dưới, loại bỏ các tổ hợp quyền mâu thuẫn.
+      </div>
+      <div class="num">05</div>
+    </div>
+  </section>
+
+  <!-- 6 · Kiến trúc -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Kiến trúc</div>
+      <h2>Vòng học tập khép kín</h2>
+      <p class="sub">Chất lượng dữ liệu được đánh giá trên toàn bộ quy trình thay vì từng bước riêng lẻ, bởi một bản ghi chỉ có giá trị khi đi được đến tập huấn luyện cuối cùng.</p>
+
+      <div class="flow" style="margin-bottom:3cqh">
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+          <div class="lab">Collect</div>
+          <div class="det">Demo</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16 9.5"/></svg>
+          <div class="lab">Review</div>
+          <div class="det">Gán nhãn và kiểm duyệt</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+          <div class="lab">Package</div>
+          <div class="det">Dataset HDF5</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg>
+          <div class="lab">Train</div>
+          <div class="det">GPU thuê theo giờ</div>
+        </div>
+        <div class="arrow">↺</div>
+      </div>
+
+      <div class="grid g3" style="flex:1">
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h9l3 4 4-4"/><path d="M20 16h-9l-3-4-4 4"/></svg><h3>WebSocket</h3></div>
+          <p>Truyền lệnh điều khiển và khung hình theo thời gian thực hai chiều, thay cho cơ chế hỏi vòng theo chu kỳ.</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg><h3>Mailbox depth-1</h3></div>
+          <p>Chỉ giữ lệnh mới nhất và loại bỏ lệnh cũ, bảo đảm người điều khiển luôn nhận phản hồi hiện tại thay vì hàng đợi tồn đọng.</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg><h3>SQLite metadata</h3></div>
+          <p>Bản ghi và trạng thái kiểm duyệt lưu trong một tệp cơ sở dữ liệu duy nhất, cho phép sao lưu và di chuyển bằng thao tác sao chép tệp.</p>
+        </div>
+      </div>
+
+      <div class="note">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 1.9V16h5.2v-.2c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z"/></svg>Đánh đổi có chủ đích: <b>ưu tiên độ trễ thấp mà không ảnh hưởng dữ liệu ghi lại</b>. Khung hình hiển thị có thể được bỏ qua để giữ tốc độ phản hồi, nhưng chuỗi <code>obs + action</code> ghi xuống đĩa được lưu đầy đủ.
+      </div>
+      <div class="num">06</div>
+    </div>
+  </section>
+
+  <!-- 7 · Thu tự động -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Luồng thu 1 · Tự động</div>
+      <h2>Sinh dữ liệu hàng loạt bằng script với nhiễu có kiểm soát</h2>
+      <p class="sub">Script hoàn thành nhiệm vụ với tỉ lệ gần tuyệt đối, nhưng dữ liệu quá lý tưởng tạo ra mô hình kém bền vững. Vì vậy nhiễu được đưa vào có kiểm soát, phân thành bốn mức.</p>
+
+      <div class="bars" style="margin-bottom:2.4cqh">
+        <div class="bar"><div class="bl">Lift</div><div class="track">
+          <div class="seg" style="width:6%;background:#94A3B8">0.00</div>
+          <div class="seg" style="width:12%;background:#64748B">0.25</div>
+          <div class="seg" style="width:48%;background:#C2410C">1.70</div>
+          <div class="seg" style="width:34%;background:#9A3412">2.50</div>
+        </div></div>
+        <div class="bar"><div class="bl">Can</div><div class="track">
+          <div class="seg" style="width:6%;background:#94A3B8">0.00</div>
+          <div class="seg" style="width:12%;background:#64748B">0.25</div>
+          <div class="seg" style="width:32%;background:#C2410C">1.10</div>
+          <div class="seg" style="width:20%;background:#9A3412">1.20</div>
+        </div></div>
+        <div class="bar"><div class="bl">Square</div><div class="track">
+          <div class="seg" style="width:6%;background:#94A3B8">0.00</div>
+          <div class="seg" style="width:10%;background:#64748B">0.18</div>
+          <div class="seg" style="width:26%;background:#C2410C">0.90</div>
+          <div class="seg" style="width:22%;background:#9A3412">1.30</div>
+        </div></div>
+        <div class="bar"><div class="bl">ToolHang</div><div class="track">
+          <div class="seg" style="width:6%;background:#94A3B8">0.00</div>
+          <div class="seg" style="width:11%;background:#64748B">0.20</div>
+          <div class="seg" style="width:18%;background:#C2410C">0.60</div>
+          <div class="seg" style="width:17%;background:#9A3412">1.00</div>
+        </div></div>
+      </div>
+
+      <table style="font-size:2.2cqh">
+        <thead><tr><th>Mức</th><th>Clean</th><th>Good</th><th>Medium</th><th>Poor</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Biên độ nhiễu</td><td class="n">0.00</td><td class="n">0.18 – 0.25</td><td class="n">0.60 – 1.70</td><td class="n">1.00 – 2.50</td></tr>
+          <tr><td class="k">Vai trò</td><td>Chuẩn tham chiếu</td><td>Sai lệch tự nhiên</td><td>Thao tác kém chính xác</td><td>Trường hợp thất bại, giúp mô hình nhận diện lỗi</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.5"/></svg><b>Đơn vị:</b> biên độ nhiễu cộng vào vector action 7 chiều trước khi gửi xuống simulator. Nhiệm vụ càng khó thì ngưỡng chịu nhiễu càng thấp: ToolHang thất bại từ mức 1.00, trong khi Lift vẫn thực hiện được đến mức 2.50.
+      </div>
+      <div class="num">07</div>
+    </div>
+  </section>
+
+  <!-- 8 · Thu bằng tay -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Luồng thu 2 · Bàn tay người</div>
+      <h2>Điều khiển robot bằng webcam, không cần thiết bị chuyên dụng</h2>
+      <p class="sub">MediaPipe HandLandmarker theo dõi 21 điểm mốc bàn tay trực tiếp trong trình duyệt: không cần cài đặt phần mềm và không truyền hình ảnh lên máy chủ.</p>
+
+      <table style="margin-bottom:2.4cqh">
+        <thead><tr><th>Cử chỉ bàn tay</th><th>Lệnh điều khiển</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Vị trí lòng bàn tay</td><td>Dịch chuyển trục X, Y</td></tr>
+          <tr><td class="k">Kích thước bàn tay (đưa gần camera)</td><td>Dịch chuyển trục Z</td></tr>
+          <tr><td class="k">Xoay cổ tay</td><td>Xoay đầu kẹp</td></tr>
+          <tr><td class="k">Nắm tay / xoè tay</td><td>Đóng / mở đầu kẹp</td></tr>
+          <tr><td class="k">Giơ ngón cái</td><td>Clutch — tạm ngắt liên kết để đặt lại vị trí tay</td></tr>
+        </tbody>
+      </table>
+
+      <div class="grid g2">
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12h3l2.5-6 3 12 3-9 2.5 5 2 -2h4"/></svg><h3>Luồng xử lý</h3></div>
+          <p>Trình duyệt gửi dữ liệu ở tần số <b>60 Hz</b> qua WebSocket, hệ thống dựng thành action 7 chiều và điều khiển theo tư thế đầu kẹp (OSC_POSE).</p>
+        </div>
+        <div class="card">
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v6c0 4.4 3.2 7.9 7.5 9 4.3-1.1 7.5-4.6 7.5-9V6L12 3Z"/><path d="m9 12 2 2 4-4"/></svg><h3>Chống rung</h3></div>
+          <p>Một cử chỉ phải duy trì <b>6 khung hình liên tiếp</b> mới được ghi nhận, tránh trường hợp tay rung trong thời gian ngắn khiến đầu kẹp nhả vật ngoài ý muốn.</p>
+        </div>
+      </div>
+      <div class="num">08</div>
+    </div>
+  </section>
+
+  <!-- 9 · So sánh -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">So sánh</div>
+      <h2>Hai luồng thu thập bổ sung cho nhau</h2>
+
+      <div class="grid g2" style="margin-bottom:2.6cqh; flex:1">
+        <div class="card">
+          <span class="tag">Scripted</span>
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8.5 10 2 2-2 2"/><path d="M12.5 14h3.5"/></svg><h3>Tốc độ cao, nhiễu thấp, quy mô lớn</h3></div>
+          <p>Hoàn thành nhiệm vụ với tỉ lệ gần tuyệt đối, sinh hàng nghìn episode liên tục mà không cần người vận hành. Nhiễu được bổ sung để tăng độ đa dạng.</p>
+          <p style="color:var(--muted)"><b>Hạn chế:</b> chỉ thể hiện một chiến lược giải duy nhất.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Human teleop</span>
+          <div class="chead"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M12 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 11V6.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6v-3a1.5 1.5 0 0 1 3 0"/></svg><h3>Tốc độ thấp, sai số cao, nhưng giàu thông tin</h3></div>
+          <p>Người vận hành điều khiển qua cử chỉ tay hoặc bàn phím. Tốc độ thấp hơn nhiều lần, nhưng dữ liệu chứa các pha do dự, hiệu chỉnh giữa chừng và những cách giải mà script không sinh ra được.</p>
+          <p style="color:var(--muted)"><b>Hạn chế:</b> không thể mở rộng quy mô.</p>
+        </div>
+      </div>
+
+      <div class="note">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 1.9V16h5.2v-.2c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z"/></svg><b>Lý do kết hợp cả hai:</b> luồng scripted cung cấp <b>khối lượng</b> và độ chính xác cho các nhiệm vụ dung sai milimet; luồng teleop cung cấp <b>độ đa dạng hành vi</b> mà một chiến lược lập trình sẵn không thể tạo ra. Mô hình chỉ học từ dữ liệu scripted sẽ thành thạo một phương án duy nhất và mất ổn định khi gặp tình huống lệch chuẩn.
+      </div>
+      <div class="num">09</div>
+    </div>
+  </section>
+
+  <!-- 10 · Quality control -->
+  <section class="slide">
+    <div class="pad">
+      <div class="eyebrow">Kiểm soát chất lượng</div>
+      <h2>Tự động hóa phần rõ ràng, con người xử lý phần mơ hồ</h2>
+      <p class="sub">Hard checks × Soft penalty → Score. Hai ngưỡng chia điểm số thành ba vùng, và hệ thống không đưa ra phán quyết khi căn cứ không đủ.</p>
+
+      <div class="flow" style="flex:1; margin-bottom:2.6cqh">
+        <div class="step" style="border-color:#16A34A">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" style="color:#15803D"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16 9.5"/></svg>
+          <div class="lab" style="color:#15803D">APPROVE</div>
+          <div class="det">Điểm vượt ngưỡng duyệt: tự động đưa vào dataset, không cần kiểm duyệt thủ công</div>
+        </div>
+        <div class="step" style="border-color:var(--accent)">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" style="color:var(--accent)"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+          <div class="lab" style="color:var(--accent)">REVIEW</div>
+          <div class="det">Vùng trung gian: hệ thống không đủ căn cứ, chuyển cho người kiểm duyệt</div>
+        </div>
+        <div class="step" style="border-color:#DC2626">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" style="color:#B91C1C"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>
+          <div class="lab" style="color:#B91C1C">REJECT</div>
+          <div class="det">Điểm dưới ngưỡng loại: loại trực tiếp, không tiêu tốn công kiểm duyệt</div>
+        </div>
+      </div>
+
+      <div class="note blue">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.2.9 1.9V16h5.2v-.2c0-.7.3-1.4.9-1.9A6 6 0 0 0 12 3Z"/></svg><b>Lý do không tự động hoàn toàn:</b> một bản ghi lỗi bị gán nhãn đạt sẽ làm hỏng cả tập huấn luyện, và sai sót này chỉ bộc lộ sau nhiều giờ huấn luyện. Vì vậy vùng mơ hồ được chuyển lại cho con người: <b>hệ thống xử lý phần rõ ràng, con người quyết định phần khó</b>.
+      </div>
+      <div class="num">10</div>
+    </div>
+  </section>
+
+  <!-- 11 · Kết -->
+  <section class="slide cover">
+    <div class="pad center">
+      <div class="eyebrow">Cảm ơn đã lắng nghe</div>
+      <h1>TeleCollect</h1>
+      <div class="rule"></div>
+      <p class="sub">Hạ chi phí khởi đầu của imitation learning<br>từ hàng chục triệu đồng thiết bị xuống còn một webcam và một trình duyệt.</p>
+    </div>
+  </section>
+
+</div>
+
+<div class="hud">
+  <button id="mode">Trình chiếu</button>
+  <span id="pos"></span>
+</div>
+
+<script>
+  // Chế độ trình chiếu: ẩn hết trừ slide hiện tại. Mặc định là cuộn dọc để
+  // duyệt nhanh cả deck; bấm nút hoặc phím F mới vào toàn màn hình.
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var i = 0, presenting = false;
+  var pos = document.getElementById('pos');
+  var btn = document.getElementById('mode');
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    pos.textContent = (i + 1) + ' / ' + slides.length;
+  }
+
+  function setMode(on) {
+    presenting = on;
+    document.body.classList.toggle('present', on);
+    btn.textContent = on ? 'Thoát' : 'Trình chiếu';
+    if (on) { show(i); } else { pos.textContent = ''; }
+  }
+
+  btn.addEventListener('click', function () { setMode(!presenting); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'f' || e.key === 'F') { setMode(!presenting); return; }
+    if (e.key === 'Escape' && presenting) { setMode(false); return; }
+    if (!presenting) return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault(); show(i + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
+      e.preventDefault(); show(i - 1);
+    } else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+</script>

@@ -198,13 +198,19 @@ async def dry_run_auto_gate(
 async def diversity(
     task: str = Query(...),
     scope: str = Query("approved", pattern="^(approved|reviewed|all)$"),
+    collection_batch_id: str | None = Query(default=None, min_length=1, max_length=64),
     _user: User = Depends(reviewer_required),
 ) -> dict[str, Any]:
     if task not in supported_tasks():
         raise HTTPException(400, f"task không hợp lệ: {task}")
     from src.labeling.diversity import diversity_report
 
-    return diversity_report(workspace(), task=task, scope=scope)
+    # `collection_batch_id` thu hẹp báo cáo về một đợt thu. Phạm vi tham chiếu
+    # để tính coverage vẫn là cả task, nên con số trả lời được câu "đợt này phủ
+    # bao nhiêu phần vùng đã thu", chứ không phải so đợt với chính nó.
+    return diversity_report(
+        workspace(), task=task, scope=scope, collection_batch_id=collection_batch_id
+    )
 
 
 # --- thu dữ liệu ------------------------------------------------------------

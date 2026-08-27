@@ -456,7 +456,7 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             </div>
             {lastSaved && (
               <Link
-                href={`/review/${lastSaved}`}
+                href={`/raw/${encodeURIComponent(lastSaved)}`}
                 className="block text-center text-xs text-accent-400 hover:underline"
               >
                 Review the take just saved →

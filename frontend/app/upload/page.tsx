@@ -62,7 +62,7 @@ export default function UploadPage() {
         trajectory,
         onProgress: setProgress,
       });
-      router.push(`/review/${demo.id}`);
+      router.push(`/raw/${encodeURIComponent(demo.id)}`);
     } catch (exc) {
       setError(uploadErrorMessage(exc));
       setBusy(false);

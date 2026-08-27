@@ -117,6 +117,44 @@ export interface RawEpisodeFilters {
   page_size?: number;
 }
 
+/**
+ * A collection batch.
+ *
+ * `named: false` means the batch exists only as a string in episode
+ * provenance and nobody has created a record for it yet — the UI uses the flag
+ * to offer naming it instead of showing a raw identifier.
+ */
+export interface CollectionBatch {
+  id: string;
+  name: string;
+  task_name: string | null;
+  description: string;
+  archived: boolean;
+  created_at: string | null;
+  named: boolean;
+  episodes: number;
+  teleop: number;
+  scripted: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
+export interface CollectionBatchImport {
+  batch: CollectionBatch;
+  episodes: number;
+  videos: number;
+  sources: string[];
+  skipped: { episode: string; reason: string }[];
+}
+
+export interface CollectionBatchInput {
+  id: string;
+  name: string;
+  task_name?: string | null;
+  description?: string;
+}
+
 export class RawApiError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
@@ -170,5 +208,77 @@ export const rawApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ archived, expected_version: expectedVersion }),
+    }),
+  /**
+   * Upload a zipped app batch folder.
+   *
+   * `fetch` cannot report how far a large upload has got, and a batch carries
+   * every rendered video, so this one call uses XHR to drive a progress bar.
+   */
+  importBatch: (
+    batchId: string,
+    params: {
+      archive: File;
+      name?: string;
+      overwrite?: boolean;
+      onProgress?: (percent: number) => void;
+    },
+  ): Promise<CollectionBatchImport> =>
+    new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.set("archive", params.archive);
+      if (params.name) form.set("name", params.name);
+      if (params.overwrite) form.set("overwrite", "true");
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", apiUrl(`/raw/batches/${encodeURIComponent(batchId)}/import`));
+      const token = getToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          params.onProgress?.(Math.round((event.loaded / event.total) * 100));
+        }
+      };
+      xhr.onerror = () => reject(new RawApiError("Could not reach the server", 0));
+      xhr.onload = () => {
+        let payload: unknown = null;
+        try {
+          payload = JSON.parse(xhr.responseText);
+        } catch {
+          payload = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(payload as CollectionBatchImport);
+          return;
+        }
+        reject(
+          new RawApiError(
+            (payload as { detail?: string } | null)?.detail ??
+              `${xhr.status} ${xhr.statusText}`,
+            xhr.status,
+          ),
+        );
+      };
+      xhr.send(form);
+    }),
+  batches: (includeArchived = false) =>
+    request<CollectionBatch[]>(
+      `/batches${includeArchived ? "?include_archived=true" : ""}`,
+    ),
+  createBatch: (input: CollectionBatchInput) =>
+    request<CollectionBatch>("/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  updateBatch: (
+    batchId: string,
+    changes: Partial<Omit<CollectionBatch, "id" | "named" | "created_at">>,
+  ) =>
+    request<CollectionBatch>(`/batches/${encodeURIComponent(batchId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
     }),
 };

@@ -3,6 +3,7 @@ import hashlib
 import json
 import zipfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -592,3 +593,163 @@ async def test_delete_dataset_as_operator_returns_403(
 
     del_resp = await client.delete(f"{API}/{dataset['id']}", headers=_auth_headers(operator))
     assert del_resp.status_code == 403
+
+
+# --- uploading a dataset built elsewhere -------------------------------------------
+
+
+def _robomimic_bytes(tmp_path, *, demos: int = 2, frames: int = 30, action_dim: int = 7) -> bytes:
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "uploaded.hdf5"
+    with h5py.File(path, "w") as handle:
+        data = handle.create_group("data")
+        data.attrs["env_args"] = json.dumps({"env_name": "Lift"})
+        for index in range(demos):
+            demo = data.create_group(f"demo_{index}")
+            demo.attrs["telecollect_task"] = "lift"
+            demo.create_dataset("actions", data=np.zeros((frames, action_dim)))
+            observations = demo.create_group("obs")
+            observations.create_dataset("robot0_eef_pos", data=np.zeros((frames, 3)))
+    return path.read_bytes()
+
+
+UPLOAD_API = f"{API}/uploads"
+
+
+@pytest.mark.asyncio
+async def test_dataset_upload_requires_reviewer(client, db_session, storage_dir, operator, tmp_path):
+    response = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(operator),
+        data={"name": "uploaded-v1"},
+        files={"file": ("d.hdf5", _robomimic_bytes(tmp_path), "application/x-hdf5")},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_dataset_upload_is_ready_and_countable(client, db_session, storage_dir, reviewer, tmp_path):
+    """No background build: the file already is the target format."""
+
+    response = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-v1"},
+        files={"file": ("d.hdf5", _robomimic_bytes(tmp_path), "application/x-hdf5")},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["format"] == "robomimic"
+    assert body["num_episodes"] == 2
+    assert body["num_frames"] == 60
+    assert body["task_names"] == ["lift"]
+    assert body["exporter_version"] == "upload"
+
+    stored = await db_session.get(Dataset, body["id"])
+    await db_session.refresh(stored)
+    assert Path(stored.zip_path).is_file()
+    assert stored.schema_manifest["action_dim"] == 7
+
+
+@pytest.mark.asyncio
+async def test_uploaded_dataset_can_be_trained_on(client, db_session, storage_dir, reviewer, tmp_path):
+    """The point of the upload: `_validated_dataset_path` must accept it."""
+
+    from src.api.training import _validated_dataset_path
+
+    response = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-trainable"},
+        files={"file": ("d.hdf5", _robomimic_bytes(tmp_path), "application/x-hdf5")},
+    )
+    assert response.status_code == 201
+
+    stored = await db_session.get(Dataset, response.json()["id"])
+    await db_session.refresh(stored)
+    assert _validated_dataset_path(stored).is_file()
+
+
+@pytest.mark.asyncio
+async def test_dataset_upload_rejects_a_file_that_is_not_hdf5(
+    client, db_session, storage_dir, reviewer,
+):
+    response = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-garbage"},
+        files={"file": ("d.hdf5", b"definitely not hdf5", "application/x-hdf5")},
+    )
+
+    assert response.status_code == 422
+    assert "HDF5" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_dataset_upload_rejects_hdf5_without_demos(
+    client, db_session, storage_dir, reviewer, tmp_path,
+):
+    import h5py
+
+    path = tmp_path / "empty.hdf5"
+    with h5py.File(path, "w") as handle:
+        handle.create_group("data")
+
+    response = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-empty"},
+        files={"file": ("d.hdf5", path.read_bytes(), "application/x-hdf5")},
+    )
+
+    assert response.status_code == 422
+    assert "demo_*" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_upload_leaves_no_file_behind(
+    client, db_session, storage_dir, reviewer,
+):
+    before = set(storage.datasets_root().glob("*")) if storage.datasets_root().is_dir() else set()
+
+    await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-garbage"},
+        files={"file": ("d.hdf5", b"definitely not hdf5", "application/x-hdf5")},
+    )
+
+    after = set(storage.datasets_root().glob("*")) if storage.datasets_root().is_dir() else set()
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_dataset_upload_name_clash_is_409_without_overwrite(
+    client, db_session, storage_dir, reviewer, tmp_path,
+):
+    payload = _robomimic_bytes(tmp_path)
+    first = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-twice"},
+        files={"file": ("d.hdf5", payload, "application/x-hdf5")},
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        UPLOAD_API,
+        headers=_auth_headers(reviewer),
+        data={"name": "uploaded-twice"},
+        files={"file": ("d.hdf5", payload, "application/x-hdf5")},
+    )
+
+    assert second.status_code == 409
+    # The first dataset's file must survive the refused second attempt.
+    kept = await db_session.get(Dataset, first.json()["id"])
+    await db_session.refresh(kept)
+    assert Path(kept.zip_path).is_file()

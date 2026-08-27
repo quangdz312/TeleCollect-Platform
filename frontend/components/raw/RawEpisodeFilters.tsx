@@ -24,6 +24,7 @@ export function RawEpisodeFilters({
   onReset,
   tasks,
   batches,
+  scoped = false,
 }: {
   value: RawFiltersValue;
   searchDraft: string;
@@ -33,11 +34,17 @@ export function RawEpisodeFilters({
   onReset: () => void;
   tasks: string[];
   batches: string[];
+  /**
+   * True while browsing inside one collection batch. The batch is already
+   * chosen on the previous screen, and a batch targets a single task, so both
+   * selects would be dead controls here.
+   */
+  scoped?: boolean;
 }) {
   return (
     <div className="space-y-4">
       <form
-        className="flex flex-col gap-2 sm:flex-row"
+        className={scoped ? "flex flex-col gap-2" : "flex flex-col gap-2 sm:flex-row"}
         onSubmit={(event) => {
           event.preventDefault();
           onApplySearch();
@@ -56,7 +63,7 @@ export function RawEpisodeFilters({
         </div>
       </form>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className={scoped ? "grid gap-3" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-6"}>
         <Field label="Source">
           <Select
             value={value.source}
@@ -71,24 +78,28 @@ export function RawEpisodeFilters({
             <option value="scripted">Scripted</option>
           </Select>
         </Field>
-        <Field label="Task">
-          <Select
-            value={value.task}
-            onChange={(event) => onChange({ task: event.target.value })}
-          >
-            <option value="">All tasks</option>
-            {tasks.map((task) => <option key={task} value={task}>{task}</option>)}
-          </Select>
-        </Field>
-        <Field label="Collection batch">
-          <Select
-            value={value.collectionBatch}
-            onChange={(event) => onChange({ collectionBatch: event.target.value })}
-          >
-            <option value="">All collection batches</option>
-            {batches.map((batch) => <option key={batch} value={batch}>{batch}</option>)}
-          </Select>
-        </Field>
+        {scoped ? null : (
+          <Field label="Task">
+            <Select
+              value={value.task}
+              onChange={(event) => onChange({ task: event.target.value })}
+            >
+              <option value="">All tasks</option>
+              {tasks.map((task) => <option key={task} value={task}>{task}</option>)}
+            </Select>
+          </Field>
+        )}
+        {scoped ? null : (
+          <Field label="Collection batch">
+            <Select
+              value={value.collectionBatch}
+              onChange={(event) => onChange({ collectionBatch: event.target.value })}
+            >
+              <option value="">All collection batches</option>
+              {batches.map((batch) => <option key={batch} value={batch}>{batch}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Quality">
           <Select
             value={value.quality}

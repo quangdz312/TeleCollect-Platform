@@ -134,6 +134,35 @@ class RawEpisodeAudit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class CollectionBatch(Base):
+    """Đợt thu dữ liệu — tên, mô tả và chủ sở hữu của một `collection_batch_id`.
+
+    `id` KHÔNG sinh tự động: nó chính là chuỗi `collection_batch_id` đã nằm sẵn
+    trong provenance của từng episode. Giữ nguyên như vậy nên bảng này chỉ bổ
+    sung phần mô tả cho các đợt thu đã có, không phải đánh số lại hay chuyển đổi
+    dữ liệu cũ.
+
+    Episode vẫn nằm ở workspace dạng file, không có khoá ngoại trỏ sang đây: một
+    đợt thu có thể bị xoá bản ghi mô tả mà dữ liệu thu được vẫn còn nguyên, và
+    ngược lại episode cũ vẫn hiển thị được dù chưa ai đặt tên cho đợt của nó.
+
+    `task_name` cố ý KHÔNG phải khoá ngoại tới `tasks.name`: đợt thu có thể trỏ
+    tới task mà bảng `tasks` chưa kịp có (task mới của simulator), và mất bản ghi
+    task không đáng để làm hỏng cả đợt thu.
+    """
+
+    __tablename__ = "collection_batches"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    task_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Dataset(Base):
     __tablename__ = "datasets"
 

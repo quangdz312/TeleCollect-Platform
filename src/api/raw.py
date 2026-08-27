@@ -2,20 +2,54 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
+import re
+import shutil
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import mkdtemp
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.demos import UploadTooLargeError, _save_upload_chunked
 from src.api.labeling import workspace
-from src.models.db import Episode, RawEpisodeAudit, RawEpisodeManagement, User, get_session
+from src.config import get_settings
+from src.labeling.batch_import import (
+    BatchImportError,
+    import_batch_archive,
+    manifest_of,
+)
+from src.models.db import (
+    CollectionBatch,
+    Episode,
+    RawEpisodeAudit,
+    RawEpisodeManagement,
+    User,
+    get_session,
+)
 from src.models.enums import DemoStatus, UserRole
 from src.models.schemas import (
+    CollectionBatchCreateRequest,
+    CollectionBatchImportResponse,
+    CollectionBatchImportSkip,
+    CollectionBatchResponse,
+    CollectionBatchUpdateRequest,
     RawArtifactResponse,
     RawEpisodeArchiveUpdate,
     RawEpisodeAuditResponse,
@@ -722,3 +756,216 @@ async def archive_raw_episode(
     ))
     await session.commit()
     return await raw_episode_detail(episode_id, user, session)
+
+
+# --- Đợt thu (collection batch) ---------------------------------------------
+#
+# Batch vốn chỉ là một chuỗi tự do nằm trong provenance của episode. Bảng
+# `collection_batches` bổ sung tên, mô tả và chủ sở hữu cho chuỗi đó nhưng
+# KHÔNG thay thế nó: đợt thu chưa có bản ghi mô tả vẫn hiện ra với
+# `named=False`, nên không đợt cũ nào biến mất khỏi giao diện.
+
+
+#: Cùng luật với `CollectionBatchCreateRequest.id` — mã đợt thu đi vào tên file
+#: dataset nên không nhận ký tự ngoài tập này.
+BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _batch_counts(episodes: list[RawEpisodeResponse]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for episode in episodes:
+        batch_id = episode.collection_batch_id
+        if not batch_id:
+            continue
+        bucket = counts.setdefault(
+            batch_id,
+            {"episodes": 0, "teleop": 0, "scripted": 0,
+             "pending": 0, "approved": 0, "rejected": 0},
+        )
+        bucket["episodes"] += 1
+        if episode.source in bucket:
+            bucket[episode.source] += 1
+        if episode.review_status in bucket:
+            bucket[episode.review_status] += 1
+    return counts
+
+
+def _batch_payload(
+    batch_id: str, row: CollectionBatch | None, bucket: dict[str, int]
+) -> CollectionBatchResponse:
+    return CollectionBatchResponse(
+        id=batch_id,
+        name=row.name if row else batch_id,
+        task_name=row.task_name if row else None,
+        description=row.description if row else "",
+        archived=bool(row.archived) if row else False,
+        created_at=row.created_at if row else None,
+        named=row is not None,
+        episodes=bucket.get("episodes", 0),
+        teleop=bucket.get("teleop", 0),
+        scripted=bucket.get("scripted", 0),
+        pending=bucket.get("pending", 0),
+        approved=bucket.get("approved", 0),
+        rejected=bucket.get("rejected", 0),
+    )
+
+
+async def _batch_response(
+    batch: CollectionBatch, session: AsyncSession
+) -> CollectionBatchResponse:
+    # Đặt tên cho một đợt thu đã có sẵn dữ liệu là chuyện bình thường, nên số
+    # liệu phải đếm lại chứ không mặc định bằng 0.
+    counts = _batch_counts(await _all_episodes(session, None))
+    return _batch_payload(batch.id, batch, counts.get(batch.id, {}))
+
+
+@router.get("/batches", response_model=list[CollectionBatchResponse])
+async def list_collection_batches(
+    include_archived: bool = False,
+    _user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
+) -> list[CollectionBatchResponse]:
+    counts = _batch_counts(await _all_episodes(session, None))
+    rows = {row.id: row for row in (await session.scalars(select(CollectionBatch))).all()}
+    batches = [
+        _batch_payload(batch_id, rows.get(batch_id), counts.get(batch_id, {}))
+        for batch_id in set(counts) | set(rows)
+        if include_archived or not getattr(rows.get(batch_id), "archived", False)
+    ]
+    batches.sort(key=lambda item: (item.archived, item.name.lower()))
+    return batches
+
+
+@router.post(
+    "/batches",
+    response_model=CollectionBatchResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_collection_batch(
+    payload: CollectionBatchCreateRequest,
+    user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
+) -> CollectionBatchResponse:
+    if await session.get(CollectionBatch, payload.id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Đợt thu này đã tồn tại"
+        )
+    batch = CollectionBatch(
+        id=payload.id,
+        name=payload.name,
+        task_name=payload.task_name,
+        description=payload.description,
+        created_by=user.id,
+    )
+    session.add(batch)
+    await session.commit()
+    return await _batch_response(batch, session)
+
+
+@router.patch("/batches/{batch_id}", response_model=CollectionBatchResponse)
+async def update_collection_batch(
+    batch_id: str,
+    payload: CollectionBatchUpdateRequest,
+    _user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
+) -> CollectionBatchResponse:
+    batch = await session.get(CollectionBatch, batch_id)
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy đợt thu"
+        )
+    fields = payload.model_dump(exclude_unset=True)
+    for field, value in fields.items():
+        setattr(batch, field, value)
+    if fields:
+        batch.updated_at = datetime.now(UTC)
+    await session.commit()
+    return await _batch_response(batch, session)
+
+
+@router.post(
+    "/batches/{batch_id}/import",
+    response_model=CollectionBatchImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_collection_batch(
+    batch_id: str,
+    archive: UploadFile = File(...),
+    name: str = Form(default=""),
+    overwrite: bool = Form(default=False),
+    user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
+) -> CollectionBatchImportResponse:
+    """Nạp một zip thư mục batch của app vào đợt thu `batch_id`.
+
+    Đợt thu chưa tồn tại thì tạo luôn tại đây: người dùng đang đứng ở trang
+    Review và vừa chọn đích, bắt họ tạo batch ở một bước riêng chỉ để rồi upload
+    tiếp là thừa.
+    """
+
+    if not BATCH_ID_PATTERN.match(batch_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Mã đợt thu chỉ nhận chữ, số và các ký tự . _ -",
+        )
+
+    settings = get_settings()
+    space = workspace()
+    scratch = Path(mkdtemp(prefix="batch-upload-"))
+    upload_path = scratch / "batch.zip"
+    try:
+        try:
+            await _save_upload_chunked(
+                archive, upload_path, settings.max_upload_mb * 1024 * 1024,
+            )
+        except UploadTooLargeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc),
+            ) from exc
+
+        # Giải nén, dựng lại file collection và rescore đều là việc nặng đồng bộ
+        # — chạy trong thread để không chặn event loop.
+        try:
+            report = await asyncio.to_thread(
+                import_batch_archive,
+                space,
+                upload_path,
+                batch_id=batch_id,
+                overwrite=overwrite,
+            )
+        except BatchImportError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc),
+            ) from exc
+        # Đọc trước khi khối `finally` xoá file zip đi.
+        manifest = manifest_of(upload_path)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    batch = await session.get(CollectionBatch, batch_id)
+    if batch is None:
+        batch = CollectionBatch(
+            id=batch_id,
+            name=(name.strip() or str(manifest.get("name") or "") or batch_id)[:150],
+            # Trang Data diversity lọc theo task, nên lấy luôn từ batch.json
+            # thay vì để trống rồi bắt người dùng sửa tay sau.
+            task_name=(str(manifest.get("task") or "").strip() or None),
+            description="",
+            created_by=user.id,
+        )
+        session.add(batch)
+    elif name.strip():
+        batch.name = name.strip()[:150]
+    batch.updated_at = datetime.now(UTC)
+    await session.commit()
+
+    return CollectionBatchImportResponse(
+        batch=await _batch_response(batch, session),
+        episodes=report.episodes,
+        videos=report.videos,
+        sources=sorted(report.sources),
+        skipped=[
+            CollectionBatchImportSkip(episode=episode, reason=reason)
+            for episode, reason in report.skipped
+        ],
+    )

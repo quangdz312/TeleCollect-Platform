@@ -63,8 +63,8 @@ export default function OverviewPage() {
   if (!user) return null;
   const pipeline: [string, number, string][] = [
     ["Collected", raw?.summary.total ?? 0, "/raw"],
-    ["Reviewed", reviewed, "/review"],
-    ["Approved", raw?.summary.approved ?? 0, "/raw?review_status=approved"],
+    ["Reviewed", reviewed, "/raw?collection_batch_id=__all__&review_status=approved"],
+    ["Approved", raw?.summary.approved ?? 0, "/raw?collection_batch_id=__all__&review_status=approved"],
     ["Datasets", datasets.length, "/datasets"],
     ["Trained", runs.filter((run) => run.status === "succeeded").length, "/training"],
     ["Evaluated", completedEvaluations.length, "/evaluate"],
@@ -73,15 +73,15 @@ export default function OverviewPage() {
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-ink-700 pb-3">
       <div><p className="text-[11px] font-bold uppercase tracking-[0.18em] text-accent-500">TeleCollect command center</p><h1 className="mt-1 font-heading text-[24px] font-bold">Overview</h1><p className="mt-1 text-sm text-ink-400">Follow data from collection through review, conversion, training and evaluation.</p></div>
-      <div className="flex gap-2"><Link href="/collect"><Button variant="primary">Collect data</Button></Link><Link href="/review"><Button variant="ghost">Review queue</Button></Link></div>
+      <div className="flex gap-2"><Link href="/collect"><Button variant="primary">Collect data</Button></Link><Link href="/raw"><Button variant="ghost">Review queue</Button></Link></div>
     </div>
     {error && <Alert>{error}</Alert>}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-busy={loading}>
       {loading ? Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-[116px]" />) : <>
         <Link href="/raw"><Stat label="Raw episodes" value={raw?.summary.total ?? "—"} hint={`${raw?.summary.teleop ?? 0} recordings · ${raw?.summary.scripted ?? 0} scripted`} /></Link>
-        <Link href="/review?status=pending"><Stat label="Pending review" value={pending} hint={`${reviewed} already reviewed`} tone={pending ? "warn" : "ok"} /></Link>
-        <Link href="/raw?review_status=approved"><Stat label="Approved" value={raw?.summary.approved ?? "—"} hint={raw ? `${percent(raw.summary.approved / Math.max(1, raw.summary.total), 1)} of raw` : undefined} tone="ok" /></Link>
+        <Link href="/raw?collection_batch_id=__all__&review_status=pending"><Stat label="Pending review" value={pending} hint={`${reviewed} already reviewed`} tone={pending ? "warn" : "ok"} /></Link>
+        <Link href="/raw?collection_batch_id=__all__&review_status=approved"><Stat label="Approved" value={raw?.summary.approved ?? "—"} hint={raw ? `${percent(raw.summary.approved / Math.max(1, raw.summary.total), 1)} of raw` : undefined} tone="ok" /></Link>
         <Link href="/datasets"><Stat label="Datasets" value={datasets.length} hint={`${bytes(totalDatasetBytes)} exported`} /></Link>
         <Link href="/training"><Stat label="Training runs" value={runs.length} hint={`${activeRuns.length} active · ${failedRuns} failed`} tone={failedRuns ? "warn" : undefined} /></Link>
         <Link href="/evaluate"><Stat label="Evaluations" value={evaluations.length} hint={bestEvaluation ? `best ${percent(bestEvaluation.success_rate ?? 0, 1)}` : "no completed result"} tone={failedEvaluations ? "warn" : "ok"} /></Link>
@@ -109,7 +109,7 @@ export default function OverviewPage() {
       <Card title="Collection batches" subtitle="Largest batches currently present in raw storage." actions={<Link href="/collect"><Button variant="subtle">New collection</Button></Link>}>
         {batchRows.length ? <div className="divide-y divide-ink-700/60">{batchRows.map(([batch, count]) => <div key={batch} className="flex items-center justify-between gap-3 py-2.5"><div className="min-w-0"><div className="truncate text-sm font-medium">{batch}</div><div className="text-xs text-ink-400">{count} episodes</div></div><div className="flex gap-2"><Link href={`/raw?collection_batch_id=${encodeURIComponent(batch)}`}><Button variant="subtle">View raw</Button></Link><Link href={`/convert?batch=${encodeURIComponent(batch)}`}><Button variant="ghost">Convert</Button></Link></div></div>)}</div> : <Empty>No collection batch metadata yet.</Empty>}
       </Card>
-      <Card title="Action required" subtitle="Items worth checking before the next training cycle."><div className="space-y-2"><Action href="/review?status=pending" count={pending} label="episodes waiting for review" tone={pending ? "warn" : "ok"} /><Action href="/datasets" count={unusedDatasets.length} label="datasets have never been trained" tone={unusedDatasets.length ? "warn" : "ok"} /><Action href="/training" count={failedRuns} label="training runs failed" tone={failedRuns ? "bad" : "ok"} /><Action href="/evaluate?status=failed" count={failedEvaluations} label="evaluations failed" tone={failedEvaluations ? "bad" : "ok"} /></div></Card>
+      <Card title="Action required" subtitle="Items worth checking before the next training cycle."><div className="space-y-2"><Action href="/raw?collection_batch_id=__all__&review_status=pending" count={pending} label="episodes waiting for review" tone={pending ? "warn" : "ok"} /><Action href="/datasets" count={unusedDatasets.length} label="datasets have never been trained" tone={unusedDatasets.length ? "warn" : "ok"} /><Action href="/training" count={failedRuns} label="training runs failed" tone={failedRuns ? "bad" : "ok"} /><Action href="/evaluate?status=failed" count={failedEvaluations} label="evaluations failed" tone={failedEvaluations ? "bad" : "ok"} /></div></Card>
     </div>
 
     <Card title="Dataset usage" subtitle="Exports connected to training runs." actions={<Link href="/datasets"><Button variant="subtle">View all</Button></Link>}>

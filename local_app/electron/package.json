@@ -1,0 +1,47 @@
+{
+  "name": "telecollect-local-desktop",
+  "private": true,
+  "version": "0.1.1",
+  "description": "TeleCollect Local desktop shell",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir --win --x64",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "ai.telecollect.local",
+    "productName": "TeleCollect Local",
+    "asar": true,
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/TeleCollectBackend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "TeleCollectLocalSetup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TeleCollect Local",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

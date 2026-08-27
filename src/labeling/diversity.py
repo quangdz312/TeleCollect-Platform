@@ -99,8 +99,18 @@ def build_report(
     *,
     task: str,
     scope: str,
+    collection_batch_id: str | None = None,
 ) -> dict[str, Any]:
     task_records = [record for record in records if record.get("task") == task]
+    if collection_batch_id:
+        # Đợt thu nằm trong provenance của từng episode, không phải một trường
+        # riêng, nên lọc ở đây thay vì bắt người gọi tự cắt danh sách.
+        task_records = [
+            record
+            for record in task_records
+            if str(record.get("provenance", {}).get("collection_batch_id", ""))
+            == collection_batch_id
+        ]
     selected = [record for record in task_records if _selected(record, labels, scope)]
     selected_ids = {str(record["episode_id"]) for record in selected}
     quality_rows = []
@@ -171,9 +181,16 @@ def build_report(
     }
 
 
-def diversity_report(space: Any, *, task: str, scope: str) -> dict[str, Any]:
+def diversity_report(
+    space: Any, *, task: str, scope: str, collection_batch_id: str | None = None
+) -> dict[str, Any]:
     records = space.scores()
     task_records = [record for record in records if record.get("task") == task]
     return build_report(
-        records, space.labels_by_id(), load_initial_positions(space, task_records), task=task, scope=scope,
+        records,
+        space.labels_by_id(),
+        load_initial_positions(space, task_records),
+        task=task,
+        scope=scope,
+        collection_batch_id=collection_batch_id,
     )

@@ -272,8 +272,9 @@ export const labeling = {
     workspace: WorkspaceSummary;
   }>("/auto-gate/apply"),
 
-  diversity: (task: string, scope: DiversityScope) => {
+  diversity: (task: string, scope: DiversityScope, collectionBatchId?: string) => {
     const query = new URLSearchParams({ task, scope });
+    if (collectionBatchId) query.set("collection_batch_id", collectionBatchId);
     return request<DiversityReport>(`/diversity?${query}`);
   },
 };

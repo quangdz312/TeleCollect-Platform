@@ -55,6 +55,13 @@ export default function ConvertPage() {
   }, [user]);
 
   useEffect(() => {
+    // Arriving from a batch card on the raw page: convert that whole batch,
+    // letting the export filters below decide which of its episodes qualify.
+    const fromBatch = new URLSearchParams(window.location.search).get("batch");
+    if (fromBatch) setBatchId(fromBatch);
+  }, []);
+
+  useEffect(() => {
     const selection = readConvertSelection();
     if (selection.length === 0) return;
     setSelectedEpisodes(selection);
