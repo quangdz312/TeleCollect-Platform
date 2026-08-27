@@ -828,10 +828,6 @@ export const api = {
   datasetDownloadUrl: (id: string) => mediaUrl(`/datasets/${encodeURIComponent(id)}/download`),
   deleteExport: (id: string) => request<void>(`/datasets/${id}`, { method: "DELETE" }),
 
-  dvc: async () => ({
-    available: false,
-    reason: "backend stores dataset zips locally in this core build",
-  }),
 
   runs: () => request<TrainingRun[]>("/training/jobs"),
   run: (id: string) => request<TrainingRun>(`/training/jobs/${id}`),
