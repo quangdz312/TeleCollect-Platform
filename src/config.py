@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=200, ge=1)
     """Giới hạn dung lượng mỗi file upload (front/wrist/trajectory), tính bằng MB."""
 
+    storage_quota_gb: float = Field(default=0, ge=0)
+    """Trần dung lượng cho toàn bộ dữ liệu, tính bằng GB. `0` = không giới hạn.
+
+    Đặt cho bản deploy chứ không phải để tiết kiệm chỗ: khi ổ đĩa VPS đầy,
+    Postgres không ghi được và Docker không pull được — mất dữ liệu mới là
+    chuyện nhỏ, sập cả site mới là chuyện lớn. Trần này khiến việc nạp dữ liệu
+    bị từ chối SỚM, kèm thông báo rõ ràng, thay vì để đĩa cạn dần.
+
+    Kiểm ở các đường nạp lớn (import batch, upload dataset), không kiểm ở
+    đường ghi nhỏ như label hay metadata — chặn một verdict vài trăm byte thì
+    chỉ làm hỏng công việc review chứ không cứu được gì.
+
+    Mặc định `0` để môi trường dev và test không đổi hành vi.
+    """
+
     review_dir: str = "./data/review"
     """Workspace cho scripted collection, scoring và nhãn người chấm."""
 

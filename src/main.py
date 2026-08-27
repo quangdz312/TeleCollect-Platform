@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router
+from src.services import quota
 from src.config import get_settings
 from src.core.session import get_session_manager
 from src.models.db import init_db
@@ -76,4 +77,22 @@ app.include_router(router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "env": settings.app_env}
+    """Liveness, kèm mức sử dụng kho dữ liệu.
+
+    Hạn mức nằm ở đây thay vì một endpoint riêng vì đây là thứ giám sát vốn đã
+    hỏi định kỳ — biết đĩa sắp đầy TRƯỚC khi nó đầy mới có ích, lúc đầy rồi thì
+    Postgres đã không ghi được nữa.
+    """
+
+    # Không `refresh=True`: health bị hỏi liên tục, quét lại cây thư mục mỗi
+    # lần sẽ tự nó thành gánh nặng.
+    disk = await asyncio.to_thread(quota.status)
+    payload: dict[str, object] = {
+        "status": "ok",
+        "env": settings.app_env,
+        "storage_used_bytes": disk.used_bytes,
+    }
+    if disk.enabled:
+        payload["storage_limit_bytes"] = disk.limit_bytes
+        payload["storage_percent_used"] = disk.percent_used
+    return payload

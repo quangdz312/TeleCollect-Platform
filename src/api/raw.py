@@ -62,6 +62,8 @@ from src.models.schemas import (
     RawSignalsResponse,
 )
 from src.services import storage
+from src.services import quota
+from src.services.quota import QuotaExceededError
 from src.services.security import (
     ROLE_RANK,
     current_user_allow_query_token,
@@ -914,6 +916,15 @@ async def import_collection_batch(
     scratch = Path(mkdtemp(prefix="batch-upload-"))
     upload_path = scratch / "batch.zip"
     try:
+        # Chặn trước khi nhận byte nào: nhận xong cả file rồi mới từ chối là
+        # đã tiêu tốn đúng chỗ trống mà hạn mức đang bảo vệ.
+        try:
+            quota.check()
+        except QuotaExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc),
+            ) from exc
+
         try:
             await _save_upload_chunked(
                 archive, upload_path, settings.max_upload_mb * 1024 * 1024,
@@ -921,6 +932,16 @@ async def import_collection_batch(
         except UploadTooLargeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc),
+            ) from exc
+
+        # Kiểm lại khi đã biết kích thước thật: lần kiểm trước chỉ biết chỗ
+        # trống hiện có, chưa biết gói này to bao nhiêu. Giải nén còn tốn thêm
+        # chỗ nữa nên tính gấp đôi cho phần dựng lại.
+        try:
+            quota.check(upload_path.stat().st_size * 2)
+        except QuotaExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc),
             ) from exc
 
         # Giải nén, dựng lại file collection và rescore đều là việc nặng đồng bộ

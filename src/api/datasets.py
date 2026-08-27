@@ -60,6 +60,8 @@ from src.models.schemas import (
 from src.api.demos import UploadTooLargeError, _save_upload_chunked
 from src.config import get_settings
 from src.services import storage
+from src.services import quota
+from src.services.quota import QuotaExceededError
 from src.services.dataset_builder import build_dataset
 from src.services.dataset_upload import DatasetUploadError, probe_robomimic
 from src.services.robomimic_dataset_builder import build_robomimic_dataset
@@ -376,6 +378,15 @@ async def upload_dataset(
     dataset_id = str(uuid.uuid4())
     destination = storage.dataset_hdf5_path(dataset_id)
     try:
+        # Chặn trước khi nhận byte nào: nhận xong cả file rồi mới từ chối là
+        # đã tiêu tốn đúng chỗ trống mà hạn mức đang bảo vệ.
+        try:
+            quota.check()
+        except QuotaExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc),
+            ) from exc
+
         try:
             await _save_upload_chunked(
                 file, destination, settings.max_upload_mb * 1024 * 1024,
@@ -383,6 +394,17 @@ async def upload_dataset(
         except UploadTooLargeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc),
+            ) from exc
+
+        # File đã nằm trên đĩa nên nó đã được tính vào `used`; kiểm lại với 0
+        # byte thêm để bắt trường hợp chính nó làm vượt trần. Khối `except` bao
+        # ngoài xoá file đi.
+        quota.reset_cache()
+        try:
+            quota.check()
+        except QuotaExceededError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc),
             ) from exc
 
         try:
