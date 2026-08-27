@@ -654,6 +654,35 @@ class TrainingJobRequest(BaseModel):
     wandb_entity: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class WandbSettingsResponse(BaseModel):
+    """Trạng thái tích hợp W&B của người đang đăng nhập.
+
+    KHÔNG có trường nào chứa API key. `key_preview` là bốn ký tự cuối, đủ để
+    nhận ra key nào đang lưu chứ không dùng lại được.
+    """
+
+    configured: bool = False
+    key_preview: str = ""
+    entity: str = ""
+
+
+class WandbSettingsRequest(BaseModel):
+    """Lưu key W&B. `api_key` bỏ trống nghĩa là chỉ đổi entity."""
+
+    # W&B key là chuỗi hex 40 ký tự; chặn ở đây để người dùng biết ngay là dán
+    # nhầm, thay vì phải đợi tới lúc job chạy mới báo lỗi xác thực.
+    api_key: str | None = Field(default=None, min_length=8, max_length=200)
+    entity: str = Field(default="", max_length=128)
+
+
+class WandbVerifyResponse(BaseModel):
+    """Kết quả thử key với W&B thật."""
+
+    ok: bool
+    detail: str = ""
+    entity: str = ""
+
+
 class TrainingCheckpointResponse(BaseModel):
     """Checkpoint do backend phát hiện trong đúng thư mục của training job."""
 

@@ -54,6 +54,32 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class UserIntegration(Base):
+    """Per-user credentials for third-party services.
+
+    One row per user, created on first save. The Weights & Biases key is a live
+    credential to that person's own account, so it is stored encrypted (see
+    `src/services/secrets.py`) and never returned by the API — only a
+    four-character preview, enough to recognise which key is stored.
+
+    Separate from `users` on purpose: a secret should not be loaded every time
+    a user row is read for auth or display.
+    """
+
+    __tablename__ = "user_integrations"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: Fernet token, not the key itself. Empty means "not configured".
+    wandb_api_key: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Last four characters, for display. Safe to return.
+    wandb_key_preview: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    #: W&B team or username runs are logged under; blank uses the key's default.
+    wandb_entity: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Task(Base):
     __tablename__ = "tasks"
 

@@ -195,13 +195,23 @@ class TrainingJobManager:
             raise ValueError("Training job id không hợp lệ")
         return path
 
+    #: Kept in the in-memory record so the subprocess can be given it, and
+    #: stripped before the record reaches disk. Encrypting the key in the
+    #: database only to write it out here in clear text would undo the point.
+    _UNPERSISTED_KEYS = ("wandb_api_key",)
+
     def _write(self, record: dict[str, Any]) -> None:
         job_dir = self._job_dir(record["id"])
         job_dir.mkdir(parents=True, exist_ok=True)
         target = job_dir / "job.json"
         temporary = job_dir / "job.json.tmp"
+        persisted = {
+            key: value
+            for key, value in record.items()
+            if key not in self._UNPERSISTED_KEYS
+        }
         temporary.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(persisted, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(temporary, target)
 
@@ -221,7 +231,33 @@ class TrainingJobManager:
             except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
                 continue
 
-    def submit(self, config: TrainingJobRequest, dataset_path: Path) -> TrainingJobResponse:
+    @staticmethod
+    def _environment(record: dict[str, Any]) -> dict[str, str]:
+        """Environment for one training subprocess.
+
+        The W&B key travels here rather than on the command line: arguments are
+        visible to anyone who can list processes, and they end up in logs. It is
+        also per-job, not per-server — each job carries the key of the person
+        who started it.
+        """
+
+        environment = dict(os.environ)
+        key = record.get("wandb_api_key")
+        if key:
+            environment["WANDB_API_KEY"] = str(key)
+        else:
+            # Never let a job silently log to whoever ran the server: an
+            # inherited key would send someone's run to a stranger's account.
+            environment.pop("WANDB_API_KEY", None)
+        return environment
+
+    def submit(
+        self,
+        config: TrainingJobRequest,
+        dataset_path: Path,
+        *,
+        wandb_api_key: str | None = None,
+    ) -> TrainingJobResponse:
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id)
         output_dir = job_dir / "output"
@@ -244,6 +280,9 @@ class TrainingJobManager:
             "checkpoints": [],
             "cancel_requested": False,
             "runner_state": {},
+            # Stripped by `_write`; reaches the subprocess through the
+            # environment, never the command line or job.json.
+            "wandb_api_key": wandb_api_key or "",
         }
         with self._lock:
             self._jobs[job_id] = record
@@ -284,6 +323,7 @@ class TrainingJobManager:
                     process = subprocess.Popen(
                         self._command(record),
                         cwd=self.repo_root,
+                        env=self._environment(record),
                         stdout=log,
                         stderr=subprocess.STDOUT,
                         text=True,

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
+from src.api.integrations import wandb_credentials
 from src.models.db import Dataset, User, get_session
 from src.models.enums import DatasetStatus, UserRole
 from src.models.schemas import (
@@ -81,13 +82,34 @@ def _job_or_404(job_id: str) -> TrainingJobResponse:
 async def create_training_job(
     body: TrainingJobRequest,
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(require_min_role(UserRole.REVIEWER)),
+    user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> TrainingJobResponse:
     _require_training_enabled()
     dataset = await session.get(Dataset, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy dataset")
-    return job_manager().submit(body, _validated_dataset_path(dataset))
+
+    key = ""
+    entity = ""
+    if body.wandb_enabled:
+        # Key của CHÍNH người bấm train, không phải key chung của máy chủ: run
+        # phải về đúng tài khoản W&B của họ.
+        stored, entity = await wandb_credentials(session, user.id)
+        if not stored:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Chưa cấu hình Weights & Biases. Vào Settings để thêm API key, "
+                    "hoặc tắt W&B cho lần chạy này."
+                ),
+            )
+        key = stored
+        if entity and not body.wandb_entity:
+            body = body.model_copy(update={"wandb_entity": entity})
+
+    return job_manager().submit(
+        body, _validated_dataset_path(dataset), wandb_api_key=key or None,
+    )
 
 
 @router.get("/jobs", response_model=list[TrainingJobResponse])

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { Alert, Badge, Button, Card, Empty, Field, Input, Select, Stat } from "@/components/ui";
@@ -65,6 +66,8 @@ function wandbProjectUrl(run: TrainingRun): string | null {
 export default function TrainingPage() {
   const { user } = useAuth();
   const [datasets, setDatasets] = useState<DatasetExport[]>([]);
+  /** `null` until known — the warning must not flash before the check lands. */
+  const [wandbConfigured, setWandbConfigured] = useState<boolean | null>(null);
   const [runs, setRuns] = useState<TrainingRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<TrainingRequest>(INITIAL_FORM);
@@ -163,6 +166,15 @@ export default function TrainingPage() {
       );
     }
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    // Only the flag, never the key — the endpoint does not return one.
+    void api
+      .wandbSettings()
+      .then((settings) => setWandbConfigured(settings.configured))
+      .catch(() => setWandbConfigured(null));
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -407,6 +419,16 @@ export default function TrainingPage() {
                     <option value="yes">Track this run</option>
                   </Select>
                 </Field>
+                {form.wandb_enabled && wandbConfigured === false && (
+                  <div className="sm:col-span-2">
+                    <Alert tone="bad">
+                      You have not connected a W&B account, so this run would be
+                      refused. Add your API key in{" "}
+                      <Link href="/settings" className="underline">Settings</Link>, or set
+                      Weights &amp; Biases back to Disabled.
+                    </Alert>
+                  </div>
+                )}
                 {form.wandb_enabled && (
                   <>
                     <Field label="W&B project">

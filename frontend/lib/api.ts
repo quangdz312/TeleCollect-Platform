@@ -550,6 +550,25 @@ function emptyTrajectory(demo: Demo): Trajectory {
   };
 }
 
+/**
+ * Weights & Biases settings for the signed-in user.
+ *
+ * There is deliberately no field carrying the key itself: the backend never
+ * returns it, only `key_preview` — the last four characters — so a person can
+ * tell which key is stored without the interface holding a usable copy.
+ */
+export interface WandbSettings {
+  configured: boolean;
+  key_preview: string;
+  entity: string;
+}
+
+export interface WandbVerifyResult {
+  ok: boolean;
+  detail: string;
+  entity: string;
+}
+
 export const api = {
   async login(username: string, password: string) {
     const body = new URLSearchParams();
@@ -581,6 +600,22 @@ export const api = {
   ) => request<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   tasks: async () => (await request<BackendTask[]>("/tasks")).map(toTask),
+
+  wandbSettings: () => request<WandbSettings>("/integrations/wandb"),
+  saveWandbSettings: (body: { api_key?: string; entity: string }) =>
+    request<WandbSettings>("/integrations/wandb", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  clearWandbSettings: () =>
+    request<WandbSettings>("/integrations/wandb", { method: "DELETE" }),
+  verifyWandbKey: (body: { api_key?: string; entity?: string }) =>
+    request<WandbVerifyResult>("/integrations/wandb/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity: "", ...body }),
+    }),
   teleopTasks: async () => (await request<BackendTask[]>("/teleop/tasks")).map(toTask),
 
   health: async () => {

@@ -36,6 +36,9 @@ aiosqlite>=0.20.0
 pyjwt>=2.10.0
 bcrypt>=4.2.0
 python-multipart>=0.0.20
+# Fernet, for the per-user Weights & Biases key at rest. Present transitively
+# today, but declared because losing it would silently take stored keys with it.
+cryptography>=43.0.0
 
 # Dataset I/O
 pyarrow>=18.0.0
