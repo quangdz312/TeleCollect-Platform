@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { notFound, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { Alert, Button, Card, Dropzone, Field, Select } from "@/components/ui";
 import { ApiError, api, type Task } from "@/lib/api";
 
@@ -24,6 +25,10 @@ function uploadErrorMessage(exc: unknown): string {
 }
 
 export default function UploadPage() {
+  // Collection lives in the packaged app, not the deployed web build. The
+  // backend drops `/teleop` and `/demos` under the same flag, so without this
+  // the page would render and then fail on every request.
+  if (!COLLECTION_ENABLED) notFound();
   const { user } = useAuth();
   const router = useRouter();
 

@@ -226,6 +226,8 @@ class Runtime:
             "APP_ENV": "development",
             "JWT_SECRET": local_admin_password(),
             "TRAINING_ENABLED": "false",
+            # Collection is what this app is for; the deployed web turns it off.
+            "COLLECTION_ENABLED": "true",
             "TELECOLLECT_LOCAL_ADMIN": "local-desktop",
             "TELECOLLECT_LOCAL_PASSWORD": local_admin_password(),
         }
@@ -260,6 +262,10 @@ class Runtime:
             "NEXT_PUBLIC_API_URL": API_PLACEHOLDER,
             "NEXT_PUBLIC_API_ORIGIN": API_PLACEHOLDER,
             "NEXT_PUBLIC_WS_BASE": WS_PLACEHOLDER,
+            # This app is where data gets collected, so it builds the
+            # collection screens in. The deployed web sets this to "0" and
+            # ships without them; both read the same source tree.
+            "NEXT_PUBLIC_COLLECTION_ENABLED": "1",
         }
         log_path = self.logs / "frontend-build.log"
         with open(log_path, "w", encoding="utf-8") as log:

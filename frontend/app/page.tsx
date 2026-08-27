@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { Alert, Badge, Button, Card, Empty, Skeleton, Stat } from "@/components/ui";
 import { api, type DatasetExport, type EvaluationRun, type TrainingRun } from "@/lib/api";
 import { bytes, percent, timeAgo } from "@/lib/format";
@@ -73,7 +74,7 @@ export default function OverviewPage() {
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-ink-700 pb-3">
       <div><p className="text-[11px] font-bold uppercase tracking-[0.18em] text-accent-500">TeleCollect command center</p><h1 className="mt-1 font-heading text-[24px] font-bold">Overview</h1><p className="mt-1 text-sm text-ink-400">Follow data from collection through review, conversion, training and evaluation.</p></div>
-      <div className="flex gap-2"><Link href="/collect"><Button variant="primary">Collect data</Button></Link><Link href="/raw"><Button variant="ghost">Review queue</Button></Link></div>
+      <div className="flex gap-2">{COLLECTION_ENABLED && <Link href="/collect"><Button variant="primary">Collect data</Button></Link>}<Link href="/raw"><Button variant={COLLECTION_ENABLED ? "ghost" : "primary"}>Review queue</Button></Link></div>
     </div>
     {error && <Alert>{error}</Alert>}
 
@@ -106,8 +107,8 @@ export default function OverviewPage() {
     </div>
 
     <div className="grid gap-5 xl:grid-cols-2">
-      <Card title="Collection batches" subtitle="Largest batches currently present in raw storage." actions={<Link href="/collect"><Button variant="subtle">New collection</Button></Link>}>
-        {batchRows.length ? <div className="divide-y divide-ink-700/60">{batchRows.map(([batch, count]) => <div key={batch} className="flex items-center justify-between gap-3 py-2.5"><div className="min-w-0"><div className="truncate text-sm font-medium">{batch}</div><div className="text-xs text-ink-400">{count} episodes</div></div><div className="flex gap-2"><Link href={`/raw?collection_batch_id=${encodeURIComponent(batch)}`}><Button variant="subtle">View raw</Button></Link><Link href={`/convert?batch=${encodeURIComponent(batch)}`}><Button variant="ghost">Convert</Button></Link></div></div>)}</div> : <Empty>No collection batch metadata yet.</Empty>}
+      <Card title="Collection batches" subtitle="Largest batches currently present in raw storage." actions={COLLECTION_ENABLED ? <Link href="/collect"><Button variant="subtle">New collection</Button></Link> : undefined}>
+        {batchRows.length ? <div className="divide-y divide-ink-700/60">{batchRows.map(([batch, count]) => <div key={batch} className="flex items-center justify-between gap-3 py-2.5"><div className="min-w-0"><div className="truncate text-sm font-medium">{batch}</div><div className="text-xs text-ink-400">{count} episodes</div></div><div className="flex gap-2"><Link href={`/raw?collection_batch_id=${encodeURIComponent(batch)}`}><Button variant="subtle">View raw</Button></Link><Link href={`/raw?collection_batch_id=${encodeURIComponent(batch)}`}><Button variant="ghost">Convert</Button></Link></div></div>)}</div> : <Empty>No collection batch metadata yet.</Empty>}
       </Card>
       <Card title="Action required" subtitle="Items worth checking before the next training cycle."><div className="space-y-2"><Action href="/raw?collection_batch_id=__all__&review_status=pending" count={pending} label="episodes waiting for review" tone={pending ? "warn" : "ok"} /><Action href="/datasets" count={unusedDatasets.length} label="datasets have never been trained" tone={unusedDatasets.length ? "warn" : "ok"} /><Action href="/training" count={failedRuns} label="training runs failed" tone={failedRuns ? "bad" : "ok"} /><Action href="/evaluate?status=failed" count={failedEvaluations} label="evaluations failed" tone={failedEvaluations ? "bad" : "ok"} /></div></Card>
     </div>

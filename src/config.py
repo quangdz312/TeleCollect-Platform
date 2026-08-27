@@ -132,6 +132,20 @@ class Settings(BaseSettings):
     # Data privacy — ràng buộc: ẩn danh khuôn mặt nếu bản ghi có hình ảnh người
     enable_face_anonymization: bool = True
 
+    collection_enabled: bool = True
+    """Cho phép thu dữ liệu trực tiếp qua API: teleop và upload demo thủ công.
+
+    Ranh giới giữa hai sản phẩm dùng chung `src/`. App đóng gói
+    (`local_app/`) là nơi thu dữ liệu — nó chạy cạnh simulator, có bàn phím và
+    tay cầm — nên bật cờ này. Bản web triển khai ở server chỉ để review, convert
+    và train trên dữ liệu đã thu, nên tắt: `/teleop` và `/demos` không được
+    mount, và giao diện thu dữ liệu cũng biến mất theo cờ tương ứng ở frontend.
+
+    Tắt cờ KHÔNG gỡ code: `src/api/demos.py` vẫn cung cấp phần đọc upload theo
+    chunk cho `POST /datasets/uploads` và `POST /raw/batches/{id}/import`, và
+    `src/sim/` vẫn là nền của scripted collection lẫn playback.
+    """
+
     training_enabled: bool = True
     """Cho phép tạo training/evaluation job thật (spawn subprocess).
 

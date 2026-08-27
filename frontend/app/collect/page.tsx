@@ -1,7 +1,9 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { ScriptedCollector } from "@/components/ScriptedCollector";
 import { TeleopConsole } from "@/components/TeleopConsole";
 import { Alert, Empty } from "@/components/ui";
@@ -10,6 +12,10 @@ import { api, type Task } from "@/lib/api";
 type Mode = "manual" | "scripted";
 
 export default function CollectPage() {
+  // Collection lives in the packaged app, not the deployed web build. The
+  // backend drops `/teleop` and `/demos` under the same flag, so without this
+  // the page would render and then fail on every request.
+  if (!COLLECTION_ENABLED) notFound();
   const { user } = useAuth();
   const [mode, setMode] = useState<Mode>("manual");
   const [tasks, setTasks] = useState<Task[] | null>(null);

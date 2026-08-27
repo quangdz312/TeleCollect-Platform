@@ -1,7 +1,9 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { Alert, Badge, Card, Empty, Select, Stat } from "@/components/ui";
 import { Histogram, QualityChart, Scatter } from "@/components/DiversityCharts";
 import {
@@ -12,6 +14,10 @@ import {
 } from "@/lib/labeling";
 
 export default function DiversityPage() {
+  // Superseded by Review -> Data diversity, which scopes the same report to one
+  // collection batch. Kept only for the app, which still links to it.
+  if (!COLLECTION_ENABLED) notFound();
+
   const { user } = useAuth();
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [task, setTask] = useState("");
