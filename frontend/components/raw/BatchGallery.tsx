@@ -35,7 +35,7 @@ function BatchCard({
   onConvert: (batch: CollectionBatch) => void;
 }) {
   return (
-    <Card>
+    <Card className="flex min-h-[210px] flex-col">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-lg font-bold text-ink-100">{batch.name}</h3>
@@ -66,7 +66,7 @@ function BatchCard({
         <span className="text-bad-600">{batch.rejected} rejected</span>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-ink-700 pt-4">
+      <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-ink-700 pt-4">
         <button
           type="button"
           onClick={() => onOpen(batch.id)}
@@ -277,7 +277,7 @@ export function BatchGallery({
       ) : visible.length === 0 ? (
         <Empty>No batch matches “{query}”.</Empty>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visible.map((batch) => (
             <BatchCard
               key={batch.id}

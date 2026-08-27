@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AppShell } from "@/components/AppShell";
 import { AuthProvider } from "@/components/AuthProvider";
-import { Nav } from "@/components/Nav";
 import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
@@ -16,8 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen">
         <AuthProvider>
           <ToastProvider>
-            <Nav />
-            <main className="mx-auto w-full max-w-[1500px] px-5 py-6">{children}</main>
+            <AppShell>{children}</AppShell>
           </ToastProvider>
         </AuthProvider>
       </body>

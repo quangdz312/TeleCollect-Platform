@@ -42,7 +42,7 @@ export function RawEpisodeFilters({
   scoped?: boolean;
 }) {
   return (
-    <div className="space-y-4">
+    <div className={scoped ? "space-y-2.5" : "space-y-4"}>
       <form
         className={scoped ? "flex flex-col gap-2" : "flex flex-col gap-2 sm:flex-row"}
         onSubmit={(event) => {
@@ -50,20 +50,88 @@ export function RawEpisodeFilters({
           onApplySearch();
         }}
       >
-        <Field label="Search episode" className="min-w-0 flex-1">
-          <Input
-            value={searchDraft}
-            onChange={(event) => onSearchDraftChange(event.target.value)}
-            placeholder="Episode ID or display name"
-          />
-        </Field>
-        <div className="flex items-end gap-2">
-          <Button type="submit" variant="primary">Search</Button>
-          <Button type="button" variant="subtle" onClick={onReset}>Reset</Button>
-        </div>
+        {scoped ? (
+          /*
+           * In the left bar there is no room for a pair of buttons beside the
+           * field, and none is needed: the form submits on Enter, so the icon
+           * is an affordance rather than the only way to search.
+           */
+          <>
+            <div className="relative">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <Input
+                style={{ paddingLeft: "2rem", paddingRight: value.search ? "2rem" : undefined }}
+                aria-label="Search episode"
+                value={searchDraft}
+                onChange={(event) => onSearchDraftChange(event.target.value)}
+                placeholder="Search episodes"
+              />
+              {/*
+                Keyed off the applied term, not the draft: a search is only
+                escapable if the way out is visible while it is in force. The
+                draft can differ from what the table is filtered by, and it is
+                the latter the reviewer needs to undo.
+              */}
+              {value.search ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    onSearchDraftChange("");
+                    onChange({ search: "" });
+                  }}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-ink-400 transition-colors hover:text-ink-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+            {value.search ? (
+              <p className="px-0.5 text-[11px] text-ink-400">
+                Filtering every status by “{value.search}”.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={onReset}
+              className="self-start rounded text-xs text-ink-400 hover:text-ink-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
+            >
+              Reset filters
+            </button>
+          </>
+        ) : (
+          <>
+            <Field label="Search episode" className="min-w-0 flex-1">
+              <Input
+                value={searchDraft}
+                onChange={(event) => onSearchDraftChange(event.target.value)}
+                placeholder="Episode ID or display name"
+              />
+            </Field>
+            <div className="flex items-end gap-2">
+              <Button type="submit" variant="primary">Search</Button>
+              <Button type="button" variant="subtle" onClick={onReset}>Reset</Button>
+            </div>
+          </>
+        )}
       </form>
 
-      <div className={scoped ? "grid gap-3" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-6"}>
+      <div className={scoped ? "grid gap-2.5" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-6"}>
         <Field label="Source">
           <Select
             value={value.source}

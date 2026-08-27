@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import { useLeftBar } from "@/components/AppShell";
 import { BatchGallery } from "@/components/raw/BatchGallery";
 import { RawEpisodeFilters, type RawFiltersValue } from "@/components/raw/RawEpisodeFilters";
 import { RawEpisodeTable } from "@/components/raw/RawEpisodeTable";
@@ -63,6 +65,26 @@ function filtersToQuery(filters: RawFiltersValue) {
   return query;
 }
 
+/** One count in the sticky batch header — the card set, flattened to a line. */
+function HeaderStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone?: "warn";
+}) {
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <span className="text-[11px] uppercase tracking-wider text-ink-400">{label}</span>
+      <strong className={tone === "warn" ? "font-bold text-warn-400" : "font-bold text-ink-100"}>
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </strong>
+    </span>
+  );
+}
+
 export default function RawEpisodesPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -89,6 +111,15 @@ export default function RawEpisodesPage() {
   const [batchError, setBatchError] = useState<string | null>(null);
   const [selectingAll, setSelectingAll] = useState(false);
   const [statusCounts, setStatusCounts] = useState<RawEpisodeSummary | null>(null);
+  /**
+   * The batch's task, held apart from the table.
+   *
+   * Diversity is scoped by task, and an unnamed batch carries no `task_name`,
+   * so the task has to come from the episodes. Reading it off the current page
+   * meant a status with no rows — Archived, usually — left it null and the
+   * report claimed the batch had no task at all.
+   */
+  const [batchTask, setBatchTask] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<"episodes" | "diversity">("episodes");
   const [importing, setImporting] = useState(false);
@@ -173,7 +204,13 @@ export default function RawEpisodesPage() {
     void rawApi
       .episodes(params)
       .then((result) => {
-        if (!cancelled) setStatusCounts(result.summary);
+        if (cancelled) return;
+        setStatusCounts(result.summary);
+        // `summary.by_task` counts the filtered set, so it is scoped to this
+        // batch — unlike `available_tasks`, which the backend derives from
+        // every episode in the system and would name another batch's task.
+        // The request omits `review_status`, so this survives an empty tab.
+        setBatchTask(Object.keys(result.summary.by_task)[0] ?? null);
       })
       .catch(() => {
         if (!cancelled) setStatusCounts(null);
@@ -192,11 +229,6 @@ export default function RawEpisodesPage() {
     user,
   ]);
 
-  if (authLoading || !user) return null;
-  if (user.role === "operator") {
-    return <Alert tone="info">Raw episode management is available to reviewers and administrators.</Alert>;
-  }
-
   const updateFilters = (patch: Partial<RawFiltersValue>) => {
     setPage(1);
     const next = { ...filters, ...patch };
@@ -204,6 +236,78 @@ export default function RawEpisodesPage() {
     const query = filtersToQuery(next);
     router.replace(query.size ? `/raw?${query}` : "/raw", { scroll: false });
   };
+
+  const insideBatch = Boolean(filters.collectionBatch);
+
+  // Diversity is a view of one batch, so leaving the batch — or opening a
+  // different one — has to drop it. Otherwise the next batch opens straight
+  // into a report while the status rail shows nothing selected.
+  useEffect(() => {
+    setView("episodes");
+  }, [filters.collectionBatch]);
+
+  // One continuous rail: status above, filters below, no cards or gap between
+  // them, so reaching the search box is a glance rather than a scroll.
+  const reviewRail = useMemo(
+    () =>
+      insideBatch ? (
+        <div className="space-y-3">
+          <div>
+            <p className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+              Review status
+            </p>
+            <ReviewStatusTabs
+              value={view === "diversity" ? DIVERSITY_VIEW : filters.reviewStatus}
+              counts={statusCounts ?? summary}
+              onChange={(next) => {
+                if (next === DIVERSITY_VIEW) {
+                  setView("diversity");
+                  return;
+                }
+                setView("episodes");
+                updateFilters({ reviewStatus: next });
+              }}
+            />
+          </div>
+
+          <div className="border-t border-ink-700 pt-3">
+            <p className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+              Filters
+            </p>
+            <RawEpisodeFilters
+              value={filters}
+              searchDraft={searchDraft}
+              onSearchDraftChange={setSearchDraft}
+              onChange={updateFilters}
+              onApplySearch={() => updateFilters({ search: searchDraft })}
+              onReset={() => {
+                // Clearing the filters must not also leave the batch: this
+                // button lives inside one, and dropping to `/raw` threw the
+                // reviewer back out to the batch picker.
+                setSearchDraft("");
+                updateFilters({
+                  ...EMPTY_FILTERS,
+                  collectionBatch: filters.collectionBatch,
+                });
+              }}
+              tasks={tasks}
+              batches={batches}
+              scoped={filters.collectionBatch !== ALL_BATCHES}
+            />
+          </div>
+        </div>
+      ) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [insideBatch, view, filters, statusCounts, summary, searchDraft, tasks, batches],
+  );
+
+  // Above the early returns below: a hook has to run on every render.
+  useLeftBar(reviewRail);
+
+  if (authLoading || !user) return null;
+  if (user.role === "operator") {
+    return <Alert tone="info">Raw episode management is available to reviewers and administrators.</Alert>;
+  }
 
   const exportWholeBatch = async (batchId: string) => {
     setBatchError(null);
@@ -307,14 +411,15 @@ export default function RawEpisodesPage() {
   // always work inside one batch at a time.
   if (!filters.collectionBatch) {
     return (
-      <div className="space-y-5">
-        <div>
-          <h1 className="font-heading text-[22px] font-bold tracking-tight">Raw episodes</h1>
-          <p className="mt-0.5 text-sm text-ink-400">
-            Teleop and scripted captures grouped by collection batch. Raw artifacts remain unchanged.
+      <div className="-mx-5 -my-6">
+        <div className="sticky top-0 z-20 border-b border-ink-700 bg-ink-950/95 px-5 py-3 backdrop-blur-md">
+          <h1 className="font-heading text-lg font-bold tracking-tight">Raw episodes</h1>
+          <p className="text-xs text-ink-400">
+            Captures grouped by collection batch.
           </p>
         </div>
 
+        <div className="space-y-5 px-5 pb-6 pt-5">
         <RawSummaryCards summary={summary} />
 
         <BatchGallery
@@ -358,6 +463,8 @@ export default function RawEpisodesPage() {
           </Card>
         )}
 
+        </div>
+
         {exporting && (
           <ExportDialog
             episodes={selectedEpisodes}
@@ -370,74 +477,47 @@ export default function RawEpisodesPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <button
-          type="button"
-          onClick={() => updateFilters({ collectionBatch: "" })}
-          className="mb-1 rounded text-sm text-ink-400 hover:text-ink-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
-        >
-          ← All batches
-        </button>
-        <h1 className="font-heading text-[22px] font-bold tracking-tight">
-          {filters.collectionBatch === ALL_BATCHES
-            ? "All episodes"
-            : (activeBatch?.name ?? filters.collectionBatch)}
-        </h1>
-        <p className="mt-0.5 text-sm text-ink-400">
-          {activeBatch?.description ||
-            "Filter, then select episodes to review or send to conversion."}
-        </p>
+    <div className="-mx-5 -my-6">
+      {/*
+        Header and counts ride together in one sticky strip. The counts are the
+        reference a reviewer checks against while working down a long table, so
+        scrolling them away is what made them worth pinning; folding them into
+        the title row keeps that strip shallow enough to be worth the space.
+      */}
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-ink-700 bg-ink-950/95 px-5 py-2.5 backdrop-blur-md">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => updateFilters({ collectionBatch: "" })}
+            className="rounded text-xs text-ink-400 hover:text-ink-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
+          >
+            ← All batches
+          </button>
+          <h1 className="truncate font-heading text-lg font-bold tracking-tight">
+            {filters.collectionBatch === ALL_BATCHES
+              ? "All episodes"
+              : (activeBatch?.name ?? filters.collectionBatch)}
+          </h1>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm tabular-nums">
+          <HeaderStat label="Episodes" value={summary.total} />
+          <HeaderStat label="Teleop" value={summary.teleop} />
+          <HeaderStat label="Scripted" value={summary.scripted} />
+          <HeaderStat
+            label="Success / failure"
+            value={`${summary.successes} / ${summary.failures}`}
+            tone="warn"
+          />
+          <HeaderStat label="Pending" value={summary.pending} />
+        </div>
       </div>
 
-      <RawSummaryCards summary={summary} />
-
-      {/*
-        Filters live in a rail rather than a full-width block above the table:
-        inside one batch there are only a handful of them, and a wide row of
-        mostly-empty selects pushed the episodes themselves below the fold.
-      */}
-      <div className="grid gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start">
-        <aside className="space-y-4 lg:sticky lg:top-4">
-          <Card title="Review status">
-            <ReviewStatusTabs
-              value={view === "diversity" ? DIVERSITY_VIEW : filters.reviewStatus}
-              counts={statusCounts ?? summary}
-              onChange={(next) => {
-                if (next === DIVERSITY_VIEW) {
-                  setView("diversity");
-                  return;
-                }
-                setView("episodes");
-                updateFilters({ reviewStatus: next });
-              }}
-            />
-          </Card>
-
-          <Card title="Filters">
-            <RawEpisodeFilters
-              value={filters}
-              searchDraft={searchDraft}
-              onSearchDraftChange={setSearchDraft}
-              onChange={updateFilters}
-              onApplySearch={() => updateFilters({ search: searchDraft })}
-              onReset={() => {
-                setSearchDraft("");
-                setPage(1);
-                setFilters(EMPTY_FILTERS);
-                router.replace("/raw", { scroll: false });
-              }}
-              tasks={tasks}
-              batches={batches}
-              scoped={filters.collectionBatch !== ALL_BATCHES}
-            />
-          </Card>
-        </aside>
-
+      <div className="grid px-5 pb-6 pt-5">
         <div className="space-y-5">
       {view === "diversity" ? (
         <BatchDiversity
-          task={activeBatch?.task_name ?? items[0]?.task ?? null}
+          task={activeBatch?.task_name ?? batchTask ?? items[0]?.task ?? null}
           collectionBatchId={
             filters.collectionBatch === ALL_BATCHES ? undefined : filters.collectionBatch
           }
