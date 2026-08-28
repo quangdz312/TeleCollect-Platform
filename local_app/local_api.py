@@ -9,7 +9,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from local_app import catalog
+import asyncio
+
+from local_app import catalog, sync
 from local_app.batch_storage import configure_runtime_storage, find_episode_folder
 from local_app.lerobot_export import export as export_lerobot
 
@@ -42,6 +44,12 @@ class ExportRequest(BaseModel):
 class BulkReviewRequest(BaseModel):
     episode_ids: list[str] = Field(min_length=1, max_length=5000)
     decision: Literal["approved", "rejected", "unreviewed"]
+
+
+class SyncSignIn(BaseModel):
+    server: str = Field(min_length=1, max_length=300)
+    username: str = Field(min_length=1, max_length=150)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class BatchCreate(BaseModel):
@@ -268,6 +276,45 @@ def install(app: FastAPI, workspace: Path) -> None:
                 "pending": sum(item["status"] == "unreviewed" for item in members),
             })
         return sorted(result, key=lambda item: (not item["active"], item["name"].casefold()))
+
+    # --- sync with the shared server ----------------------------------------
+    #
+    # A second session, separate from the app's own `local-desktop` account:
+    # different database and different signing secret, so neither token means
+    # anything to the other side.
+
+    @app.get("/api/v1/local/sync")
+    def sync_status():
+        session = sync.current_session()
+        return session.as_dict() if session else None
+
+    @app.post("/api/v1/local/sync/login")
+    async def sync_login(body: SyncSignIn):
+        try:
+            session = await asyncio.to_thread(
+                sync.sign_in, body.server, body.username, body.password,
+            )
+        except sync.SyncError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return session.as_dict()
+
+    @app.post("/api/v1/local/sync/logout")
+    def sync_logout():
+        sync.sign_out()
+        return {"ok": True}
+
+    @app.post("/api/v1/local/batches/{batch_id}/sync")
+    async def sync_batch(batch_id: str):
+        data = catalog.load(workspace)
+        batch = data["batches"].get(batch_id)
+        if not isinstance(batch, dict):
+            raise HTTPException(status_code=404, detail="Batch not found")
+        try:
+            # Zipping and uploading are blocking and can run for minutes on a
+            # large batch; keep them off the event loop.
+            return await asyncio.to_thread(sync.upload_batch, workspace, batch)
+        except sync.SyncError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/v1/local/batches/active")
     async def active_batch():

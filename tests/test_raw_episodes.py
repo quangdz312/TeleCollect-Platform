@@ -598,7 +598,15 @@ IMPORT_API = "/api/v1/raw/batches/{}/import"
 
 
 @pytest.mark.asyncio
-async def test_batch_import_requires_reviewer(client, db_session, raw_workspace, tmp_path):
+async def test_an_operator_can_import_the_batches_they_collected(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """Collecting is an operator's job, so delivering a collection must be too.
+
+    Gating this at reviewer would leave the people producing the data unable to
+    get it onto the server. Judging what arrives is still reviewer-only.
+    """
+
     operator = await _create_user(db_session, "import_operator", UserRole.OPERATOR)
 
     response = await client.post(
@@ -607,7 +615,18 @@ async def test_batch_import_requires_reviewer(client, db_session, raw_workspace,
         files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 201, response.text
+    assert response.json()["episodes"] == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_import_still_requires_signing_in(client, db_session, raw_workspace, tmp_path):
+    response = await client.post(
+        IMPORT_API.format("lift-v9"),
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+
+    assert response.status_code in {401, 403}
 
 
 @pytest.mark.asyncio

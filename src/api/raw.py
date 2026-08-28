@@ -73,6 +73,10 @@ from src.services.streaming import stream_file_range
 
 router = APIRouter(prefix="/raw", tags=["raw"])
 reviewer_required = require_min_role(UserRole.REVIEWER)
+#: Importing is how a collection reaches the server at all, and collecting is an
+#: operator's job — gating it at reviewer would mean the people producing the
+#: data could not deliver it. Reading and judging what arrives stays at reviewer.
+operator_required = require_min_role(UserRole.OPERATOR)
 
 RawSource = Literal["teleop", "scripted"]
 RawQuality = Literal["clean", "good", "medium", "poor"]
@@ -895,7 +899,7 @@ async def import_collection_batch(
     archive: UploadFile = File(...),
     name: str = Form(default=""),
     overwrite: bool = Form(default=False),
-    user: User = Depends(reviewer_required),
+    user: User = Depends(operator_required),
     session: AsyncSession = Depends(get_session),
 ) -> CollectionBatchImportResponse:
     """Nạp một zip thư mục batch của app vào đợt thu `batch_id`.
