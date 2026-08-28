@@ -753,3 +753,183 @@ async def test_dataset_upload_name_clash_is_409_without_overwrite(
     kept = await db_session.get(Dataset, first.json()["id"])
     await db_session.refresh(kept)
     assert Path(kept.zip_path).is_file()
+
+
+# --- LeRobot -----------------------------------------------------------------
+
+
+def _lerobot_teleop(directory: Path, *, control_hz: int = 10, frames: int = 5) -> None:
+    """A schema-v2 teleop recording with the video LeRobot needs."""
+
+    import subprocess
+
+    import imageio_ffmpeg
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    directory.mkdir(parents=True, exist_ok=True)
+    qpos = np.arange(frames * 9, dtype=np.float64).reshape(frames, 9) / 100.0
+    ee_pose = np.zeros((frames, 7), dtype=np.float64)
+    ee_pose[:, :3] = np.arange(frames * 3).reshape(frames, 3) / 10.0
+    ee_pose[:, 3] = 1.0
+    pq.write_table(
+        pa.table({
+            "t": [index / control_hz for index in range(frames)],
+            "qpos": qpos.tolist(),
+            "qvel": (qpos + 0.5).tolist(),
+            "ee_pose": ee_pose.tolist(),
+            "privileged_state": np.arange(frames * 12, dtype=np.float64).reshape(frames, 12).tolist(),
+            "object": (np.arange(frames * 10, dtype=np.float64).reshape(frames, 10) / 100.0).tolist(),
+            "action": (np.arange(frames * 7, dtype=np.float64).reshape(frames, 7) / 10.0).tolist(),
+        }),
+        directory / storage.ACTIONS_FILENAME,
+    )
+    (directory / storage.META_FILENAME).write_text(
+        json.dumps({
+            "episode_id": directory.name,
+            "task_name": "lift_cube",
+            "operator_id": "operator-1",
+            "num_steps": frames,
+            "control_hz": control_hz,
+            "teleop_schema_version": 2,
+            "task_success": True,
+        }),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi",
+            "-i", "testsrc=duration=1:size=64x64:rate=10",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(directory / storage.FRONT_FILENAME),
+        ],
+        capture_output=True, check=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_lerobot_export_builds_a_directory_dataset(
+    client, db_session, storage_dir, operator, reviewer
+):
+    """The whole point of the format: a LeRobot v3 tree, not a zip of videos."""
+
+    await _create_task(db_session, "lift_cube")
+    episode = Episode(
+        task_name="lift_cube",
+        operator_id=operator.id,
+        reviewer_id=reviewer.id,
+        reviewed_at=datetime.now(UTC),
+        status=DemoStatus.APPROVED,
+        outcome=DemoOutcome.SUCCESS,
+        num_frames=5,
+    )
+    db_session.add(episode)
+    await db_session.commit()
+    await db_session.refresh(episode)
+    _lerobot_teleop(storage.episode_dir(episode.id))
+
+    response = await client.post(
+        API,
+        json={
+            "name": "lerobot-v1",
+            "format": "lerobot",
+            "task_names": ["lift_cube"],
+            "data_source": "teleop",
+        },
+        headers=_auth_headers(reviewer),
+    )
+
+    assert response.status_code == 202, response.text
+    dataset = await _wait_ready(client, _auth_headers(reviewer), response.json()["id"])
+    assert dataset["status"] == "ready", dataset.get("error_message")
+    assert dataset["format"] == "lerobot"
+
+    stored = await db_session.get(Dataset, response.json()["id"])
+    await db_session.refresh(stored)
+    root = Path(stored.zip_path)
+    assert root.is_dir()
+    info = json.loads((root / "meta" / "info.json").read_text(encoding="utf-8"))
+    assert info["codebase_version"] == "v3.0"
+    assert info["total_episodes"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_lerobot_dataset_downloads_as_one_zip(
+    client, db_session, storage_dir, operator, reviewer
+):
+    """A directory cannot be streamed as a file, so download packs it."""
+
+    await _create_task(db_session, "lift_cube")
+    episode = Episode(
+        task_name="lift_cube",
+        operator_id=operator.id,
+        reviewer_id=reviewer.id,
+        reviewed_at=datetime.now(UTC),
+        status=DemoStatus.APPROVED,
+        outcome=DemoOutcome.SUCCESS,
+        num_frames=5,
+    )
+    db_session.add(episode)
+    await db_session.commit()
+    await db_session.refresh(episode)
+    _lerobot_teleop(storage.episode_dir(episode.id))
+
+    created = await client.post(
+        API,
+        json={
+            "name": "lerobot-download",
+            "format": "lerobot",
+            "task_names": ["lift_cube"],
+            "data_source": "teleop",
+        },
+        headers=_auth_headers(reviewer),
+    )
+    dataset_id = created.json()["id"]
+    await _wait_ready(client, _auth_headers(reviewer), dataset_id)
+
+    response = await client.get(f"{API}/{dataset_id}/download", headers=_auth_headers(reviewer))
+
+    assert response.status_code == 200, response.text
+    assert "lerobot.zip" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_lerobot_dataset_removes_the_whole_tree(
+    client, db_session, storage_dir, operator, reviewer
+):
+    """`unlink` raises on a directory, which would silently orphan gigabytes."""
+
+    await _create_task(db_session, "lift_cube")
+    episode = Episode(
+        task_name="lift_cube",
+        operator_id=operator.id,
+        reviewer_id=reviewer.id,
+        reviewed_at=datetime.now(UTC),
+        status=DemoStatus.APPROVED,
+        outcome=DemoOutcome.SUCCESS,
+        num_frames=5,
+    )
+    db_session.add(episode)
+    await db_session.commit()
+    await db_session.refresh(episode)
+    _lerobot_teleop(storage.episode_dir(episode.id))
+
+    created = await client.post(
+        API,
+        json={
+            "name": "lerobot-delete",
+            "format": "lerobot",
+            "task_names": ["lift_cube"],
+            "data_source": "teleop",
+        },
+        headers=_auth_headers(reviewer),
+    )
+    dataset_id = created.json()["id"]
+    await _wait_ready(client, _auth_headers(reviewer), dataset_id)
+    root = Path((await db_session.get(Dataset, dataset_id)).zip_path)
+    assert root.is_dir()
+
+    response = await client.delete(f"{API}/{dataset_id}", headers=_auth_headers(reviewer))
+
+    assert response.status_code == 204
+    assert not root.exists()

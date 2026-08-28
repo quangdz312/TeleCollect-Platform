@@ -519,8 +519,11 @@ class DatasetCreateRequest(BaseModel):
         default=False, description="True: xoá dataset cùng tên (record + zip cũ) rồi tạo lại"
     )
     format: str = Field(
-        default="raw", pattern="^(raw|robomimic)$",
-        description="raw: core ZIP cũ; robomimic: HDF5 từ scripted hoặc manual teleop đã duyệt",
+        default="raw", pattern="^(raw|robomimic|lerobot)$",
+        description=(
+            "raw: core ZIP cũ; robomimic: HDF5 từ scripted hoặc manual teleop đã duyệt; "
+            "lerobot: thư mục LeRobot v3 từ teleop đã duyệt"
+        ),
     )
     data_source: Literal["teleop", "scripted", "both"] = Field(
         default="both",

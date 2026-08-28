@@ -53,7 +53,12 @@ export function ExportDialog({
   // robomimic writes one file per task, so a mixed selection has no single
   // target to write into.
   const tooManyTasks = format === "robomimic" && tasks.length > 1;
-  const canSubmit = approved.length > 0 && name.trim().length > 0 && !tooManyTasks && !busy;
+  // The LeRobot writer reads teleop recording directories; scripted episodes
+  // live inside multi-demo HDF5 files and never reach it, so a scripted-only
+  // selection would fail after the job started rather than here.
+  const noTeleop = format === "lerobot" && !sources.has("teleop");
+  const canSubmit =
+    approved.length > 0 && name.trim().length > 0 && !tooManyTasks && !noTeleop && !busy;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -148,6 +153,13 @@ export function ExportDialog({
               </Alert>
             ) : null}
 
+            {noTeleop ? (
+              <Alert tone="bad">
+                LeRobot exports teleop recordings, and this selection has none. Pick
+                teleop episodes, or choose the robomimic format for scripted data.
+              </Alert>
+            ) : null}
+
             <Field label="Dataset name">
               <Input
                 value={name}
@@ -164,11 +176,7 @@ export function ExportDialog({
                 onChange={(event) => setFormat(event.target.value)}
               >
                 <option value="robomimic">RoboMimic (HDF5)</option>
-                {/* The web has no LeRobot writer yet — `src/export/lerobot.py`
-                    is a stub, and picking "lerobot" server-side falls through
-                    to the generic video ZIP instead. Keep it visible but
-                    unselectable, as the old convert page did. */}
-                <option disabled>LeRobot (planned)</option>
+                <option value="lerobot">LeRobot v3</option>
                 <option disabled>RLDS (planned)</option>
               </Select>
             </Field>

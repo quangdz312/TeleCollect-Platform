@@ -514,7 +514,9 @@ function toExport(dataset: BackendDataset): DatasetExport {
     num_episodes: dataset.num_episodes,
     num_frames: dataset.num_frames,
     size_bytes: dataset.size_bytes || 0,
-    path: `data/datasets/${dataset.id}.${dataset.format === "robomimic" ? "hdf5" : "zip"}`,
+    path: `data/datasets/${dataset.id}.${
+      dataset.format === "robomimic" ? "hdf5" : dataset.format === "lerobot" ? "lerobot" : "zip"
+    }`,
     dvc_hash: null,
     status: dataset.status,
     error_message: dataset.error_message,

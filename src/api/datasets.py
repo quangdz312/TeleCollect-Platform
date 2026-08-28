@@ -26,7 +26,10 @@ import asyncio
 import json
 import logging
 import math
+import os
+import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
 import h5py
@@ -64,6 +67,7 @@ from src.services import quota
 from src.services.quota import QuotaExceededError
 from src.services.dataset_builder import build_dataset
 from src.services.dataset_upload import DatasetUploadError, probe_robomimic
+from src.services.lerobot_dataset_builder import build_lerobot_dataset
 from src.services.robomimic_dataset_builder import build_robomimic_dataset
 from src.services.security import current_user, current_user_allow_query_token, require_min_role
 from src.services.streaming import stream_file_range
@@ -167,11 +171,11 @@ async def create_dataset(
     if not body.include_failures:
         query = query.where(Episode.outcome == DemoOutcome.SUCCESS)
     episodes = list((await session.scalars(query)).all())
-    if body.format == "robomimic" and body.data_source == "scripted":
+    if body.format in {"robomimic", "lerobot"} and body.data_source == "scripted":
         episodes = []
 
-    if body.format == "robomimic":
-        if len(body.task_names) != 1:
+    if body.format in {"robomimic", "lerobot"}:
+        if body.format == "robomimic" and len(body.task_names) != 1:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="RoboMimic BC cần đúng một task/environment cho mỗi dataset",
@@ -181,7 +185,9 @@ async def create_dataset(
         space = workspace()
         labels = space.labels_by_id()
         scripted = []
-        if body.data_source != "teleop":
+        # LeRobot đọc thư mục teleop; episode scripted nằm trong HDF5 nhiều
+        # demo một file nên không đi qua writer này.
+        if body.data_source != "teleop" and body.format == "robomimic":
             for score in space.scores():
                 if body.episode_ids and str(score["episode_id"]) not in body.episode_ids:
                     continue
@@ -234,7 +240,7 @@ async def create_dataset(
     if body.episode_ids:
         eligible_ids = (
             {str(item["episode_id"]) for item in export_items}
-            if body.format == "robomimic"
+            if body.format in {"robomimic", "lerobot"}
             else {episode.id for episode in episodes}
         )
         invalid_ids = sorted(set(body.episode_ids) - eligible_ids)
@@ -263,7 +269,11 @@ async def create_dataset(
         old_zip = Path(existing.zip_path) if existing.zip_path else storage.dataset_zip_path(existing.id)
         await session.delete(existing)
         await session.commit()
-        old_zip.unlink(missing_ok=True)
+        if old_zip.is_dir():
+            # A LeRobot export is a directory, not a file.
+            shutil.rmtree(old_zip, ignore_errors=True)
+        else:
+            old_zip.unlink(missing_ok=True)
 
     dataset = Dataset(
         name=body.name,
@@ -283,10 +293,12 @@ async def create_dataset(
         # Persist the final extension immediately so list/create responses can
         # expose the correct format even while the background build is running.
         dataset.zip_path = str(storage.dataset_hdf5_path(dataset.id))
+    elif body.format == "lerobot":
+        dataset.zip_path = str(storage.dataset_lerobot_path(dataset.id))
 
     linked_episode_ids = (
         {str(item["episode_id"]) for item in manual}
-        if body.format == "robomimic" else {episode.id for episode in episodes}
+        if body.format in {"robomimic", "lerobot"} else {episode.id for episode in episodes}
     )
     for episode in episodes:
         if episode.id not in linked_episode_ids:
@@ -305,7 +317,10 @@ async def create_dataset(
                 else str(scripted_by_id[str(item["episode_id"])].get("task", body.task_names[0]))
             ),
             "outcome": (
-                teleop_by_id[str(item["episode_id"])].outcome.value
+                # `outcome` is a String column, so it round-trips from the DB as
+                # a plain str even though it is assigned as an enum.
+                str(getattr(teleop_by_id[str(item["episode_id"])].outcome, "value",
+                            teleop_by_id[str(item["episode_id"])].outcome))
                 if str(item["episode_id"]) in teleop_by_id and teleop_by_id[str(item["episode_id"])].outcome
                 else ("success" if item.get("successful") else "failure")
             ),
@@ -329,13 +344,13 @@ async def create_dataset(
     # liệu), background task tự y như đang chạy nhầm CSDL.
     bind = session.bind
     assert isinstance(bind, AsyncEngine)  # session_factory() luôn bind theo engine, không phải connection
-    if body.format == "robomimic":
+    if body.format in {"robomimic", "lerobot"}:
         # Set unconditionally a few lines above; the ORM column type is
         # Optional because it's nullable for other dataset states, not
         # because it can be missing here.
         assert dataset.zip_path is not None
         background_tasks.add_task(
-            build_robomimic_dataset,
+            build_robomimic_dataset if body.format == "robomimic" else build_lerobot_dataset,
             dataset.id,
             Path(dataset.zip_path),
             export_items,
@@ -559,6 +574,20 @@ async def download_dataset(
     if not zip_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy file dataset")
 
+    if zip_path.is_dir():
+        # LeRobot is a directory; hand the browser one zip of it. Built into a
+        # temporary file rather than streamed, so a failure mid-pack surfaces
+        # as an error instead of a truncated archive the user thinks is whole.
+        packed = await asyncio.to_thread(_pack_directory, zip_path)
+        return stream_file_range(
+            packed,
+            request,
+            media_type="application/zip",
+            extra_headers={
+                "Content-Disposition": f'attachment; filename="{dataset.name}.lerobot.zip"'
+            },
+        )
+
     is_hdf5 = zip_path.suffix == ".hdf5"
 
     return stream_file_range(
@@ -567,6 +596,30 @@ async def download_dataset(
         media_type="application/x-hdf5" if is_hdf5 else "application/zip",
         extra_headers={"Content-Disposition": f'attachment; filename="{dataset.name}{zip_path.suffix}"'},
     )
+
+
+def _pack_directory(root: Path) -> Path:
+    """Zip a LeRobot export for download, reusing the archive once built.
+
+    Video and parquet are already compressed, so ZIP_STORED keeps the CPU cost
+    near zero. The archive sits beside the dataset and is rebuilt only when the
+    export is newer than it, which matters because these run to gigabytes.
+    """
+
+    archive = root.with_suffix(root.suffix + ".zip")
+    if archive.is_file() and archive.stat().st_mtime >= root.stat().st_mtime:
+        return archive
+    staging = archive.with_name(f".{archive.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with zipfile.ZipFile(staging, "w", zipfile.ZIP_STORED) as handle:
+            for path in sorted(root.rglob("*")):
+                if path.is_file():
+                    handle.write(path, path.relative_to(root).as_posix())
+        os.replace(staging, archive)
+    except Exception:
+        staging.unlink(missing_ok=True)
+        raise
+    return archive
 
 
 @router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -585,7 +638,11 @@ async def delete_dataset(
     await session.commit()
 
     try:
-        zip_path.unlink(missing_ok=True)
+        if zip_path.is_dir():
+            # A LeRobot export is a directory tree, not a single file.
+            shutil.rmtree(zip_path, ignore_errors=True)
+        else:
+            zip_path.unlink(missing_ok=True)
     except OSError as exc:
         logger.error("Không xoá được file zip dataset %s (%s): %s", dataset_id, zip_path, exc)
 

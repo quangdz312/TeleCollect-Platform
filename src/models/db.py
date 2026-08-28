@@ -219,7 +219,14 @@ class Dataset(Base):
 
     @property
     def format(self) -> str:
-        return "robomimic" if self.zip_path and self.zip_path.lower().endswith(".hdf5") else "raw"
+        # Derived from the artefact on disk rather than stored, so it cannot
+        # drift from what a download actually hands back.
+        path = (self.zip_path or "").lower()
+        if path.endswith(".hdf5"):
+            return "robomimic"
+        if path.endswith(".lerobot"):
+            return "lerobot"
+        return "raw"
 
 
 class DatasetEpisode(Base):

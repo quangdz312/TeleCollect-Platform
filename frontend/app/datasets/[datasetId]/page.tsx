@@ -54,7 +54,7 @@ export default function DatasetDetailPage() {
             <Button variant="primary">Train this dataset</Button>
           </Link>
         )}
-        {dataset.status === "ready" && <a href={api.datasetDownloadUrl(dataset.id)}><Button variant="subtle">Download HDF5</Button></a>}
+        {dataset.status === "ready" && <a href={api.datasetDownloadUrl(dataset.id)}><Button variant="subtle">{dataset.format === "robomimic" ? "Download HDF5" : dataset.format === "lerobot" ? "Download LeRobot (ZIP)" : "Download ZIP"}</Button></a>}
         {dataset.status === "failed" && <Button disabled={busy} onClick={async () => { setBusy(true); try { await api.retryExport(dataset.id); await load(); } catch (problem) { setError(problem instanceof Error ? problem.message : "Retry failed"); } finally { setBusy(false); } }}>Retry build</Button>}
       </div>
     </div>
