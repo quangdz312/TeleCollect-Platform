@@ -435,15 +435,17 @@
     const path = location.pathname;
     const pathChanged = path !== lastShellPath;
     lastShellPath = path;
-    if (path === '/login' || path === '/') { location.replace(path === '/login' ? '/review' : '/collect'); return; }
-    document.querySelectorAll('header nav a').forEach((link) => {
-      const target = new URL(link.href, location.origin).pathname;
-      link.style.display = ['/collect', '/review', '/diversity'].includes(target) ? '' : 'none';
-    });
-    const account = document.querySelector('header > div > div:last-child'); if (account) account.style.display = 'none';
-    const nav = document.querySelector('header nav');
+    // Local mode supplies its own token, so the login page is never useful.
+    // `/` is now a real Overview page, however, and must not be redirected to
+    // Collect.  Keeping the old redirect made the sidebar/brand appear to jump
+    // between pages every time Overview was selected.
+    if (path === '/login') { location.replace('/'); return; }
+    // The shared web moved navigation from a top bar into a left sidebar, so
+    // the rail is `aside nav`, not `header nav`. Every link stays visible: the
+    // app runs that same web, so Training, Evaluate and the rest work here too.
+    const nav = document.querySelector('aside nav');
     if (nav && !document.getElementById('tc-project-button')) {
-      const project = button('Project', 'rounded-lg px-3.5 py-2 text-[13px] font-medium text-ink-300'); project.id = 'tc-project-button'; project.onclick = () => openProject().catch((error) => alert(error.message)); nav.appendChild(project);
+      const project = button('Project folder', 'rounded-lg px-3.5 py-2 text-left text-[13px] font-medium text-ink-300'); project.id = 'tc-project-button'; project.onclick = () => openProject().catch((error) => alert(error.message)); nav.appendChild(project);
     }
     document.getElementById('tc-batches-button')?.remove();
     if (path === '/review') {

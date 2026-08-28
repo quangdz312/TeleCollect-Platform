@@ -4,17 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { Badge, Button, cx } from "@/components/ui";
 
 /**
- * Collect data, Upload and Data diversity are deliberately absent.
+ * Upload and Data diversity are deliberately absent: still routed and still
+ * reachable, they just no longer earn a permanent slot in the sidebar.
  *
- * They are still routed and still reachable — Overview links to /collect, and
- * /scripted and /teleop redirect into it — they just no longer earn a permanent
- * slot in the sidebar.
+ * Collect data is different. It is the desktop app's home screen — where
+ * recording actually happens — but the deployed web has no robot to connect
+ * to and `/collect` returns 404 there. So it is listed only where it works,
+ * keyed off the same flag that gates the page itself.
  */
-const LINKS: { href: string; label: string; roles?: string[] }[] = [
+const LINKS: { href: string; label: string; roles?: string[]; appOnly?: boolean }[] = [
   { href: "/", label: "Overview" },
+  { href: "/collect", label: "Collect data", appOnly: true },
   { href: "/raw", label: "Review", roles: ["reviewer", "admin"] },
   { href: "/datasets", label: "Datasets" },
   { href: "/training", label: "Training" },
@@ -29,7 +33,11 @@ export function Nav({ rail = null }: { rail?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   if (!user) return null;
 
-  const visible = LINKS.filter((link) => !link.roles || link.roles.includes(user.role));
+  const visible = LINKS.filter(
+    (link) =>
+      (!link.roles || link.roles.includes(user.role)) &&
+      (!link.appOnly || COLLECTION_ENABLED),
+  );
 
   const links = (
     <nav className="flex flex-col gap-0.5">
