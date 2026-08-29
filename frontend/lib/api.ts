@@ -357,6 +357,45 @@ function setRefreshToken(token: string | null) {
   else window.localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+// Một lần đổi token tại một thời điểm. Một trang mở thường bắn nhiều request
+// song song; hết hạn thì tất cả cùng nhận 401, và nếu mỗi cái tự đổi thì chỉ
+// cái đầu thành công — các cái sau gửi refresh token đã bị thay và bị đăng
+// xuất, đúng thứ bản vá này định chấm dứt.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  const refresh = getRefreshToken();
+  if (!refresh) return false;
+  refreshInFlight = (async () => {
+    try {
+      const response = await fetch(apiUrl("/auth/refresh"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (!response.ok) return false;
+      const token = (await response.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      setToken(token.access_token);
+      setRefreshToken(token.refresh_token);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -392,21 +431,38 @@ function errorMessage(payload: unknown, fallback: string) {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
+  const send = async () => {
+    const headers = new Headers(init.headers);
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    try {
+      return await fetch(apiUrl(path), { ...init, headers });
+    } catch (exc) {
+      throw new ApiError(
+        0,
+        `Cannot reach backend at ${API_ORIGIN}. Start FastAPI on port 8000 or set NEXT_PUBLIC_API_URL.`,
+      );
+    }
+  };
 
-  let response: Response;
-  try {
-    response = await fetch(apiUrl(path), { ...init, headers });
-  } catch (exc) {
-    throw new ApiError(
-      0,
-      `Cannot reach backend at ${API_ORIGIN}. Start FastAPI on port 8000 or set NEXT_PUBLIC_API_URL.`,
-    );
+  let response = await send();
+  // Access token sống 30 phút còn refresh token sống 7 ngày, nhưng refresh
+  // token chỉ được lưu chứ chưa bao giờ được dùng: 401 đầu tiên là đăng xuất,
+  // nên rời trang một lúc quay lại là mất phiên. Đổi token rồi gửi lại đúng
+  // một lần — thất bại lần nữa thì mới thật sự là hết phiên.
+  //
+  // FormData không gửi lại được: body của nó đã bị tiêu thụ ở lần gửi đầu,
+  // lần hai sẽ đi với thân rỗng. Upload gặp 401 vẫn phải đăng nhập lại.
+  if (
+    response.status === 401 &&
+    !path.startsWith("/auth/") &&
+    !(init.body instanceof FormData) &&
+    (await refreshAccessToken())
+  ) {
+    response = await send();
   }
 
   const payload = await parseResponse(response);
