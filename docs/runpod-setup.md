@@ -2,7 +2,7 @@
 
 Hướng dẫn thao tác trên web. Làm sau khi image đã đẩy lên Docker Hub.
 
-Địa chỉ image của dự án: **`pakerpp/telecollect-train:v3`**
+Địa chỉ image của dự án: **`pakerpp/telecollect-train:v4`**
 
 Lịch sử tag — endpoint phải trỏ tag mới nhất, RunPod cache theo tag:
 
@@ -11,6 +11,7 @@ Lịch sử tag — endpoint phải trỏ tag mới nhất, RunPod cache theo ta
 | `v1` | Bản đầu. Thiếu `wandb`, bật W&B là hỏng. |
 | `v2` | Thêm `wandb`, nhưng khoá không tới được tiến trình train nên run vẫn không hiện trên W&B. Chỉ đẩy về `last.pth` và `best_validation`. |
 | `v3` | Khoá W&B tới đúng chỗ. Giữ cả checkpoint theo `save_every_n_epochs`. In mức VRAM đỉnh vào log để chọn batch size. |
+| `v4` | Sửa phép đo VRAM: `max_memory_reserved` thay cho `max_memory_allocated`, vì cái sau bỏ qua bộ đệm của allocator nên một lần train thật chỉ báo 0.1 GB. Dòng log kèm luôn tên card. |
 
 ---
 
@@ -33,7 +34,7 @@ Image đã dựng và kiểm tra xong ở máy local — **5.55 GB**, nội dung
 hành vi lạ ở tầng Python thì đây là chỗ đáng nghi đầu tiên; sửa bằng cách thêm
 kho `deadsnakes` vào `Dockerfile.train`.
 
-Vào https://hub.docker.com/r/pakerpp/telecollect-train/tags — phải thấy tag `v3`.
+Vào https://hub.docker.com/r/pakerpp/telecollect-train/tags — phải thấy tag `v4`.
 
 Nếu chưa thấy, image chưa được đẩy lên. RunPod không tải được từ máy bạn, chỉ
 tải được từ kho công khai.
@@ -89,7 +90,7 @@ Chọn **Docker Image** (không phải GitHub Repo, không phải template có s
 Ô **Container Image** điền đúng chuỗi này:
 
 ```
-pakerpp/telecollect-train:v3
+pakerpp/telecollect-train:v4
 ```
 
 Không thêm `docker.io/` ở đầu, không thêm `https://`.

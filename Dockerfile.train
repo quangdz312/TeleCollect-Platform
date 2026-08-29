@@ -4,8 +4,8 @@
 # trong khi server chỉ nhận dữ liệu và điều phối, không train.
 #
 # Build và đẩy lên Docker Hub:
-#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v3 .
-#   docker push <tài-khoản>/telecollect-train:v3
+#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v4 .
+#   docker push <tài-khoản>/telecollect-train:v4
 #
 # Đặt tag phiên bản, đừng dùng `latest`: RunPod cache image, `latest` khiến
 # không biết endpoint đang chạy bản nào.
