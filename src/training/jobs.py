@@ -39,6 +39,9 @@ _EPOCH_BLOCK = re.compile(
     r"(?P<kind>Train|Validation) Epoch (?P<epoch>\d+)\s*\n(?P<body>\{.*?\})",
     re.DOTALL,
 )
+_GPU_MEMORY = re.compile(
+    r"GPU memory: peak (?P<peak>[0-9.]+) GB of (?P<total>[0-9.]+) GB"
+)
 _CHECKPOINT_EPOCH = re.compile(r"^model_epoch_(?P<epoch>\d+)(?=_|\.pth$)")
 _CHECKPOINT_VALIDATION = re.compile(
     r"_best_validation_(?P<loss>[0-9.eE+-]+)(?=_|\.pth$)"
@@ -68,6 +71,22 @@ def parse_training_progress(text: str) -> dict[str, int | float | None]:
         else:
             validation_loss = loss
     return {"epoch": epoch, "train_loss": train_loss, "validation_loss": validation_loss}
+
+
+def parse_gpu_memory(text: str) -> dict[str, float | None]:
+    """Đỉnh VRAM mà script train in ra khi kết thúc, nếu chạy trên GPU."""
+    match = None
+    for match in _GPU_MEMORY.finditer(text):
+        pass  # lấy lần cuối: một job chạy lại sẽ in thêm dòng mới
+    if match is None:
+        return {"gpu_peak_gb": None, "gpu_total_gb": None}
+    try:
+        return {
+            "gpu_peak_gb": float(match.group("peak")),
+            "gpu_total_gb": float(match.group("total")),
+        }
+    except ValueError:
+        return {"gpu_peak_gb": None, "gpu_total_gb": None}
 
 
 def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[str, Any]]:
@@ -284,6 +303,8 @@ class TrainingJobManager:
             "epoch": 0,
             "train_loss": None,
             "validation_loss": None,
+            "gpu_peak_gb": None,
+            "gpu_total_gb": None,
             "error": None,
             "checkpoints": [],
             "cancel_requested": False,
@@ -672,6 +693,7 @@ class TrainingJobManager:
             record["train_loss"],
             record["validation_loss"],
             record["checkpoints"],
+            record.get("gpu_peak_gb"),
         )
         log_candidates = [self._job_dir(record["id"]) / "stdout.log"]
         output_dir = Path(record["output_dir"])
@@ -684,12 +706,14 @@ class TrainingJobManager:
         progress = parse_training_progress(text)
         if progress["epoch"]:
             record.update(progress)
+        record.update(parse_gpu_memory(text))
         record["checkpoints"] = discover_checkpoints(output_dir, int(record["epoch"]))
         after = (
             record["epoch"],
             record["train_loss"],
             record["validation_loss"],
             record["checkpoints"],
+            record.get("gpu_peak_gb"),
         )
         if after != before:
             self._write(record)

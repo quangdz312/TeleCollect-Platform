@@ -514,10 +514,21 @@ export default function TrainingPage() {
         {!selected ? <Empty>Select a training run to see its details.</Empty> : (
           <div className="space-y-5">
             <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge>{selectedWandbUrl && <Button variant="success" onClick={() => window.open(selectedWandbUrl, "_blank", "noopener,noreferrer")}>Open W&B</Button>}<Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}>Delete</Button>}</div>}>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className={selected.gpu_peak_gb == null ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
                 <Stat label="Epoch" value={`${currentEpoch} / ${totalEpochs}`} />
                 <Stat label="Train loss" value={selected.train_loss == null ? "—" : selected.train_loss.toFixed(6)} />
                 <Stat label="Validation loss" value={selected.validation_loss == null ? "—" : selected.validation_loss.toFixed(6)} />
+                {selected.gpu_peak_gb != null && (
+                  <Stat
+                    label="GPU memory"
+                    value={`${selected.gpu_peak_gb.toFixed(1)} GB`}
+                    hint={
+                      selected.gpu_total_gb
+                        ? `${Math.round((100 * selected.gpu_peak_gb) / selected.gpu_total_gb)}% of ${selected.gpu_total_gb.toFixed(0)} GB · batch ${selected.config.batch_size}`
+                        : `batch ${selected.config.batch_size}`
+                    }
+                  />
+                )}
               </div>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500 transition-all" style={{ width: `${progress}%` }} /></div>
               <div className="mt-1 text-right text-xs tabular text-ink-400">{progress.toFixed(1)}%</div>

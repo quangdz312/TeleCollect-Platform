@@ -414,3 +414,32 @@ async def test_a_job_records_who_started_it(
     assert response.status_code == 202
     job_id = response.json()["id"]
     assert manager._jobs[job_id]["owner_id"] == user.id
+
+
+# --- VRAM ---------------------------------------------------------------------
+
+
+def test_gpu_memory_is_read_from_the_log():
+    from src.training.jobs import parse_gpu_memory
+
+    text = "Train Epoch 1\nGPU memory: peak 3.42 GB of 16.0 GB (21%) at batch size 32\n"
+    assert parse_gpu_memory(text) == {"gpu_peak_gb": 3.42, "gpu_total_gb": 16.0}
+
+
+def test_gpu_memory_absent_on_a_cpu_run():
+    from src.training.jobs import parse_gpu_memory
+
+    assert parse_gpu_memory("Train Epoch 1\n{}\n") == {
+        "gpu_peak_gb": None,
+        "gpu_total_gb": None,
+    }
+
+
+def test_gpu_memory_keeps_the_last_line_when_a_job_reran():
+    from src.training.jobs import parse_gpu_memory
+
+    text = (
+        "GPU memory: peak 3.40 GB of 16.0 GB (21%) at batch size 32\n"
+        "GPU memory: peak 6.80 GB of 16.0 GB (43%) at batch size 64\n"
+    )
+    assert parse_gpu_memory(text)["gpu_peak_gb"] == 6.80

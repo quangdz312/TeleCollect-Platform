@@ -152,6 +152,9 @@ export interface TrainingRun {
   epoch?: number;
   train_loss?: number | null;
   validation_loss?: number | null;
+  // Peak VRAM for the run, so the next batch size is a decision, not a guess.
+  gpu_peak_gb?: number | null;
+  gpu_total_gb?: number | null;
   checkpoints?: TrainingCheckpoint[];
   error: string | null;
   started_at?: string | null;

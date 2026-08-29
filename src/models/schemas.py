@@ -721,6 +721,10 @@ class TrainingJobResponse(BaseModel):
     validation_loss: float | None = Field(default=None, ge=0.0)
     error: str | None = None
     checkpoints: list[TrainingCheckpointResponse] = Field(default_factory=list)
+    # Đỉnh VRAM của lần chạy này, đọc từ log. Có để chọn batch size lần sau
+    # dựa trên số thật thay vì tăng đại rồi hỏng giữa chừng.
+    gpu_peak_gb: float | None = Field(default=None, ge=0.0)
+    gpu_total_gb: float | None = Field(default=None, ge=0.0)
 
 
 class EvaluationJobRequest(BaseModel):

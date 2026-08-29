@@ -58,6 +58,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _report_gpu_memory(batch_size: int) -> None:
+    """In mức VRAM đỉnh sau khi train xong, để lần sau chọn batch size có căn cứ.
+
+    Đỉnh gần như tỉ lệ thuận với batch size, nên biết batch 32 dùng hết bao
+    nhiêu là ước được batch 64 có vừa không — thay vì tăng đại rồi hỏng ở
+    giữa chừng, mất cả lần chạy đã trả tiền.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if not torch.cuda.is_available():
+        return
+    peak = torch.cuda.max_memory_allocated() / 1024**3
+    total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    print(
+        f"GPU memory: peak {peak:.2f} GB of {total:.1f} GB "
+        f"({100 * peak / total:.0f}%) at batch size {batch_size}",
+        flush=True,
+    )
+
+
 def main() -> int:
     from src.training.robomimic_bc import inspect_training_dataset, run_training
 
@@ -97,6 +119,7 @@ def main() -> int:
         print("Dry run OK: dataset hợp lệ, chưa bắt đầu training.")
         return 0
     run_training(plan)
+    _report_gpu_memory(args.batch_size)
     return 0
 
 
