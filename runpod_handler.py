@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -111,12 +112,30 @@ def upload_checkpoints(client: httpx.Client, job_id: str, output_dir: Path) -> l
     return uploaded
 
 
+def _training_environment(wandb_api_key: str | None) -> dict[str, str]:
+    """Môi trường cho tiến trình train.
+
+    Khoá W&B đi qua đây chứ không qua tham số dòng lệnh: tham số hiện ra với
+    bất kỳ ai liệt kê được tiến trình, và lọt luôn vào log đẩy về server. Đây
+    cũng là khoá của riêng người bấm Train, không phải khoá dùng chung.
+    """
+    environment = dict(os.environ)
+    if wandb_api_key:
+        environment["WANDB_API_KEY"] = wandb_api_key
+    else:
+        # Máy thuê không có khoá nào sẵn, nhưng xoá cho chắc: một khoá thừa
+        # hưởng từ image sẽ đẩy run của người này vào tài khoản người khác.
+        environment.pop("WANDB_API_KEY", None)
+    return environment
+
+
 def run_training(
     client: httpx.Client,
     job_id: str,
     config: dict[str, Any],
     dataset: Path,
     output_dir: Path,
+    wandb_api_key: str | None = None,
 ) -> int:
     """Chạy script train, vừa chạy vừa đẩy log về theo lô."""
     command = build_training_command(
@@ -130,6 +149,7 @@ def run_training(
     process = subprocess.Popen(
         command,
         cwd=Path(__file__).parent,
+        env=_training_environment(wandb_api_key),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -162,6 +182,8 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
 
     job_id = str(payload["job_id"])
     config = payload["config"]
+    # Không bắt buộc: job không bật W&B thì server không gửi khoá nào cả.
+    wandb_api_key = payload.get("wandb_api_key") or None
     try:
         with tempfile.TemporaryDirectory() as workspace:
             root = Path(workspace)
@@ -169,7 +191,9 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
             output_dir.mkdir()
             with _client(payload["callback_url"], payload["machine_token"]) as client:
                 dataset = download_dataset(client, job_id, root / "dataset.hdf5")
-                code = run_training(client, job_id, config, dataset, output_dir)
+                code = run_training(
+                    client, job_id, config, dataset, output_dir, wandb_api_key
+                )
                 if code != 0:
                     push_log(client, job_id, f"\nTraining thất bại, mã thoát {code}\n")
                     # Vẫn đẩy checkpoint đã có: một lần chạy hỏng ở epoch cuối
@@ -211,6 +235,8 @@ def _main() -> int:
             "callback_url": args.callback_url,
             "machine_token": args.machine_token,
             "config": config,
+            # Chạy tay thì lấy khoá từ môi trường sẵn có, khỏi gõ vào dòng lệnh.
+            "wandb_api_key": os.environ.get("WANDB_API_KEY", ""),
         }
     })
     print(json.dumps(result, ensure_ascii=False, indent=2))

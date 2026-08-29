@@ -128,3 +128,59 @@ def test_unexpected_exception_is_contained(monkeypatch, stubbed):
     result = handler(_event())
     assert result["status"] == "failed"
     assert "gpu fell over" in result["error"]
+
+
+# --- khoá W&B ---------------------------------------------------------------
+
+
+def test_the_wandb_key_reaches_the_training_process(monkeypatch, stubbed):
+    """Khoá phải đi tới tiến trình train qua môi trường, nếu không W&B trống."""
+    seen = {}
+
+    def capture(client, job_id, config, dataset, output_dir, wandb_api_key=None):
+        seen["key"] = wandb_api_key
+        return 0
+
+    monkeypatch.setattr(runpod_handler, "run_training", capture)
+    event = _event()
+    event["input"]["wandb_api_key"] = "wandb-secret"
+    assert handler(event)["status"] == "succeeded"
+    assert seen["key"] == "wandb-secret"
+
+
+def test_the_environment_carries_the_key():
+    environment = runpod_handler._training_environment("wandb-secret")
+    assert environment["WANDB_API_KEY"] == "wandb-secret"
+
+
+def test_an_inherited_key_is_dropped_when_the_job_brought_none(monkeypatch):
+    """Khoá thừa hưởng sẽ đẩy run của người này vào tài khoản người khác."""
+    monkeypatch.setenv("WANDB_API_KEY", "somebody-elses-key")
+    assert "WANDB_API_KEY" not in runpod_handler._training_environment(None)
+
+
+def test_popen_receives_the_key_not_just_the_function(monkeypatch, tmp_path):
+    """Kiểm tra tận `Popen`: các test trên stub `run_training` nên không thấy
+    được lúc quên truyền `env=` — chính là lỗi đã xảy ra."""
+    seen = {}
+
+    class FakeProcess:
+        stdout = iter(())
+
+        def wait(self):
+            return 0
+
+    def fake_popen(command, **kwargs):
+        seen.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(runpod_handler.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runpod_handler, "push_log", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runpod_handler, "build_training_command", lambda *a, **k: ["python", "-c", ""]
+    )
+
+    runpod_handler.run_training(
+        None, "job-1", {"name": "run"}, tmp_path / "d.hdf5", tmp_path, "wandb-secret"
+    )
+    assert seen["env"]["WANDB_API_KEY"] == "wandb-secret"

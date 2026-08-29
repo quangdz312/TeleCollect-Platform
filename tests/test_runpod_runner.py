@@ -77,6 +77,20 @@ def test_payload_strips_trailing_slash_from_base_url(configured):
     assert payload["callback_url"] == "https://tele.example.com"
 
 
+def test_payload_carries_the_wandb_key_so_the_run_reaches_the_right_account(configured):
+    """Không gửi khoá thì máy GPU train xong mà W&B trống trơn."""
+    payload = RunPodRunner().payload(_record(wandb_api_key="wandb-secret"))["input"]
+    assert payload["wandb_api_key"] == "wandb-secret"
+    # Khoá đi riêng, không lẫn vào `config` — `config` được ghi ra đĩa và trả
+    # về qua API, khoá thì không.
+    assert "wandb_api_key" not in payload["config"]
+
+
+def test_payload_omits_the_wandb_key_when_there_is_none(configured):
+    payload = RunPodRunner().payload(_record())["input"]
+    assert "wandb_api_key" not in payload
+
+
 # --- start ------------------------------------------------------------------
 
 

@@ -105,14 +105,20 @@ class RunPodRunner:
             record["id"],
             timedelta(hours=settings.runpod_max_hours) + _TOKEN_GRACE,
         )
-        return {
-            "input": {
-                "job_id": record["id"],
-                "callback_url": base_url,
-                "machine_token": token,
-                "config": record["config"],
-            }
+        # Khoá W&B đi riêng chứ không nằm trong `config`: `config` được ghi vào
+        # hồ sơ job trên đĩa và trả về qua API, còn khoá thì không (xem
+        # `_UNPERSISTED_KEYS`). Máy GPU đặt nó vào biến môi trường của tiến
+        # trình train, giống hệt đường mà runner local đang đi.
+        payload: dict[str, Any] = {
+            "job_id": record["id"],
+            "callback_url": base_url,
+            "machine_token": token,
+            "config": record["config"],
         }
+        wandb_key = record.get("wandb_api_key")
+        if wandb_key:
+            payload["wandb_api_key"] = str(wandb_key)
+        return {"input": payload}
 
     def start(self, record: dict[str, Any]) -> dict[str, Any]:
         api_key, endpoint_id, _ = self._config()
