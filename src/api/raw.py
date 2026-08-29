@@ -540,21 +540,40 @@ def _matches(
     return True
 
 
+def _scripted_detail_for(episode_id: str) -> RawEpisodeDetailResponse | None:
+    """Chi tiết một episode scripted, hoặc None nếu workspace không có nó.
+    Quét cả workspace (~30 ms) nên cũng phải chạy ngoài event loop."""
+    space = workspace()
+    record = space.scores_by_id().get(episode_id)
+    if record is None:
+        return None
+    return _scripted_detail(record, space.labels_by_id().get(episode_id))
+
+
+def _scripted_episodes() -> list[RawEpisodeResponse]:
+    """Đọc toàn bộ episode scripted từ workspace. Chạm đĩa nhiều lần — với
+    745 episode mất khoảng 130 ms — nên người gọi phải đẩy sang thread."""
+    space = workspace()
+    labels = space.labels_by_id()
+    return [
+        _scripted_episode(record, labels.get(str(record["episode_id"])))
+        for record in space.scores()
+    ]
+
+
 async def _all_episodes(
     session: AsyncSession, source: RawSource | None,
 ) -> list[RawEpisodeResponse]:
     items: list[RawEpisodeResponse] = []
     if source in (None, "teleop"):
         teleop = list((await session.scalars(select(Episode).order_by(Episode.created_at.desc()))).all())
-        items.extend(_teleop_episode(episode) for episode in teleop)
+        # `_teleop_episode` mở `meta.json` của từng episode, cũng là I/O đồng bộ.
+        items.extend(await asyncio.to_thread(lambda: [_teleop_episode(e) for e in teleop]))
 
     if source in (None, "scripted"):
-        space = workspace()
-        labels = space.labels_by_id()
-        items.extend(
-            _scripted_episode(record, labels.get(str(record["episode_id"])))
-            for record in space.scores()
-        )
+        # Một backend, một worker: mọi mili-giây chặn ở đây là mili-giây không
+        # phục vụ được teleop hay log training đang chạy.
+        items.extend(await asyncio.to_thread(_scripted_episodes))
     management_rows = list((await session.scalars(select(RawEpisodeManagement))).all())
     management_by_id = {item.episode_id: item for item in management_rows}
     return [_managed_episode(item, management_by_id.get(item.episode_id)) for item in items]
@@ -736,12 +755,9 @@ async def raw_episode_detail(
     if teleop is not None:
         return await _detail_management(session, _teleop_detail(teleop))
 
-    space = workspace()
-    record = space.scores_by_id().get(episode_id)
-    if record is not None:
-        return await _detail_management(
-            session, _scripted_detail(record, space.labels_by_id().get(episode_id)),
-        )
+    detail = await asyncio.to_thread(_scripted_detail_for, episode_id)
+    if detail is not None:
+        return await _detail_management(session, detail)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy episode")
 
 
