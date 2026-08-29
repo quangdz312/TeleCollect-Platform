@@ -257,6 +257,7 @@ class TrainingJobManager:
         dataset_path: Path,
         *,
         wandb_api_key: str | None = None,
+        owner_id: str | None = None,
     ) -> TrainingJobResponse:
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id)
@@ -264,6 +265,9 @@ class TrainingJobManager:
         output_dir.mkdir(parents=True, exist_ok=False)
         record: dict[str, Any] = {
             "id": job_id,
+            # Ai bấm Train — cần để cộng giờ GPU vào đúng tài khoản khi job
+            # kết thúc. `None` với job cũ và với runner local (không tốn giờ thuê).
+            "owner_id": owner_id,
             "dataset_id": config.dataset_id,
             "dataset_path": str(dataset_path.resolve()),
             "name": config.name,
@@ -407,18 +411,24 @@ class TrainingJobManager:
                         self._write(record)
                     return
                 if time.monotonic() > deadline:
-                    # Trần thời gian: job vẫn chạy nhưng đã vượt ngân sách. Hủy
-                    # bên RunPod trước rồi mới đánh dấu thất bại, nếu không
-                    # worker cứ chạy tiếp và hóa đơn cứ tăng.
+                    # Trần thời gian: job vẫn chạy nhưng đã hết ngân sách giờ.
+                    # Hủy bên RunPod trước, nếu không worker cứ chạy tiếp và
+                    # hóa đơn cứ tăng.
+                    #
+                    # Đánh dấu CANCELLED chứ không phải FAILED: training lưu
+                    # checkpoint theo từng epoch, nên hết giờ là dừng đúng lúc
+                    # chứ không phải hỏng — checkpoint đã lưu vẫn dùng được để
+                    # Evaluate hoặc train tiếp.
                     with self._lock:
                         snapshot = dict(self._jobs[job_id])
                     self._safe_cancel(snapshot)
                     with self._lock:
                         record = self._jobs[job_id]
-                        record["status"] = JobStatus.FAILED
+                        record["status"] = JobStatus.CANCELLED
                         record["finished_at"] = _now()
                         record["error"] = (
-                            f"Job vượt trần {settings.runpod_max_hours} giờ và đã bị hủy"
+                            f"Hết {settings.runpod_max_hours} giờ GPU — đã dừng, "
+                            "checkpoint đã lưu vẫn dùng được"
                         )
                         self._write(record)
                     return

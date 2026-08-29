@@ -53,6 +53,13 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    #: Giờ GPU thuê được cấp cho tài khoản này, và số đã dùng. Admin chỉnh
+    #: `gpu_hours_limit`; `gpu_hours_used` do hệ thống cộng dồn khi job kết
+    #: thúc. Hết giờ KHÔNG mất kết quả: job đang chạy bị dừng và checkpoint đã
+    #: lưu vẫn dùng được — xem `TrainingJobManager._run_remote`.
+    gpu_hours_limit: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    gpu_hours_used: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
 
 class UserIntegration(Base):
     """Per-user credentials for third-party services.
@@ -298,3 +305,14 @@ async def init_db(engine: AsyncEngine | None = None) -> None:
             for name, definition in additions.items():
                 if name not in columns:
                     await conn.exec_driver_sql(f"ALTER TABLE datasets ADD COLUMN {name} {definition}")
+
+            user_columns = {
+                row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(users)")).all()
+            }
+            user_additions = {
+                "gpu_hours_limit": "FLOAT NOT NULL DEFAULT 1.0",
+                "gpu_hours_used": "FLOAT NOT NULL DEFAULT 0.0",
+            }
+            for name, definition in user_additions.items():
+                if name not in user_columns:
+                    await conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {name} {definition}")

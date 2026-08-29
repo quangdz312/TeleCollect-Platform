@@ -159,3 +159,59 @@ async def test_admin_can_update_own_display_name(client, db_session):
     )
     assert resp.status_code == 200
     assert resp.json()["display_name"] == "New Name"
+
+
+# --- hạn mức giờ GPU ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_user_starts_with_one_gpu_hour(client, db_session):
+    admin = await _create_user(db_session, "quota_admin", UserRole.ADMIN)
+
+    response = await client.get(API, headers=_auth_headers(admin))
+
+    assert response.status_code == 200
+    row = next(item for item in response.json() if item["username"] == "quota_admin")
+    assert row["gpu_hours_limit"] == 1.0
+    assert row["gpu_hours_used"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_admin_can_change_the_gpu_hour_limit(client, db_session):
+    admin = await _create_user(db_session, "quota_boss", UserRole.ADMIN)
+    target = await _create_user(db_session, "quota_target", UserRole.REVIEWER)
+
+    response = await client.patch(
+        f"{API}/{target.id}", headers=_auth_headers(admin), json={"gpu_hours_limit": 5.5}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["gpu_hours_limit"] == 5.5
+
+
+@pytest.mark.asyncio
+async def test_hours_used_is_not_writable_through_the_admin_form(client, db_session):
+    """Số giờ đã dùng do hệ thống cộng dồn; admin cấp thêm bằng cách nâng hạn mức."""
+    admin = await _create_user(db_session, "quota_admin2", UserRole.ADMIN)
+    target = await _create_user(db_session, "quota_target2", UserRole.REVIEWER)
+    target.gpu_hours_used = 0.75
+    await db_session.commit()
+
+    response = await client.patch(
+        f"{API}/{target.id}", headers=_auth_headers(admin), json={"gpu_hours_used": 0.0}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["gpu_hours_used"] == 0.75
+
+
+@pytest.mark.asyncio
+async def test_a_negative_limit_is_refused(client, db_session):
+    admin = await _create_user(db_session, "quota_admin3", UserRole.ADMIN)
+    target = await _create_user(db_session, "quota_target3", UserRole.REVIEWER)
+
+    response = await client.patch(
+        f"{API}/{target.id}", headers=_auth_headers(admin), json={"gpu_hours_limit": -1}
+    )
+
+    assert response.status_code == 422

@@ -114,3 +114,22 @@ def test_failure_counter_resets_after_a_good_poll(fast_poll, tmp_path):
     results.append({"status": JobStatus.SUCCEEDED, "error": None})
     record = _run(FakeRunner(results), tmp_path)
     assert record["status"] == JobStatus.SUCCEEDED
+
+
+def test_running_out_of_gpu_hours_cancels_rather_than_fails(fast_poll, tmp_path, monkeypatch):
+    """Hết giờ GPU là dừng đúng lúc, không phải hỏng.
+
+    Training lưu checkpoint theo từng epoch, nên khi trần thời gian cắt ngang
+    thì phần đã train vẫn dùng được. Đánh dấu FAILED khiến người dùng tưởng
+    mất trắng lần chạy và thấy nó nằm chung với lỗi thật.
+    """
+    # Trần 0 giờ: quá hạn ngay lần kiểm tra đầu.
+    monkeypatch.setattr(fast_poll, "runpod_max_hours", 0.0000001)
+    runner = FakeRunner([{"status": JobStatus.RUNNING, "error": None} for _ in range(50)])
+
+    record = _run(runner, tmp_path)
+
+    assert record["status"] == JobStatus.CANCELLED
+    assert "checkpoint" in record["error"]
+    # Vẫn phải hủy bên RunPod, nếu không hóa đơn cứ chạy.
+    assert runner.cancelled is True

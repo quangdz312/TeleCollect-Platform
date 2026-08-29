@@ -103,6 +103,8 @@ async def update_user(
         target.is_active = body.is_active
     if body.password is not None:
         target.password_hash = hash_password(body.password)
+    if body.gpu_hours_limit is not None:
+        target.gpu_hours_limit = body.gpu_hours_limit
 
     await session.commit()
     await session.refresh(target)

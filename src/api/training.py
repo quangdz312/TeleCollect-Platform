@@ -32,6 +32,24 @@ from src.training.runpod_runner import RunPodRunner
 router = APIRouter(prefix="/training", tags=["training"])
 
 
+def _require_gpu_hours(user: User) -> None:
+    """Chặn TRƯỚC khi thuê GPU, không phải sau.
+
+    Hết giờ thì không cho mở job mới. Job đang chạy thì không bị đụng tới —
+    trần thời gian trong `TrainingJobManager` lo phần đó, và nó dừng job kèm
+    giữ nguyên checkpoint đã lưu chứ không huỷ kết quả.
+    """
+    remaining = user.gpu_hours_limit - user.gpu_hours_used
+    if remaining <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Đã dùng hết {user.gpu_hours_limit:g} giờ GPU. "
+                "Liên hệ quản trị viên để được cấp thêm."
+            ),
+        )
+
+
 def _require_training_enabled() -> None:
     if not get_settings().training_enabled:
         raise HTTPException(
@@ -85,6 +103,7 @@ async def create_training_job(
     user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> TrainingJobResponse:
     _require_training_enabled()
+    _require_gpu_hours(user)
     dataset = await session.get(Dataset, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy dataset")
@@ -108,7 +127,10 @@ async def create_training_job(
             body = body.model_copy(update={"wandb_entity": entity})
 
     return job_manager().submit(
-        body, _validated_dataset_path(dataset), wandb_api_key=key or None,
+        body,
+        _validated_dataset_path(dataset),
+        wandb_api_key=key or None,
+        owner_id=user.id,
     )
 
 

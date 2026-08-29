@@ -333,3 +333,84 @@ async def test_create_job_api_rejects_when_training_disabled(
 
     assert response.status_code == 403
     assert manager.list() == []
+
+
+@pytest.mark.asyncio
+async def test_create_job_api_refuses_when_gpu_hours_are_spent(
+    client, db_session, storage_dir: Path, monkeypatch
+) -> None:
+    """Hết giờ thì chặn TRƯỚC khi thuê GPU, không phải sau khi hoá đơn đã chạy."""
+    user = User(
+        username="training-reviewer-3",
+        password_hash=hash_password("password123"),
+        display_name="Training Reviewer",
+        role=UserRole.REVIEWER,
+        gpu_hours_limit=1.0,
+        gpu_hours_used=1.0,
+    )
+    dataset = Dataset(
+        id="dataset-ready-3",
+        name="lift_export",
+        task_names=["lift_cube"],
+        status=DatasetStatus.READY,
+        zip_path=str(storage_dir / "datasets" / "dataset-ready-3.hdf5"),
+    )
+    db_session.add_all([user, dataset])
+    await db_session.commit()
+    path = storage_dir / "datasets" / "dataset-ready-3.hdf5"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+    manager = TrainingJobManager(storage_dir / "training")
+    monkeypatch.setattr(training_api, "job_manager", lambda: manager)
+    headers = {"Authorization": f"Bearer {create_access_token(user.id, user.role)}"}
+
+    response = await client.post(
+        "/api/v1/training/jobs",
+        json={"dataset_id": dataset.id, "name": "lift_bc"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert "giờ GPU" in response.json()["detail"]
+    assert manager.list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_job_records_who_started_it(
+    client, db_session, storage_dir: Path, monkeypatch
+) -> None:
+    """Cần biết chủ job để cộng giờ đã dùng vào đúng tài khoản."""
+    user = User(
+        username="training-reviewer-4",
+        password_hash=hash_password("password123"),
+        display_name="Training Reviewer",
+        role=UserRole.REVIEWER,
+    )
+    dataset = Dataset(
+        id="dataset-ready-4",
+        name="lift_export",
+        task_names=["lift_cube"],
+        status=DatasetStatus.READY,
+        zip_path=str(storage_dir / "datasets" / "dataset-ready-4.hdf5"),
+    )
+    db_session.add_all([user, dataset])
+    await db_session.commit()
+    path = storage_dir / "datasets" / "dataset-ready-4.hdf5"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+    manager = TrainingJobManager(storage_dir / "training")
+    monkeypatch.setattr(training_api, "job_manager", lambda: manager)
+    monkeypatch.setattr(manager, "_run", lambda job_id: None)
+    headers = {"Authorization": f"Bearer {create_access_token(user.id, user.role)}"}
+
+    response = await client.post(
+        "/api/v1/training/jobs",
+        json={"dataset_id": dataset.id, "name": "lift_bc"},
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    assert manager._jobs[job_id]["owner_id"] == user.id

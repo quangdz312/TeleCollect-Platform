@@ -46,6 +46,8 @@ class UserResponse(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    gpu_hours_limit: float
+    gpu_hours_used: float
 
     model_config = {"from_attributes": True}
 
@@ -89,6 +91,9 @@ class UserUpdateRequest(BaseModel):
     password: str | None = Field(
         default=None, min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
     )
+    #: Admin cấp thêm hoặc rút giờ GPU. `gpu_hours_used` KHÔNG sửa được qua đây
+    #: — nó là số hệ thống cộng dồn; muốn cấp lại thì nâng hạn mức.
+    gpu_hours_limit: float | None = Field(default=None, ge=0)
 
 
 class TokenResponse(BaseModel):
