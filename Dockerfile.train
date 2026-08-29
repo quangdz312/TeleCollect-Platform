@@ -51,7 +51,7 @@ WORKDIR /app
 # torch lấy từ index riêng của PyTorch, KHÔNG từ PyPI: PyPI trả bản CPU, cài
 # xong `torch.cuda.is_available()` trả False và cả lần thuê GPU thành vô nghĩa.
 # cu124 khớp với image CUDA 12.4 ở trên.
-RUN pip install torch>=2.5.0 torchvision>=0.20.0 \
+RUN pip install torch==2.6.0 torchvision==0.21.0 \
         --index-url https://download.pytorch.org/whl/cu124
 
 # Cài dependency trước khi copy mã nguồn: sửa một dòng trong src/ thì Docker
@@ -68,15 +68,28 @@ RUN pip install -r requirements.txt
 # nên thiếu nó thì `from robomimic.scripts.train import train` hỏng và job
 # thất bại với mã 1 trước cả epoch đầu tiên (đã gặp trên image v1).
 # Danh sách này lấy từ phần hướng dẫn cài tay trong `requirements-train.txt`.
+#
+# Ghim phiên bản, và ghim đúng những con số đã đo được là chạy trên image v3.
+# Trước đó để trống nên mỗi lần build ra một image khác nhau: chỉ ba ngày giữa
+# v2 và v3, `transformers` đã nhảy 4.41 -> 5.16 và `huggingface_hub` 0.23 ->
+# 1.29. Lần này vẫn chạy, nhưng đó là may chứ không phải thiết kế — và một
+# image train hỏng chỉ lộ ra khi đang trả tiền GPU.
+#
+# robomimic 0.5 khai nó cần bản cũ hơn hẳn (huggingface_hub 0.23.4,
+# transformers 4.41.2, diffusers 0.11.1). pip sẽ cảnh báo xung đột khi build.
+# Giữ bản mới vì đã kiểm chứng `file_utils` và `robomimic.scripts.train` đều
+# import được; hạ xuống đúng bản robomimic khai là việc khác, cần đo lại.
 RUN pip install --no-deps \
         "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5" \
-    && pip install imageio imageio-ffmpeg tensorboard tensorboardX matplotlib \
-    && pip install huggingface-hub diffusers transformers safetensors \
+    && pip install imageio==2.37.4 imageio-ffmpeg==0.6.0 tensorboard==2.21.0 \
+        tensorboardX==2.6.5 matplotlib==3.11.1 \
+    && pip install huggingface-hub==1.29.0 diffusers==0.40.0 \
+        transformers==5.16.1 safetensors==0.8.0 \
     && pip install "numpy>=1.26.0,<2.0.0"
 
 # SDK của RunPod và W&B: chỉ image này cần, nên không nằm trong requirements.txt.
 # `wandb` đến từ PR #29 — image v1 dựng trước đó nên không có, bật W&B sẽ hỏng.
-RUN pip install runpod>=1.6.0 wandb>=0.19.0
+RUN pip install runpod==1.12.0 wandb==0.29.0
 
 # Cùng lý do như image server — xem ghi chú ở `Dockerfile`. MUJOCO_GL chọn
 # backend của MuJoCo, còn PyOpenGL có bộ dò nền riêng mặc định chọn GLX và
