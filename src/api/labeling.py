@@ -20,6 +20,7 @@ bằng `require_role(UserRole.REVIEWER)`.
 
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -288,6 +289,21 @@ async def list_episodes(
     include_score: bool = False,
     limit: int = Query(default=500, ge=1, le=5000),
     _user: User = Depends(reviewer_required),
+) -> dict[str, Any]:
+    # Đọc cả workspace và liệt kê thư mục video — khoảng 140 ms với kho hiện
+    # tại. Backend chỉ có một worker nên chặn ở đây là chặn tất cả mọi người.
+    return await asyncio.to_thread(
+        _collect_episodes, task, quality, collection_batch_id, status, include_score, limit
+    )
+
+
+def _collect_episodes(
+    task: str | None,
+    quality: str | None,
+    collection_batch_id: str | None,
+    status: str,
+    include_score: bool,
+    limit: int,
 ) -> dict[str, Any]:
     space = workspace()
     labels = space.labels_by_id()

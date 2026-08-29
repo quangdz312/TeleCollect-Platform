@@ -540,6 +540,17 @@ def _matches(
     return True
 
 
+def _purge_episode_dirs(episode_ids: list[str]) -> None:
+    """Xoá thư mục của từng episode, bỏ qua cái đã không còn."""
+    for episode_id in episode_ids:
+        try:
+            shutil.rmtree(storage.episode_dir(episode_id))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.error("Không xoá được thư mục episode %s: %s", episode_id, exc)
+
+
 def _scripted_detail_for(episode_id: str) -> RawEpisodeDetailResponse | None:
     """Chi tiết một episode scripted, hoặc None nếu workspace không có nó.
     Quét cả workspace (~30 ms) nên cũng phải chạy ngoài event loop."""
@@ -953,15 +964,9 @@ async def delete_collection_batch(
     await session.commit()
 
     if purge_episodes:
-        for episode_id in episode_ids:
-            try:
-                shutil.rmtree(storage.episode_dir(episode_id))
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                logger.error(
-                    "Không xoá được thư mục episode %s: %s", episode_id, exc
-                )
+        # Mỗi episode là một thư mục có video: xoá vài trăm cái mất hàng giây,
+        # và một backend chỉ có một worker để phục vụ tất cả.
+        await asyncio.to_thread(_purge_episode_dirs, episode_ids)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
