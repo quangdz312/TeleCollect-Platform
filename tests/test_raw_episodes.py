@@ -717,3 +717,99 @@ async def test_batch_import_rejects_a_file_that_is_not_a_zip(
 
     assert response.status_code == 422
     assert "zip" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_delete_batch_keeps_its_episodes_by_default(
+    client, db_session, raw_workspace
+):
+    """Xoá đợt thu chỉ bỏ phần mô tả: episode phải còn và quay về chưa đặt tên."""
+    reviewer = await _create_user(db_session, "batch_deleter", UserRole.REVIEWER)
+    headers = _auth_headers(reviewer)
+    await client.post(BATCHES, headers=headers, json={"id": "batch-1", "name": "Đợt 1"})
+
+    response = await client.delete(f"{BATCHES}/batch-1", headers=headers)
+
+    assert response.status_code == 204
+    remaining = (await client.get(BATCHES, headers=headers)).json()
+    assert [item["id"] for item in remaining] == ["batch-1"]
+    assert remaining[0]["named"] is False
+    assert remaining[0]["episodes"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_batch_with_purge_removes_teleop_episodes(
+    client, db_session, raw_workspace, storage_dir
+):
+    """purge_episodes xoá episode teleop; episode scripted vẫn phải còn."""
+    from src.services import storage
+
+    reviewer = await _create_user(db_session, "batch_purger", UserRole.REVIEWER)
+    operator = await _create_user(db_session, "purge_op", UserRole.OPERATOR)
+    headers = _auth_headers(reviewer)
+
+    episode = await _create_teleop(db_session, operator)
+    directory = storage.episode_dir(episode.id)
+    directory.mkdir(parents=True, exist_ok=True)
+    # Teleop gắn với đợt thu qua meta.json, giống dữ liệu app ghi ra.
+    (directory / "meta.json").write_text(
+        json.dumps({"collection_batch_id": "batch-1"}), encoding="utf-8"
+    )
+
+    response = await client.delete(
+        f"{BATCHES}/batch-1?purge_episodes=true", headers=headers
+    )
+
+    assert response.status_code == 204
+    db_session.expunge_all()
+    assert await db_session.get(Episode, episode.id) is None
+    assert not directory.exists()
+    # Episode scripted của batch-1 nằm trong workspace, không bị đụng tới.
+    still_there = (await client.get(BATCHES, headers=headers)).json()
+    assert [item["id"] for item in still_there] == ["batch-1"]
+    assert still_there[0]["scripted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_unknown_batch_is_404(client, db_session, raw_workspace):
+    reviewer = await _create_user(db_session, "batch_gone", UserRole.REVIEWER)
+
+    response = await client.delete(f"{BATCHES}/nope", headers=_auth_headers(reviewer))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_batch_requires_reviewer(client, db_session, raw_workspace):
+    operator = await _create_user(db_session, "batch_del_op", UserRole.OPERATOR)
+
+    response = await client.delete(f"{BATCHES}/batch-1", headers=_auth_headers(operator))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_unnamed_batch_with_purge_works(
+    client, db_session, raw_workspace, storage_dir
+):
+    """Đợt chưa ai đặt tên không có row DB, nhưng vẫn phải xoá được episode."""
+    reviewer = await _create_user(db_session, "batch_unnamed_del", UserRole.REVIEWER)
+    operator = await _create_user(db_session, "unnamed_op", UserRole.OPERATOR)
+    headers = _auth_headers(reviewer)
+
+    from src.services import storage
+
+    episode = await _create_teleop(db_session, operator)
+    directory = storage.episode_dir(episode.id)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "meta.json").write_text(
+        json.dumps({"collection_batch_id": "never-named"}), encoding="utf-8"
+    )
+
+    response = await client.delete(
+        f"{BATCHES}/never-named?purge_episodes=true", headers=headers
+    )
+
+    assert response.status_code == 204
+    db_session.expunge_all()
+    assert await db_session.get(Episode, episode.id) is None

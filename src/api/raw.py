@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 import shutil
@@ -70,6 +71,8 @@ from src.services.security import (
     require_min_role,
 )
 from src.services.streaming import stream_file_range
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/raw", tags=["raw"])
 reviewer_required = require_min_role(UserRole.REVIEWER)
@@ -887,6 +890,64 @@ async def update_collection_batch(
         batch.updated_at = datetime.now(UTC)
     await session.commit()
     return await _batch_response(batch, session)
+
+
+@router.delete("/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_collection_batch(
+    batch_id: str,
+    purge_episodes: bool = False,
+    _user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Xoá đợt thu. Mặc định chỉ xoá phần mô tả (tên, ghi chú) — episode giữ
+    nguyên và quay về trạng thái chưa đặt tên, đúng như `CollectionBatch` mô tả:
+    bảng này không có khoá ngoại sang episode.
+
+    `purge_episodes=true` xoá thêm episode teleop của đợt thu này cùng file trên
+    đĩa. CHỈ teleop: episode scripted nằm trong workspace dạng file, không có
+    đường xoá an toàn từ đây, nên chúng luôn được giữ lại.
+
+    Thứ tự giống `delete_demo`: commit DB trước rồi mới xoá thư mục. Thư mục xoá
+    lỗi thì để lại file mồ côi (vô hại) còn hơn để row DB trỏ vào file đã mất.
+    """
+    batch = await session.get(CollectionBatch, batch_id)
+    purged = 0
+
+    if purge_episodes:
+        # Episode teleop gắn với đợt thu qua `meta.json` trên đĩa, không phải
+        # bằng cột DB — cùng nguồn mà `_teleop_episode` đọc để hiển thị.
+        episodes = [
+            episode
+            for episode in (await session.scalars(select(Episode))).all()
+            if _read_teleop_meta(episode.id).get("collection_batch_id") == batch_id
+        ]
+        episode_ids = [episode.id for episode in episodes]
+        for episode in episodes:
+            await session.delete(episode)
+        purged = len(episode_ids)
+
+    if batch is not None:
+        await session.delete(batch)
+
+    if batch is None and purged == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy đợt thu"
+        )
+
+    await session.commit()
+
+    if purge_episodes:
+        for episode_id in episode_ids:
+            try:
+                shutil.rmtree(storage.episode_dir(episode_id))
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.error(
+                    "Không xoá được thư mục episode %s: %s", episode_id, exc
+                )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

@@ -281,4 +281,12 @@ export const rawApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(changes),
     }),
+  // `purgeEpisodes` also deletes the teleop captures and their files; without
+  // it only the batch's name and description go, and the episodes stay behind
+  // as an unnamed batch.
+  deleteBatch: (batchId: string, purgeEpisodes = false) =>
+    request<null>(
+      `/batches/${encodeURIComponent(batchId)}${purgeEpisodes ? "?purge_episodes=true" : ""}`,
+      { method: "DELETE" },
+    ),
 };

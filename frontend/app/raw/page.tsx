@@ -404,6 +404,16 @@ export default function RawEpisodesPage() {
     (episode) => episode.review_status === "approved",
   );
 
+  // A selection survives moving between batches, and the export sends episode
+  // ids rather than a batch, so picking some episodes from one collection run
+  // and some from another already builds a mixed dataset. Nothing on screen
+  // said so, so the breakdown spells out where the selection came from.
+  const selectedByBatch = selectedEpisodes.reduce((counts, episode) => {
+    const key = episode.collection_batch_id ?? "No batch";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+
   const activeBatch = batchList.find((item) => item.id === filters.collectionBatch) ?? null;
 
   // With no batch chosen, stop at the picker. A flat table over the whole
@@ -435,6 +445,13 @@ export default function RawEpisodesPage() {
           onUpdate={async (batchId, changes) => {
             await rawApi.updateBatch(batchId, changes);
             await loadBatches();
+          }}
+          onDelete={async (batchId, purgeEpisodes) => {
+            await rawApi.deleteBatch(batchId, purgeEpisodes);
+            await loadBatches();
+            // Purging removes episodes, so the table and summary above the
+            // gallery are stale too, not just the batch counts.
+            if (purgeEpisodes) await load();
           }}
           onImport={() => setImporting(true)}
         />
@@ -532,7 +549,7 @@ export default function RawEpisodesPage() {
           subtitle={
             convertibleEpisodes.length === 0
               ? "Datasets are built from approved episodes only — none of this selection is approved yet."
-              : "Your selection is kept while you move between pages in this table."
+              : "Your selection is kept as you move between pages and batches, so one dataset can mix episodes from several collection runs."
           }
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -543,6 +560,15 @@ export default function RawEpisodesPage() {
                 <span className="ml-2 text-warn-400">
                   {convertibleEpisodes.length} approved · the export drops the other{" "}
                   {selectedEpisodes.length - convertibleEpisodes.length}
+                </span>
+              )}
+              {selectedByBatch.size > 1 && (
+                <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-400">
+                  {Array.from(selectedByBatch.entries()).map(([batchId, count]) => (
+                    <span key={batchId} className="rounded bg-ink-800 px-1.5 py-0.5 font-mono">
+                      {count} · {batchId}
+                    </span>
+                  ))}
                 </span>
               )}
             </div>
