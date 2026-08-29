@@ -10,6 +10,7 @@ import {
   type TeleopEvent,
 } from "@/lib/teleop";
 import { TeleopClient } from "@/lib/real-teleop";
+import { useActiveBatch } from "@/lib/activeBatch";
 import { getToken, type Task } from "@/lib/api";
 import { Alert, Badge, Button, Card, Empty, Select, cx } from "@/components/ui";
 import { HandControl, type HandControls } from "@/components/HandControl";
@@ -46,6 +47,10 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const handInputRef = useRef<AxisInput | null>(null);
 
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "pick_place");
+  // A batch belongs to one task, so inside the app the task follows the active
+  // batch instead of being chosen again. Teleop task ids already match the
+  // app's names, so no mapping is needed here.
+  const activeBatch = useActiveBatch();
   const [status, setStatus] = useState<Status>("idle");
   const [statusDetail, setStatusDetail] = useState<string>("");
   const [frame, setFrame] = useState<FrameState | null>(null);
@@ -56,6 +61,14 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [rotationSafety, setRotationSafety] = useState<RotationSafety>({ twistDeg: 0, limited: false });
   const [handControls, setHandControls] = useState<HandControls | null>(null);
+
+  useEffect(() => {
+    // Only follow a batch whose task this console actually offers, so an
+    // unknown name leaves the picker on something selectable rather than blank.
+    if (activeBatch && tasks.some((t) => t.id === activeBatch.task)) {
+      setTaskId(activeBatch.task);
+    }
+  }, [activeBatch, tasks]);
 
   const task = useMemo(() => tasks.find((t) => t.id === taskId), [tasks, taskId]);
 
@@ -219,7 +232,12 @@ export function TeleopConsole({ tasks }: { tasks: Task[] }) {
             <>
               <Select
                 value={taskId}
-                disabled={connected}
+                disabled={connected || activeBatch !== null}
+                title={
+                  activeBatch
+                    ? `Fixed by the active batch ${activeBatch.name}.`
+                    : undefined
+                }
                 onChange={(e) => setTaskId(e.target.value)}
                 className="w-44"
               >

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Badge, Button, Card, Field, Input, Select, Stat } from "@/components/ui";
+import { apiTaskOf, useActiveBatch } from "@/lib/activeBatch";
 import { labeling, type CollectionJob, type LabelingConfig } from "@/lib/labeling";
 
 const POLL_MS = 1500;
@@ -20,16 +21,32 @@ export function ScriptedCollector() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Inside the app a batch is already chosen, and a batch belongs to one task.
+  // Pinning both here means the operator cannot set up a combination the app
+  // would reject at start time. On the web there is no active batch and both
+  // fields stay free.
+  const activeBatch = useActiveBatch();
+  const pinnedTask = apiTaskOf(activeBatch);
+
   const loadConfig = useCallback(async () => {
     const data = await labeling.config();
     setConfig(data);
-    if (data.tasks.length && !data.tasks.some((item) => item.task === task)) setTask(data.tasks[0].task);
+    // Never override a task the active batch fixed — the config load races the
+    // batch fetch, and falling back to tasks[0] here would silently unpin it.
+    if (!pinnedTask && data.tasks.length && !data.tasks.some((item) => item.task === task)) {
+      setTask(data.tasks[0].task);
+    }
     return data;
-  }, [task]);
+  }, [task, pinnedTask]);
 
   useEffect(() => {
     void loadConfig().catch((problem) => setError((problem as Error).message));
   }, [loadConfig]);
+
+  useEffect(() => {
+    if (pinnedTask) setTask(pinnedTask);
+    if (activeBatch) setBatchId(activeBatch.id);
+  }, [pinnedTask, activeBatch]);
 
   useEffect(() => {
     const suggested = config?.suggested_seeds[`${task}:${quality}`];
@@ -87,8 +104,15 @@ export function ScriptedCollector() {
       </div>
       <Card title="Scripted collection" subtitle="Generate scripted episodes and send them to the review queue.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(280px,1fr)_220px_140px_120px_120px_auto] lg:items-end">
-          <Field label="Task">
-            <Select value={task} disabled={running} onChange={(event) => setTask(event.target.value)}>
+          <Field
+            label="Task"
+            hint={activeBatch ? `Fixed by the active batch ${activeBatch.name}.` : undefined}
+          >
+            <Select
+              value={task}
+              disabled={running || pinnedTask !== null}
+              onChange={(event) => setTask(event.target.value)}
+            >
               {config?.tasks.map((item) => (
                 <option key={item.task} value={item.task}>{item.task} · {item.tool_label ?? item.tool}</option>
               ))}
@@ -100,7 +124,7 @@ export function ScriptedCollector() {
               aria-describedby="collection-batch-hint"
               className="font-mono"
               value={batchId}
-              disabled={running}
+              disabled={running || activeBatch !== null}
               onChange={(event) => setBatchId(event.target.value)}
             />
           </Field>

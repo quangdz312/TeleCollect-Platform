@@ -401,7 +401,10 @@
   };
 
   const applyCollectBatchPanel = () => {
-    if (location.pathname !== '/collect') return;
+    // Returning early only skipped building the bar; one already prepended to
+    // `main` stayed there for the rest of the session, so every other page
+    // grew a batch picker it has no use for. Remove it on the way out.
+    if (location.pathname !== '/collect') { document.getElementById('tc-collect-batch')?.remove(); return; }
     if (!state.loaded && !state.loading) { loadReview(); return; }
     const main = document.querySelector('main:not(#tc-local-review)'); if (!main) return;
     const active = state.batches.find((batch) => batch.active);
@@ -415,8 +418,23 @@
         ? `<strong>Collection batch: ${esc(active.name)}</strong><span>${esc(active.task)} · new Teleop and Scripted data will be assigned here</span>`
         : '<strong>No active batch</strong><span>Create or choose a batch before collecting data.</span>';
       const picker = select([['', 'Choose a batch…'], ...available.map((batch) => [batch.id, `${batch.name} · ${batch.task}`])], active?.id || '', 'Active collection batch');
-      picker.onchange = async () => { if (!picker.value) return; await api('/api/v1/local/batches/active', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({batch_id: picker.value})}); await loadReview(true); };
-      const manage = button('Review batches'); manage.onclick = () => location.assign('/review');
+      // The collection screens are React and read the active batch once on
+      // mount, so switching batches here has to tell them. Without this the
+      // task stayed pinned to the batch that was active when the page loaded.
+      picker.onchange = async () => {
+        if (!picker.value) return;
+        await api('/api/v1/local/batches/active', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({batch_id: picker.value})});
+        // Flip the flag here rather than waiting for the reload: `loadReview`
+        // bails out while another load is in flight, which left the heading
+        // naming the old batch while the picker already showed the new one.
+        state.batches.forEach((batch) => { batch.active = batch.id === picker.value; });
+        applyCollectBatchPanel();
+        await loadReview(true);
+        window.dispatchEvent(new CustomEvent('telecollect:active-batch-changed'));
+      };
+      // `/review` is not a route — it rendered a broken page. The batch list
+      // lives at `/raw`, which the sidebar calls Review.
+      const manage = button('Review batches'); manage.onclick = () => location.assign('/raw');
       panel.append(copy, picker, manage);
     }
     main.querySelectorAll('button').forEach((item) => {

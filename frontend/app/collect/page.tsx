@@ -31,7 +31,7 @@ export default function CollectPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-heading text-[22px] font-bold tracking-tight">Thu data</h1>
+        <h1 className="font-heading text-[22px] font-bold tracking-tight">Collect data</h1>
         <p className="mt-0.5 text-sm text-ink-400">Record by hand or generate scripted episodes. Saved episodes appear in Review.</p>
       </div>
       <div className="flex w-fit gap-1 rounded-lg border border-ink-700 bg-ink-850 p-1">

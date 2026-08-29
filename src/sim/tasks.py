@@ -71,7 +71,7 @@ def _check_success(env: object) -> bool:
 register(
     TaskSpec(
         name="lift_cube",
-        description="Gắp khối lập phương trên bàn và nhấc lên khỏi mặt bàn.",
+        description="Pick up the cube from the table and lift it clear of the surface.",
         model_path="Lift:Panda",
         max_steps=500,
         success_fn=_check_success,
@@ -81,7 +81,7 @@ register(
 register(
     TaskSpec(
         name="pick_place_can",
-        description="Gắp lon trên bàn và đặt vào đúng vị trí mục tiêu.",
+        description="Pick up the can and place it in the target bin.",
         model_path="PickPlaceCan:Panda",
         max_steps=400,
         success_fn=_check_success,
@@ -91,7 +91,7 @@ register(
 register(
     TaskSpec(
         name="nut_assembly_square",
-        description="Gắp đai ốc vuông và lắp vào đúng chốt trên bàn.",
+        description="Pick up the square nut and fit it onto the matching peg.",
         model_path="NutAssemblySquare:Panda",
         max_steps=500,
         success_fn=_check_success,
@@ -111,8 +111,8 @@ register(
     TaskSpec(
         name="tool_hang",
         description=(
-            "Giai doan 1: cam khung moc vao de dung; giai doan 2: treo co-le "
-            "len moc vua dung. Thanh cong khi ca hai giai doan dat."
+            "Stage 1: insert the hook frame into the stand. Stage 2: hang the "
+            "wrench on the hook. Success requires both stages."
         ),
         model_path="ToolHang:Panda",
         max_steps=1500,
