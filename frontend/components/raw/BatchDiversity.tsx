@@ -24,6 +24,18 @@ function statusTone(code: string): "ok" | "warn" | "bad" | "neutral" {
   return "bad";
 }
 
+/**
+ * The episode list reports a task by its display name, but the diversity
+ * endpoint only accepts the simulator's own task names and 400s on anything
+ * else. `lift` is the one that differs — episodes come back as `lift_cube` —
+ * so a lift batch could never load its report until this mapped back.
+ */
+const REPORTED_TASK: Record<string, string> = { lift_cube: "lift" };
+
+function reportedTask(task: string): string {
+  return REPORTED_TASK[task] ?? task;
+}
+
 export function BatchDiversity({
   task,
   collectionBatchId,
@@ -42,7 +54,7 @@ export function BatchDiversity({
     setLoading(true);
     setError(null);
     labeling
-      .diversity(task, scope, collectionBatchId)
+      .diversity(reportedTask(task), scope, collectionBatchId)
       .then((result) => {
         if (!cancelled) setReport(result);
       })

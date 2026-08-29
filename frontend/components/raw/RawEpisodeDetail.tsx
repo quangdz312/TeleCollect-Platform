@@ -86,11 +86,19 @@ export function RawEpisodeDetail({ episodeId }: { episodeId: string }) {
     ? "Unknown"
     : episode.recorded_success ? "Success" : "Failure";
 
+  // Back goes to the batch this episode belongs to, not the batch picker. The
+  // episode carries its own batch id, so the link needs nothing from whoever
+  // opened it.
+  const backHref = episode.collection_batch_id
+    ? `/raw?collection_batch_id=${encodeURIComponent(episode.collection_batch_id)}`
+    : "/raw";
+  const backLabel = episode.collection_batch_id ?? "Raw episodes";
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <Link href="/raw" className="text-xs text-accent-500 hover:underline">← Raw episodes</Link>
+          <Link href={backHref} className="text-xs text-accent-500 hover:underline">← {backLabel}</Link>
           <h1 className="mt-1 truncate font-heading text-[22px] font-bold tracking-tight">{episode.display_name}</h1>
           <p className="mt-0.5 break-all font-mono text-xs text-ink-400">{episode.episode_id}</p>
         </div>
