@@ -238,7 +238,7 @@
     const updateInfo = () => {
       info.textContent = format.value === 'hdf5'
         ? `HDF5 will export ${selected.filter((item) => item.has_trajectory).length} trajectory episode(s), split into one file per task when needed.`
-        : `LeRobot can export ${lerobotReady} of ${selected.length} selected episode(s). It requires compatible teleop data with top and wrist cameras.`;
+        : `LeRobot can export ${lerobotReady} of ${selected.length} selected episode(s). It needs a trajectory and its recorded video.`;
     };
     format.onchange = updateInfo; updateInfo();
     const field = (label, control) => { const wrap = document.createElement('label'); wrap.append(label, control); form.appendChild(wrap); };

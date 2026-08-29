@@ -163,10 +163,11 @@ phí.** Các lần sau nhanh hơn nhiều.
 
 ### 1. Lấy mã nguồn mới
 
-```bash
-cd /srv/telecollect/app
-git pull origin main
-```
+VPS chưa có Git remote hợp lệ, nên **không dùng `git pull` trên VPS**. Đưa mã
+lên bằng Git bundle theo đúng quy trình trong file bàn giao
+(`TELECOLLECT_P111_TEAMMATE_DEPLOYMENT_HANDOFF`, mục "tạo full Git bundle"):
+tạo bundle từ `main` đã review trên máy Windows, copy sang VPS, rồi fetch từ
+bundle đó.
 
 ### 2. Thêm cấu hình
 
