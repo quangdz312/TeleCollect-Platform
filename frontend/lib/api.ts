@@ -596,6 +596,11 @@ export const api = {
     role: Role;
   }) => request<User>("/users", { method: "POST", body: JSON.stringify(body) }),
 
+  // Self-registration, which the server may have switched off. The account
+  // comes back inactive: an admin has to approve it before it can sign in.
+  register: (body: { username: string; password: string; display_name?: string }) =>
+    request<User>("/auth/register", { method: "POST", body: JSON.stringify(body) }),
+
   updateUser: (
     id: string,
     body: Partial<{ role: Role; is_active: boolean; password: string; display_name: string }>,

@@ -85,6 +85,11 @@ export default function AdminPage() {
   if (!user) return null;
   if (user.role !== "admin") return <Alert tone="info">Administrators only.</Alert>;
 
+  // Self-registration creates the account disabled, so anyone still inactive is
+  // either waiting to be let in or was disabled on purpose — both need the same
+  // button, and surfacing them here saves hunting through the whole table.
+  const pending = users.filter((item) => !item.is_active);
+
   return (
     <div className="space-y-5">
       <div>
@@ -106,6 +111,34 @@ export default function AdminPage() {
         ))}
       </div>
 
+      {pending.length > 0 && (
+        <Card title={`Waiting for approval (${pending.length})`}>
+          <div className="space-y-2">
+            {pending.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-700/50 p-3"
+                aria-busy={lockedIds.has(item.id)}
+              >
+                <div>
+                  <span className="font-medium">{item.username}</span>
+                  <div className="mt-0.5 text-xs text-ink-400">
+                    {item.display_name} · signed up {timeAgo(item.created_at)}
+                  </div>
+                </div>
+                <Button
+                  variant="primary"
+                  disabled={lockedIds.has(item.id)}
+                  onClick={() => toggleActive(item)}
+                >
+                  {lockedIds.has(item.id) ? "Approving…" : "Approve"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card title="Add a user">
         <div className="grid gap-3 sm:grid-cols-4">
           <Field label="Username">
@@ -120,7 +153,7 @@ export default function AdminPage() {
               onChange={(e) => setForm({ ...form, display_name: e.target.value })}
             />
           </Field>
-          <Field label="Password">
+          <Field label="Password" hint="At least 8 characters">
             <Input
               type="password"
               value={form.password}

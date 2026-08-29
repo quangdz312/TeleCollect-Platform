@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { Alert, Button, Card, Field, Input } from "@/components/ui";
+import { api } from "@/lib/api";
 
 const SEEDS: [string, string, string][] = [
   ["admin", "Admin12345", "Everything, plus user management"],
@@ -10,21 +11,44 @@ const SEEDS: [string, string, string][] = [
   ["seed_operator1", "seedpassword1", "View and manage operator recordings"],
 ];
 
+// The seed accounts exist so a developer running the repo can sign in without
+// setting anything up. The deployed web serves real accounts, so printing
+// working passwords on its front door would hand the site to anyone.
+const SHOW_SEEDS = process.env.NODE_ENV !== "production";
+
 export default function LoginPage() {
   const { login } = useAuth();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("Admin12345");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [username, setUsername] = useState(SHOW_SEEDS ? "admin" : "");
+  const [password, setPassword] = useState(SHOW_SEEDS ? "Admin12345" : "");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  function switchMode(next: "signin" | "signup") {
+    setMode(next);
+    setError(null);
+    setNotice(null);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await login(username, password);
+      if (mode === "signup") {
+        await api.register({ username, password, display_name: displayName });
+        setNotice("Account created. An administrator has to approve it before you can sign in.");
+        setMode("signin");
+        setPassword("");
+        setDisplayName("");
+      } else {
+        await login(username, password);
+      }
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Login failed");
+      setError(exc instanceof Error ? exc.message : mode === "signup" ? "Sign up failed" : "Login failed");
     } finally {
       setBusy(false);
     }
@@ -101,21 +125,51 @@ export default function LoginPage() {
                   required
                 />
               </Field>
-              <Field label="Password">
+              {mode === "signup" && (
+                <Field label="Display name" hint="Optional — how your name appears to reviewers">
+                  <Input
+                    value={displayName}
+                    autoComplete="name"
+                    onChange={(e) => setDisplayName(e.target.value)}
+                  />
+                </Field>
+              )}
+              <Field label="Password" hint={mode === "signup" ? "At least 8 characters" : undefined}>
                 <Input
                   type="password"
                   value={password}
-                  autoComplete="current-password"
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  minLength={mode === "signup" ? 8 : undefined}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
               </Field>
+              {notice && <Alert tone="info">{notice}</Alert>}
               {error && <Alert>{error}</Alert>}
-              <Button type="submit" variant="primary" className="w-full" disabled={busy}>
-                {busy ? "Signing in…" : "Sign in"}
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full"
+                disabled={busy || (mode === "signup" && password.length < 8)}
+              >
+                {busy
+                  ? mode === "signup"
+                    ? "Creating account…"
+                    : "Signing in…"
+                  : mode === "signup"
+                    ? "Create account"
+                    : "Sign in"}
               </Button>
+              <button
+                type="button"
+                onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
+                className="w-full text-center text-xs text-ink-400 underline-offset-2 hover:text-accent-500 hover:underline"
+              >
+                {mode === "signup" ? "Already have an account? Sign in" : "Create an account"}
+              </button>
             </form>
 
+            {SHOW_SEEDS && (
             <div className="border-t border-ink-700 px-5 pb-5 pt-4">
               <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-ink-400">
                 Development accounts
@@ -137,6 +191,7 @@ export default function LoginPage() {
                 ))}
               </div>
             </div>
+            )}
           </Card>
         </div>
       </div>

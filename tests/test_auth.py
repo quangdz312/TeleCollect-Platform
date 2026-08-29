@@ -36,6 +36,7 @@ async def test_register_creates_operator(client):
     body = resp.json()
     assert body["username"] == "alice"  # normalize lowercase
     assert body["role"] == "operator"
+    assert body["is_active"] is False  # chờ admin duyệt mới đăng nhập được
     assert "password_hash" not in body
 
 
@@ -107,10 +108,22 @@ async def test_login_unknown_and_wrong_password_share_same_message(client, db_se
 
 
 @pytest.mark.asyncio
-async def test_login_inactive_user_returns_401(client, db_session):
+async def test_login_inactive_user_is_told_it_is_pending(client, db_session):
+    """Mật khẩu đúng nhưng chưa được duyệt: nói thẳng, đừng để người vừa đăng ký
+    tưởng mình gõ sai. Không lộ gì thêm — họ đã chứng minh biết mật khẩu."""
     await _create_user(db_session, "gina", "correctpass", UserRole.OPERATOR, is_active=False)
 
     resp = await client.post(f"{API}/login", data={"username": "gina", "password": "correctpass"})
+    assert resp.status_code == 403
+    assert "duyệt" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_login_inactive_user_with_wrong_password_returns_401(client, db_session):
+    """Sai mật khẩu thì vẫn là 401 chung, không tiết lộ tài khoản có tồn tại."""
+    await _create_user(db_session, "hana", "correctpass", UserRole.OPERATOR, is_active=False)
+
+    resp = await client.post(f"{API}/login", data={"username": "hana", "password": "wrongpass"})
     assert resp.status_code == 401
 
 

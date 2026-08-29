@@ -8,6 +8,7 @@ Ba vai trò, có kế thừa quyền: admin ⊇ reviewer ⊇ operator.
 
 Endpoint:
     POST /auth/register      (username, password, display_name) -> UserResponse
+                             Tài khoản tạo ra ở trạng thái chờ admin duyệt.
     POST /auth/login         (form: username, password)          -> TokenResponse
     POST /auth/refresh       (refresh_token)                     -> TokenResponse
     GET  /auth/me            ()                                  -> UserResponse
@@ -67,11 +68,16 @@ async def register(body: RegisterRequest, session: AsyncSession = Depends(get_se
 
     # Role luôn ép về operator — RegisterRequest không có field role nên client
     # không thể gửi lên, nhưng ghi rõ ở đây để không ai sau này "tiện tay" thêm field.
+    #
+    # `is_active=False`: tài khoản tự đăng ký chưa dùng được cho tới khi admin
+    # duyệt trong trang Users. Mở đăng ký mà cho vào thẳng thì bất kỳ ai biết
+    # địa chỉ đều xem được dữ liệu của cả nhóm.
     user = User(
         username=username,
         password_hash=hash_password(body.password),
         display_name=body.display_name or username,
         role=UserRole.OPERATOR,
+        is_active=False,
     )
     session.add(user)
     try:
@@ -92,9 +98,18 @@ async def login(
     user = await session.scalar(select(User).where(User.username == username))
 
     # Sai username HOẶC sai password đều trả cùng thông báo — không tiết lộ
-    # username nào tồn tại. is_active=False cũng coi như sai credential.
-    if user is None or not user.is_active or not verify_password(form.password, user.password_hash):
+    # username nào tồn tại.
+    if user is None or not verify_password(form.password, user.password_hash):
         raise _BAD_CREDENTIALS
+
+    # Chỉ tới đây mới nói rõ tài khoản chưa được duyệt: mật khẩu đã đúng nên
+    # người gọi vốn đã biết tài khoản này tồn tại, không lộ thêm gì. Nếu gộp
+    # vào thông báo trên thì người vừa đăng ký tưởng mình gõ nhầm mật khẩu.
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản đang chờ admin duyệt",
+        )
 
     return TokenResponse(
         access_token=create_access_token(user.id, user.role),
