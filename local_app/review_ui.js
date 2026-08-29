@@ -7,6 +7,7 @@
     episodes: [],
     batches: [],
     project: null,
+    sync: null,
     selected: new Set(),
     group: 'all',
     search: '',
@@ -336,11 +337,80 @@
     pagination.append(previous, next);
   };
 
+  /* Sign in to the shared server, then push a batch to it. The backend for
+     both already exists in `local_app/sync.py`; this is the only way to reach
+     it. The session is separate from the app's own local account — different
+     database, different signing secret. */
+  const openSyncDialog = () => {
+    const overlay = document.createElement('div'); overlay.className = 'tc-overlay';
+    const card = document.createElement('section'); card.className = 'tc-dialog';
+    card.innerHTML = '<div class="tc-dialog-head"><div><h2>Shared server</h2><p>Sign in to push collected batches to the team server.</p></div><button class="tc-icon-button">&times;</button></div>';
+    const form = document.createElement('div'); form.className = 'tc-export-form';
+    const server = document.createElement('input'); server.placeholder = 'https://telecollect.io.vn';
+    const username = document.createElement('input'); username.placeholder = 'Username';
+    const password = document.createElement('input'); password.type = 'password'; password.placeholder = 'Password';
+    const field = (label, control) => { const wrap = document.createElement('label'); wrap.append(label, control); form.appendChild(wrap); };
+    field('Server', server); field('Username', username); field('Password', password);
+    card.appendChild(form);
+    const result = document.createElement('div'); result.className = 'tc-export-result';
+    const actions = document.createElement('div'); actions.className = 'tc-dialog-actions';
+    const cancel = button('Cancel'); cancel.onclick = () => overlay.remove();
+    const signIn = button('Sign in', 'tc-primary');
+    signIn.onclick = async () => {
+      signIn.disabled = true; result.textContent = 'Signing in…';
+      try {
+        state.sync = await api('/api/v1/local/sync/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({server: server.value.trim(), username: username.value.trim(), password: password.value})});
+        overlay.remove(); renderCurrent();
+      } catch (error) { result.textContent = error.message || error; signIn.disabled = false; }
+    };
+    actions.append(cancel, signIn); card.append(result, actions);
+    card.querySelector('.tc-icon-button').onclick = () => overlay.remove();
+    overlay.appendChild(card); document.body.appendChild(overlay); server.focus();
+  };
+
+  const syncBatch = async (batch, status) => {
+    status.textContent = 'Uploading…';
+    try {
+      // Zipping and uploading run for minutes on a large batch, so the caller
+      // disables its button rather than letting a second upload start.
+      const result = await api(`/api/v1/local/batches/${encodeURIComponent(batch.id)}/sync`, {method: 'POST'});
+      status.textContent = `Pushed ${result.episodes || 0} episode(s)`;
+    } catch (error) { status.textContent = error.message || String(error); }
+  };
+
+  const renderSyncBar = (container) => {
+    const bar = document.createElement('div'); bar.className = 'tc-sync-bar';
+    if (!state.sync) {
+      const copy = document.createElement('div');
+      copy.innerHTML = '<strong>Not connected to a server</strong><span>Batches stay on this machine until you sign in.</span>';
+      const connect = button('Connect to server', 'tc-secondary'); connect.onclick = openSyncDialog;
+      bar.append(copy, connect);
+      container.appendChild(bar);
+      return;
+    }
+    const copy = document.createElement('div');
+    copy.innerHTML = `<strong>${esc(state.sync.server)}</strong><span>Signed in as ${esc(state.sync.username)}</span>`;
+    const picker = select([['', 'Choose a batch to push…'], ...state.batches.map((batch) => [batch.id, `${batch.name} · ${batch.episodes} episode(s)`])], '', 'Batch to push');
+    const status = document.createElement('span'); status.className = 'tc-muted';
+    const push = button('Push', 'tc-primary');
+    push.onclick = async () => {
+      const batch = state.batches.find((item) => item.id === picker.value);
+      if (!batch) { status.textContent = 'Choose a batch first'; return; }
+      push.disabled = true; picker.disabled = true;
+      await syncBatch(batch, status);
+      push.disabled = false; picker.disabled = false;
+    };
+    const out = button('Sign out'); out.onclick = async () => { await api('/api/v1/local/sync/logout', {method: 'POST'}); state.sync = null; renderCurrent(); };
+    bar.append(copy, picker, push, status, out);
+    container.appendChild(bar);
+  };
+
   const renderReviewBatchPicker = () => {
     const root = document.getElementById('tc-local-review'); if (!root) return;
-    root.innerHTML = `<div class="tc-page-head"><div><h1>Review</h1><p>Choose a batch to review its episodes.</p></div><div class="tc-head-actions"><button id="tc-new-batch" class="tc-primary">New batch</button><button id="tc-change-project" class="tc-secondary">Project folder</button></div></div><div id="tc-review-batch-grid" class="tc-review-batch-grid"></div>`;
+    root.innerHTML = `<div class="tc-page-head"><div><h1>Review</h1><p>Choose a batch to review its episodes.</p></div><div class="tc-head-actions"><button id="tc-new-batch" class="tc-primary">New batch</button><button id="tc-change-project" class="tc-secondary">Project folder</button></div></div><div id="tc-sync-slot"></div><div id="tc-review-batch-grid" class="tc-review-batch-grid"></div>`;
     document.getElementById('tc-change-project').onclick = () => openProject().catch((error) => alert(error.message));
     document.getElementById('tc-new-batch').onclick = openNewBatchDialog;
+    renderSyncBar(document.getElementById('tc-sync-slot'));
     const grid = document.getElementById('tc-review-batch-grid');
     state.batches.forEach((batch) => {
       const card = document.createElement('button'); card.type = 'button'; card.className = 'tc-review-batch-card';
@@ -375,6 +445,9 @@
         state.project = await api('/api/v1/local/project');
         state.episodes = await api('/api/v1/local/library/episodes');
         state.batches = await api('/api/v1/local/batches');
+        // Null when nobody has signed in to a server; that is a state, not an
+        // error, so a failure here must not take the whole review screen down.
+        state.sync = await api('/api/v1/local/sync').catch(() => null);
         state.loaded = true;
         const valid = new Set(state.episodes.map((item) => item.id)); state.selected = new Set([...state.selected].filter((id) => valid.has(id)));
       }
@@ -479,7 +552,7 @@
     .tc-head-actions{display:flex;gap:10px;align-items:center}
     .tc-review-batch-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
     .tc-back-button{display:block;margin:0 0 16px;padding:0;border:0;background:transparent;color:#2868ed;font:600 13px Inter,ui-sans-serif,system-ui,sans-serif;cursor:pointer}.tc-back-button:hover{text-decoration:underline}.tc-review-batch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}.tc-review-batch-card{min-height:210px;padding:20px;border:1px solid #dce4ef;border-radius:14px;background:#fff;box-shadow:0 5px 16px #2031500d;color:#172033;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}.tc-review-batch-card:hover{border-color:#8fb2f5;box-shadow:0 10px 24px #2031501a;transform:translateY(-1px)}.tc-review-batch-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.tc-review-batch-head strong{font-size:17px;overflow-wrap:anywhere}.tc-review-batch-card>p{margin:8px 0 20px;color:#64748b;font:12px ui-monospace,SFMono-Regular,monospace}.tc-review-batch-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:13px 0;border-top:1px solid #edf1f6;border-bottom:1px solid #edf1f6}.tc-review-batch-stats span{display:grid;gap:3px;color:#718096;font-size:11px}.tc-review-batch-stats b{color:#172033;font-size:17px}.tc-review-batch-progress{display:flex;flex-wrap:wrap;gap:12px;margin-top:13px;font-size:11px;font-weight:650}.tc-review-batch-progress .ok{color:#087a5d}.tc-review-batch-progress .warn{color:#b65c12}.tc-review-batch-progress .bad{color:#c73535}.tc-review-batch-open{display:block;margin-top:18px;color:#2868ed;font-size:12px;font-weight:750}.tc-empty-batches{grid-column:1/-1;padding:60px 20px;border:1px dashed #cbd5e1;border-radius:14px;background:#fff;text-align:center;color:#64748b}.tc-empty-batches h2{margin:0 0 7px;color:#172033;font-size:19px}.tc-empty-batches p{margin:0}
-    #tc-local-review *{box-sizing:border-box}.tc-page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}.tc-page-head h1{font-size:27px;line-height:1;margin:0 0 9px}.tc-page-head p{margin:0;color:#64748b;font:12px ui-monospace,SFMono-Regular,monospace}.tc-review-shell{display:grid;grid-template-columns:245px minmax(0,1fr);gap:18px;align-items:start}.tc-review-tree,.tc-inbox{background:#fff;border:1px solid #dce4ef;border-radius:14px;box-shadow:0 5px 16px #2031500d}.tc-review-tree{padding:14px 10px;max-height:calc(100vh - 180px);overflow:auto;position:sticky;top:15px}.tc-tree-heading{padding:17px 10px 6px;color:#718096;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.tc-tree-row{display:grid;grid-template-columns:25px 1fr;align-items:center;border-radius:8px}.tc-tree-row.active{background:#edf3ff;color:#1859d1}.tc-tree-row>input{margin-left:8px}.tc-tree-row button{display:grid;grid-template-columns:18px 1fr auto;gap:5px;align-items:center;width:100%;padding:9px 9px 9px 2px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.tc-folder{color:#7992ba}.tc-count{color:#74829a;font-size:11px}.tc-inbox{overflow:hidden}.tc-filter-bar{display:grid;grid-template-columns:minmax(230px,1.6fr) repeat(4,minmax(120px,.65fr));gap:8px;padding:15px;border-bottom:1px solid #e2e8f0}.tc-filter-bar input,.tc-filter-bar select,.tc-export-form input,.tc-export-form select{width:100%;height:40px;padding:0 11px;border:1px solid #cfd9e7;border-radius:8px;background:#fff;color:#172033}.tc-selection-bar{min-height:55px;padding:9px 15px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #e2e8f0;color:#475569}.tc-selection-bar.visible{background:#f5f8ff}.tc-selection-bar .tc-muted{margin-left:auto}.tc-primary,.tc-secondary,.tc-open,.tc-icon-button{border:1px solid #cad5e5;border-radius:8px;padding:9px 14px;background:#fff;color:#18233a;font-weight:650;cursor:pointer}.tc-primary{border-color:#2868ed;background:#2868ed;color:#fff}.tc-open{padding:7px 13px}.tc-icon-button{border:0;font-size:25px;padding:3px 9px}.tc-primary:disabled,.tc-secondary:disabled{opacity:.45;cursor:not-allowed}.tc-table-wrap{overflow:auto}.tc-table{width:100%;border-collapse:collapse;font-size:13px}.tc-table th{padding:12px 10px;text-align:left;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:#fbfcfe;border-bottom:1px solid #e2e8f0}.tc-table td{padding:12px 10px;border-bottom:1px solid #e8edf4;vertical-align:middle}.tc-table tr.selected{background:#f4f7ff}.tc-table small{display:block;margin-top:4px;color:#7c899e;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tc-check-cell{width:42px;text-align:center!important}.tc-row-actions{display:flex;justify-content:flex-end;gap:5px;white-space:nowrap}.tc-row-actions button{padding:6px 8px;font-size:11px}.tc-badge{display:inline-block;padding:4px 8px;border-radius:6px;background:#eef2f7;color:#4b5a70;font-size:11px;font-weight:700}.tc-teleop{background:#e8efff;color:#2463dd}.tc-scripted{background:#eee9ff;color:#6742dc}.tc-open{background:#e7f8f1;color:#087a5d}.tc-closed{background:#eef2f7;color:#64748b}.tc-auto-accept,.tc-accepted{background:#e7f8f1;color:#087a5d}.tc-auto-reject,.tc-rejected{background:#ffeded;color:#c73535}.tc-auto-review,.tc-unreviewed{background:#fff3e5;color:#b65c12}.tc-pagination{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:13px 15px;color:#64748b}.tc-pagination span{margin-right:auto}.tc-empty{height:180px;text-align:center;color:#718096}.tc-muted{color:#718096;font-size:12px}.tc-batch-help{margin-bottom:14px;padding:14px 16px;border:1px solid #cddcf4;border-radius:10px;background:#f4f8ff;color:#44546d;font-size:13px}.tc-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:#0b1425a8;font-family:Inter,ui-sans-serif,system-ui;color:#172033}.tc-dialog{width:min(680px,100%);max-height:88vh;overflow:auto;padding:24px;background:#fff;border-radius:16px;box-shadow:0 26px 90px #0006}.tc-project-dialog{width:min(620px,100%)}.tc-dialog-head{display:flex;align-items:flex-start;justify-content:space-between}.tc-dialog h2{margin:0 0 6px}.tc-dialog p{margin:0;color:#64748b}.tc-path{margin-top:16px;padding:12px;border:1px solid #d9e2ee;border-radius:8px;background:#f7f9fc;font:12px ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}.tc-dialog-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:18px}.tc-export-form{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:20px}.tc-export-form label{display:grid;gap:6px;font-size:12px;font-weight:700}.tc-export-info{grid-column:1/-1;padding:12px;border-radius:8px;background:#f4f7fc;color:#52627a;font-size:13px}.tc-export-result{margin-top:15px;color:#334155}.tc-load-error{padding:30px;background:#fff;border:1px solid #fecaca;border-radius:12px}.tc-collect-batch{display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,420px) auto;gap:12px;align-items:center;margin-bottom:18px;padding:14px 16px;border:1px solid #bcd2f5;border-radius:12px;background:#f4f8ff;color:#172033}.tc-collect-batch.warning{border-color:#fdba74;background:#fff7ed}.tc-collect-batch div{display:grid;gap:3px}.tc-collect-batch span{color:#64748b;font-size:12px}.tc-collect-batch select{height:40px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+    #tc-local-review *{box-sizing:border-box}.tc-page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}.tc-page-head h1{font-size:27px;line-height:1;margin:0 0 9px}.tc-page-head p{margin:0;color:#64748b;font:12px ui-monospace,SFMono-Regular,monospace}.tc-review-shell{display:grid;grid-template-columns:245px minmax(0,1fr);gap:18px;align-items:start}.tc-review-tree,.tc-inbox{background:#fff;border:1px solid #dce4ef;border-radius:14px;box-shadow:0 5px 16px #2031500d}.tc-review-tree{padding:14px 10px;max-height:calc(100vh - 180px);overflow:auto;position:sticky;top:15px}.tc-tree-heading{padding:17px 10px 6px;color:#718096;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.tc-tree-row{display:grid;grid-template-columns:25px 1fr;align-items:center;border-radius:8px}.tc-tree-row.active{background:#edf3ff;color:#1859d1}.tc-tree-row>input{margin-left:8px}.tc-tree-row button{display:grid;grid-template-columns:18px 1fr auto;gap:5px;align-items:center;width:100%;padding:9px 9px 9px 2px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.tc-folder{color:#7992ba}.tc-count{color:#74829a;font-size:11px}.tc-inbox{overflow:hidden}.tc-filter-bar{display:grid;grid-template-columns:minmax(230px,1.6fr) repeat(4,minmax(120px,.65fr));gap:8px;padding:15px;border-bottom:1px solid #e2e8f0}.tc-filter-bar input,.tc-filter-bar select,.tc-export-form input,.tc-export-form select{width:100%;height:40px;padding:0 11px;border:1px solid #cfd9e7;border-radius:8px;background:#fff;color:#172033}.tc-selection-bar{min-height:55px;padding:9px 15px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #e2e8f0;color:#475569}.tc-selection-bar.visible{background:#f5f8ff}.tc-selection-bar .tc-muted{margin-left:auto}.tc-primary,.tc-secondary,.tc-open,.tc-icon-button{border:1px solid #cad5e5;border-radius:8px;padding:9px 14px;background:#fff;color:#18233a;font-weight:650;cursor:pointer}.tc-primary{border-color:#2868ed;background:#2868ed;color:#fff}.tc-open{padding:7px 13px}.tc-icon-button{border:0;font-size:25px;padding:3px 9px}.tc-primary:disabled,.tc-secondary:disabled{opacity:.45;cursor:not-allowed}.tc-table-wrap{overflow:auto}.tc-table{width:100%;border-collapse:collapse;font-size:13px}.tc-table th{padding:12px 10px;text-align:left;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:#fbfcfe;border-bottom:1px solid #e2e8f0}.tc-table td{padding:12px 10px;border-bottom:1px solid #e8edf4;vertical-align:middle}.tc-table tr.selected{background:#f4f7ff}.tc-table small{display:block;margin-top:4px;color:#7c899e;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tc-check-cell{width:42px;text-align:center!important}.tc-row-actions{display:flex;justify-content:flex-end;gap:5px;white-space:nowrap}.tc-row-actions button{padding:6px 8px;font-size:11px}.tc-badge{display:inline-block;padding:4px 8px;border-radius:6px;background:#eef2f7;color:#4b5a70;font-size:11px;font-weight:700}.tc-teleop{background:#e8efff;color:#2463dd}.tc-scripted{background:#eee9ff;color:#6742dc}.tc-open{background:#e7f8f1;color:#087a5d}.tc-closed{background:#eef2f7;color:#64748b}.tc-auto-accept,.tc-accepted{background:#e7f8f1;color:#087a5d}.tc-auto-reject,.tc-rejected{background:#ffeded;color:#c73535}.tc-auto-review,.tc-unreviewed{background:#fff3e5;color:#b65c12}.tc-pagination{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:13px 15px;color:#64748b}.tc-pagination span{margin-right:auto}.tc-empty{height:180px;text-align:center;color:#718096}.tc-muted{color:#718096;font-size:12px}.tc-batch-help{margin-bottom:14px;padding:14px 16px;border:1px solid #cddcf4;border-radius:10px;background:#f4f8ff;color:#44546d;font-size:13px}.tc-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:#0b1425a8;font-family:Inter,ui-sans-serif,system-ui;color:#172033}.tc-dialog{width:min(680px,100%);max-height:88vh;overflow:auto;padding:24px;background:#fff;border-radius:16px;box-shadow:0 26px 90px #0006}.tc-project-dialog{width:min(620px,100%)}.tc-dialog-head{display:flex;align-items:flex-start;justify-content:space-between}.tc-dialog h2{margin:0 0 6px}.tc-dialog p{margin:0;color:#64748b}.tc-path{margin-top:16px;padding:12px;border:1px solid #d9e2ee;border-radius:8px;background:#f7f9fc;font:12px ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}.tc-dialog-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:18px}.tc-export-form{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:20px}.tc-export-form label{display:grid;gap:6px;font-size:12px;font-weight:700}.tc-export-info{grid-column:1/-1;padding:12px;border-radius:8px;background:#f4f7fc;color:#52627a;font-size:13px}.tc-export-result{margin-top:15px;color:#334155}.tc-load-error{padding:30px;background:#fff;border:1px solid #fecaca;border-radius:12px}.tc-collect-batch{display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,420px) auto;gap:12px;align-items:center;margin-bottom:18px;padding:14px 16px;border:1px solid #bcd2f5;border-radius:12px;background:#f4f8ff;color:#172033}.tc-collect-batch.warning{border-color:#fdba74;background:#fff7ed}.tc-collect-batch div{display:grid;gap:3px}.tc-collect-batch span{color:#64748b;font-size:12px}.tc-collect-batch select{height:40px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}.tc-sync-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;padding:12px 15px;border:1px solid #d9e2ee;border-radius:12px;background:#fff}.tc-sync-bar>div{display:grid;gap:2px;margin-right:auto}.tc-sync-bar span{color:#64748b;font-size:12px}.tc-sync-bar select{height:38px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;min-width:230px}
     @media(max-width:1050px){.tc-review-shell{grid-template-columns:210px minmax(0,1fr)}.tc-filter-bar{grid-template-columns:1fr 1fr}.tc-filter-bar input{grid-column:1/-1}.tc-table th:nth-child(4),.tc-table td:nth-child(4){display:none}}
   `;
   document.head.appendChild(style);
