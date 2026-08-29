@@ -83,7 +83,7 @@ def stubbed(monkeypatch, tmp_path):
     def fake_push_log(client, job_id, text):
         calls["logs"].append(text)
 
-    def fake_upload(client, job_id, output_dir):
+    def fake_upload(client, job_id, output_dir, save_every_n_epochs=None):
         calls["uploaded"].append(output_dir)
         return ["last.pth"]
 

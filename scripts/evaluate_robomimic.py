@@ -505,7 +505,10 @@ def main() -> int:
     for index in range(args.n_rollouts):
         episode_seed = args.seed + index
         writer = None
-        temporary_video = args.video_dir / f"episode_{index:03d}.mp4"
+        # Tên theo seed, không theo chỉ số trong lần chạy: khi một lần evaluate
+        # được chia cho nhiều process, mỗi process đều bắt đầu từ index 0 và
+        # hai process sẽ ghi đè lên video của nhau.
+        temporary_video = args.video_dir / f"seed_{episode_seed}.tmp.mp4"
         if args.record_videos > 0:
             writer = imageio.get_writer(temporary_video, fps=30)
         try:
@@ -532,7 +535,7 @@ def main() -> int:
             index, args.record_videos, success
         ):
             final_video = args.video_dir / (
-                f"episode_{index:03d}_{'success' if success else 'fail'}.mp4"
+                f"seed_{episode_seed}_{'success' if success else 'fail'}.mp4"
             )
             temporary_video.replace(final_video)
             video_name = final_video.name

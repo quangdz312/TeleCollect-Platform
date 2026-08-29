@@ -42,7 +42,8 @@ _EPOCH_BLOCK = re.compile(
 _GPU_MEMORY = re.compile(
     r"GPU memory: peak (?P<peak>[0-9.]+) GB of (?P<total>[0-9.]+) GB"
 )
-_CHECKPOINT_EPOCH = re.compile(r"^model_epoch_(?P<epoch>\d+)(?=_|\.pth$)")
+# Công khai: `runpod_handler.selected_checkpoints` lọc theo cùng quy ước tên.
+CHECKPOINT_EPOCH = re.compile(r"^model_epoch_(?P<epoch>\d+)(?=_|\.pth$)")
 _CHECKPOINT_VALIDATION = re.compile(
     r"_best_validation_(?P<loss>[0-9.eE+-]+)(?=_|\.pth$)"
 )
@@ -98,7 +99,7 @@ def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[
         if not path.is_file() or path.name == "last_bak.pth":
             continue
         relative = path.relative_to(output_dir).as_posix()
-        epoch_match = _CHECKPOINT_EPOCH.search(path.name)
+        epoch_match = CHECKPOINT_EPOCH.search(path.name)
         validation_match = _CHECKPOINT_VALIDATION.search(path.name)
         loss = float(validation_match.group("loss")) if validation_match else None
         # ``last.pth`` has no epoch in its filename and represents the current

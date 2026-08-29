@@ -185,6 +185,21 @@ class Settings(BaseSettings):
     runpod_endpoint_id: str = ""
     """Endpoint Serverless đã trỏ tới image train của dự án."""
 
+    evaluation_workers: int = Field(default=2, ge=1, le=16)
+    """Số process rollout chạy song song trong một lần evaluate.
+
+    Các rollout độc lập nhau nên chia được, nhưng mỗi process nạp torch và
+    mujoco riêng — đo được 1.81 GB đỉnh cho một process có quay video.
+
+    Mặc định 2 chọn theo VPS staging: 4 nhân, 7.8 GB RAM và KHÔNG có swap.
+    Hai process ăn ~3.6 GB và hai nhân, còn đủ chỗ cho backend phục vụ người
+    dùng. Ba process vừa RAM nhưng chỉ chừa một nhân cho tất cả phần còn lại,
+    và khi hết RAM thì không có swap đỡ: OOM-killer chọn tiến trình lớn nhất,
+    có thể chính là backend chứ không phải evaluate.
+
+    Nâng lên chỉ khi máy có nhiều nhân và RAM hơn hẳn.
+    """
+
     runpod_poll_interval_s: float = Field(default=10.0, ge=1.0)
     """Nhịp hỏi trạng thái job trên RunPod. Mỗi lần hỏi là một request tính phí
     nên đừng hạ quá thấp."""

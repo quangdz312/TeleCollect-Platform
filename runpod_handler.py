@@ -30,7 +30,7 @@ from typing import Any
 
 import httpx
 
-from src.training.jobs import build_training_command
+from src.training.jobs import CHECKPOINT_EPOCH, build_training_command
 
 # Đẩy log theo lô: mỗi dòng một request thì một lần train sinh ra hàng nghìn
 # request, còn gom quá lâu thì người dùng nhìn màn hình trống tưởng job treo.
@@ -77,12 +77,20 @@ def push_log(client: httpx.Client, job_id: str, text: str) -> None:
         pass
 
 
-def selected_checkpoints(output_dir: Path) -> list[Path]:
-    """Chỉ giữ `last.pth` và bản `best_validation`.
+def selected_checkpoints(output_dir: Path, save_every_n_epochs: int | None = None) -> list[Path]:
+    """Giữ `last.pth`, các bản `best_validation`, và các mốc đều đặn.
 
-    Một lần train sinh ra nhiều `model_epoch_*.pth`, mỗi file vài chục tới vài
-    trăm MB. Đẩy hết về vừa chậm vừa lấp đĩa server mà gần như không ai dùng
-    tới các mốc trung gian.
+    Ban đầu chỉ hai loại đầu, để khỏi lấp đĩa. Nhưng chính các mốc trung gian
+    là thứ đem so sánh: không có chúng thì trang Evaluate chỉ có đúng epoch
+    cuối, và không trả lời được câu hỏi thường gặp nhất — train thêm có tốt
+    lên không, hay đã quá khớp từ lâu.
+
+    Chi phí nhỏ hơn ghi chú cũ tưởng: một checkpoint đo được 26 MB, nên
+    `save_every_n_epochs=20` trên 200 epoch chỉ thêm ~260 MB.
+
+    RoboMimic lưu thêm một file mỗi lần validation loss cải thiện, nên tổng số
+    file có thể lớn hơn nhiều số mốc — đó là lý do phải lọc theo epoch chia
+    hết cho `save_every_n_epochs` chứ không phải lấy tất cả `model_epoch_*`.
     """
     keep: list[Path] = []
     for path in sorted(output_dir.rglob("*.pth")):
@@ -91,12 +99,23 @@ def selected_checkpoints(output_dir: Path) -> list[Path]:
             continue
         if name == "last.pth" or "best_validation" in name:
             keep.append(path)
+            continue
+        if not save_every_n_epochs:
+            continue
+        match = CHECKPOINT_EPOCH.match(name)
+        if match and int(match.group("epoch")) % save_every_n_epochs == 0:
+            keep.append(path)
     return keep
 
 
-def upload_checkpoints(client: httpx.Client, job_id: str, output_dir: Path) -> list[str]:
+def upload_checkpoints(
+    client: httpx.Client,
+    job_id: str,
+    output_dir: Path,
+    save_every_n_epochs: int | None = None,
+) -> list[str]:
     uploaded: list[str] = []
-    for path in selected_checkpoints(output_dir):
+    for path in selected_checkpoints(output_dir, save_every_n_epochs):
         relative = path.relative_to(output_dir).as_posix()
         with path.open("rb") as handle:
             response = client.post(
@@ -198,9 +217,9 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
                     push_log(client, job_id, f"\nTraining thất bại, mã thoát {code}\n")
                     # Vẫn đẩy checkpoint đã có: một lần chạy hỏng ở epoch cuối
                     # vẫn để lại mốc dùng được, và đằng nào cũng đã trả tiền GPU.
-                    upload_checkpoints(client, job_id, output_dir)
+                    upload_checkpoints(client, job_id, output_dir, config.get("save_every_n_epochs"))
                     raise HandlerError(f"Training thoát với mã {code}")
-                uploaded = upload_checkpoints(client, job_id, output_dir)
+                uploaded = upload_checkpoints(client, job_id, output_dir, config.get("save_every_n_epochs"))
                 push_log(client, job_id, f"\nĐã đẩy {len(uploaded)} checkpoint về server\n")
         return {"status": "succeeded", "checkpoints": uploaded}
     except HandlerError as exc:

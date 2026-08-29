@@ -23,6 +23,53 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def split_rollouts(seed: int, count: int, workers: int) -> list[tuple[int, int]]:
+    """Chia `count` rollout thành các dải `(seed đầu, số lượng)` liên tiếp.
+
+    Dải liên tiếp chứ không xen kẽ, để mỗi process nhận đúng một đoạn seed
+    dùng được luôn với `--seed` và `--n-rollouts` của script hiện có.
+    """
+    workers = max(1, min(workers, count))
+    base, remainder = divmod(count, workers)
+    chunks: list[tuple[int, int]] = []
+    start = seed
+    for index in range(workers):
+        size = base + (1 if index < remainder else 0)
+        chunks.append((start, size))
+        start += size
+    return chunks
+
+
+def merge_results(parts: list[dict[str, Any]], requested: int) -> dict[str, Any]:
+    """Gộp `result.json` của từng process thành một, đúng schema cũ.
+
+    Bốn số tổng hợp phải tính lại từ danh sách gộp — cộng trung bình của các
+    phần chỉ đúng khi các phần bằng nhau, mà chúng không bằng nhau khi số
+    rollout không chia hết cho số process.
+    """
+    episodes: list[dict[str, Any]] = []
+    task_name = "unknown"
+    for part in parts:
+        if part.get("task_name") and part["task_name"] != "unknown":
+            task_name = part["task_name"]
+        episodes.extend(part.get("episodes", []))
+    episodes.sort(key=lambda item: int(item.get("seed", 0)))
+    completed = len(episodes)
+    successes = sum(1 for item in episodes if item.get("success"))
+    return {
+        "task_name": task_name,
+        "num_episodes": requested,
+        "completed_episodes": completed,
+        "success_rate": successes / completed if completed else None,
+        "mean_episode_length": (
+            sum(int(item.get("steps", 0)) for item in episodes) / completed
+            if completed
+            else None
+        ),
+        "episodes": episodes,
+    }
+
+
 class EvaluationJobManager:
     def __init__(
         self,
@@ -43,7 +90,7 @@ class EvaluationJobManager:
         self.training_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
-        self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._processes: dict[str, list[subprocess.Popen[str]]] = {}
         self._futures: dict[str, Future[None]] = {}
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="evaluation-job")
         self._load_existing()
@@ -112,31 +159,183 @@ class EvaluationJobManager:
             self._futures[evaluation_id] = self._executor.submit(self._run, evaluation_id)
         return self._response(record)
 
-    def _command(self, record: dict[str, Any]) -> list[str]:
-        directory = self._job_dir(record["training_run_id"], record["id"])
+    def _state_bank(self, record: dict[str, Any]) -> Path:
+        """Ngân hàng trạng thái khởi đầu, đặt tên theo TOÀN BỘ dải seed.
+
+        Cố ý không phụ thuộc số process: chia việc là quyết định vận hành, còn
+        cảnh khởi đầu của mỗi seed phải giữ nguyên qua các lần chạy, nếu không
+        so sánh hai checkpoint sẽ so cả sự khác biệt của cảnh.
+        """
         config = record["config"]
         start_seed = int(config["seed"])
         end_seed = start_seed + int(config["num_rollouts"]) - 1
-        state_bank = (
+        return (
             self.training_root
             / record["training_run_id"]
             / "evaluation_state_banks"
             / f"seeds_{start_seed}_{end_seed}.npz"
         ).resolve()
+
+    def _command(
+        self,
+        record: dict[str, Any],
+        *,
+        seed: int | None = None,
+        rollouts: int | None = None,
+        result: Path | None = None,
+        record_videos: int | None = None,
+    ) -> list[str]:
+        """Dòng lệnh cho một phần công việc. Bỏ trống các tham số thì chạy trọn
+        dải seed vào `result.json` — đúng hành vi khi chỉ có một process."""
+        directory = self._job_dir(record["training_run_id"], record["id"])
+        config = record["config"]
         command = [
             self.python_executable,
             str(self.evaluation_script),
             "--agent", str(record["checkpoint_path"]),
-            "--result", str(directory / "result.json"),
+            "--result", str(result or directory / "result.json"),
             "--video-dir", str(directory / "videos"),
-            "--n-rollouts", str(config["num_rollouts"]),
-            "--seed", str(config["seed"]),
-            "--record-videos", str(config["record_videos"]),
-            "--state-bank", str(state_bank),
+            "--n-rollouts", str(config["num_rollouts"] if rollouts is None else rollouts),
+            "--seed", str(config["seed"] if seed is None else seed),
+            "--record-videos", str(
+                config["record_videos"] if record_videos is None else record_videos
+            ),
+            "--state-bank", str(self._state_bank(record)),
         ]
         if config.get("horizon") is not None:
             command.extend(["--horizon", str(config["horizon"])])
         return command
+
+    def _worker_count(self, rollouts: int) -> int:
+        from src.config import get_settings
+
+        return max(1, min(int(get_settings().evaluation_workers), rollouts))
+
+    def _environment(self, workers: int) -> dict[str, str]:
+        """Chia số nhân cho các process, thay vì để mỗi cái đòi cả máy.
+
+        torch mặc định mở thread bằng số nhân, nên hai process song song sẽ tạo
+        gấp đôi số thread mà máy có. Đo được trên 8 rollout: một process 46 s,
+        hai process không giới hạn 77 s — CHẬM HƠN cả tuần tự vì tranh nhau —
+        còn hai process giới hạn hai thread mỗi cái chỉ 41 s.
+        """
+        environment = dict(os.environ)
+        if workers > 1:
+            share = max(1, (os.cpu_count() or workers) // workers)
+            for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+                environment[name] = str(share)
+        return environment
+
+    def _spawn(
+        self, command: list[str], log: Any, creationflags: int, workers: int = 1
+    ) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            command,
+            cwd=self.repo_root,
+            env=self._environment(workers),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            text=True,
+            creationflags=creationflags,
+        )
+
+    def _run_rollouts(
+        self,
+        record: dict[str, Any],
+        directory: Path,
+        log: Any,
+        creationflags: int,
+    ) -> int:
+        """Chạy các rollout, chia cho nhiều process nếu được cấu hình.
+
+        Một process thì giữ nguyên đường cũ: nó tự ghi thẳng `result.json`.
+        Nhiều process thì mỗi cái ghi file riêng rồi gộp lại ở cuối.
+        """
+        evaluation_id = record["id"]
+        config = record["config"]
+        rollouts = int(config["num_rollouts"])
+        workers = self._worker_count(rollouts)
+
+        if workers == 1:
+            process = self._spawn(self._command(record), log, creationflags)
+            with self._lock:
+                self._processes[evaluation_id] = [process]
+            return process.wait()
+
+        # Ngân hàng trạng thái phải có TRƯỚC khi chia việc: nhiều process cùng
+        # dựng nó sẽ ghi đè lên nhau, và mỗi process chỉ dựng được phần seed
+        # của mình. Một lượt dựng trước, các process sau chỉ đọc.
+        bank = self._state_bank(record)
+        if not bank.is_file():
+            log.write(f"preparing state bank for {rollouts} seeds\n")
+            log.flush()
+            warmup = self._spawn(
+                self._command(record, rollouts=1, result=directory / "warmup.json",
+                              record_videos=0),
+                log,
+                creationflags,
+            )
+            with self._lock:
+                self._processes[evaluation_id] = [warmup]
+            code = warmup.wait()
+            (directory / "warmup.json").unlink(missing_ok=True)
+            if code != 0:
+                return code
+            with self._lock:
+                if self._jobs[evaluation_id]["cancel_requested"]:
+                    return 0
+
+        chunks = split_rollouts(int(config["seed"]), rollouts, workers)
+        log.write(f"running {rollouts} rollouts across {len(chunks)} processes\n")
+        log.flush()
+
+        # Hạn ngạch video thuộc về cả lần chạy, không phải từng nhóm: nhóm đầu
+        # nhận trọn, các nhóm sau chỉ quay rollout thất bại (script luôn giữ
+        # video của thất bại). Chia đều thì tổng số video vượt yêu cầu.
+        videos_left = int(config["record_videos"])
+        processes: list[subprocess.Popen[str]] = []
+        parts: list[Path] = []
+        for index, (chunk_seed, chunk_size) in enumerate(chunks):
+            part = directory / f"result.part{index}.json"
+            parts.append(part)
+            share = min(videos_left, chunk_size)
+            videos_left -= share
+            processes.append(
+                self._spawn(
+                    self._command(
+                        record,
+                        seed=chunk_seed,
+                        rollouts=chunk_size,
+                        result=part,
+                        record_videos=share,
+                    ),
+                    log,
+                    creationflags,
+                    workers=len(chunks),
+                )
+            )
+        with self._lock:
+            self._processes[evaluation_id] = processes
+
+        codes = [process.wait() for process in processes]
+        failed = next((code for code in codes if code != 0), 0)
+
+        # Gộp cả khi có process hỏng: những nhóm chạy xong vẫn là kết quả thật,
+        # và người dùng nhìn thấy phần nào đã chạy thay vì một trang trống.
+        merged = merge_results(
+            [
+                json.loads(part.read_text(encoding="utf-8"))
+                for part in parts
+                if part.is_file()
+            ],
+            rollouts,
+        )
+        (directory / "result.json").write_text(
+            json.dumps(merged, indent=2), encoding="utf-8"
+        )
+        for part in parts:
+            part.unlink(missing_ok=True)
+        return failed
 
     def _run(self, evaluation_id: str) -> None:
         with self._lock:
@@ -158,17 +357,9 @@ class EvaluationJobManager:
                         if self._jobs[evaluation_id]["cancel_requested"]:
                             self._finish_cancelled(self._jobs[evaluation_id])
                             return
-                    process = subprocess.Popen(
-                        self._command(record),
-                        cwd=self.repo_root,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        creationflags=creationflags,
+                    return_code = self._run_rollouts(
+                        record, directory, log, creationflags
                     )
-                    with self._lock:
-                        self._processes[evaluation_id] = process
-                    return_code = process.wait()
             with self._lock:
                 record = self._jobs[evaluation_id]
                 self._refresh(record)
@@ -249,10 +440,13 @@ class EvaluationJobManager:
             if record["status"] not in {JobStatus.PENDING, JobStatus.RUNNING}:
                 return self._response(record)
             record["cancel_requested"] = True
-            process = self._processes.get(evaluation_id)
+            processes = self._processes.get(evaluation_id)
             future = self._futures.get(evaluation_id)
-            if process is not None:
-                process.terminate()
+            if processes:
+                # Dừng tất cả: bỏ sót một cái là nó chạy tiếp và vẫn ghi kết
+                # quả vào một job người dùng đã huỷ.
+                for process in processes:
+                    process.terminate()
             elif future is not None and future.cancel():
                 self._finish_cancelled(record)
             else:

@@ -48,6 +48,57 @@ def _request(**overrides) -> EvaluationJobRequest:
     return EvaluationJobRequest(**values)
 
 
+# Script thay cho `evaluate_robomimic.py`: tôn trọng --seed/--n-rollouts và
+# ghi state bank, để một lần chạy chia cho nhiều process cho ra đúng số
+# episode như chạy một process.
+_FAKE_EVALUATE = """
+import argparse, json
+from pathlib import Path
+
+p = argparse.ArgumentParser()
+p.add_argument('--result')
+p.add_argument('--video-dir')
+p.add_argument('--seed', type=int, default=5000)
+p.add_argument('--n-rollouts', type=int, default=1)
+p.add_argument('--record-videos', type=int, default=0)
+p.add_argument('--state-bank')
+a, _ = p.parse_known_args()
+
+if a.state_bank:
+    bank = Path(a.state_bank)
+    bank.parent.mkdir(parents=True, exist_ok=True)
+    bank.write_bytes(b'bank')
+
+v = Path(a.video_dir)
+v.mkdir(parents=True, exist_ok=True)
+
+episodes = []
+for index in range(a.n_rollouts):
+    seed = a.seed + index
+    success = seed % 3 != 1
+    video = None
+    if index < a.record_videos:
+        name = f"seed_{seed}_{'success' if success else 'fail'}.mp4"
+        (v / name).write_bytes(b'video')
+        video = name
+    episodes.append({
+        'seed': seed, 'success': success,
+        'steps': 30 + (seed - 5000), 'video': video,
+    })
+
+done = len(episodes)
+Path(a.result).write_text(json.dumps({
+    'task_name': 'Lift',
+    'num_episodes': a.n_rollouts,
+    'completed_episodes': done,
+    'success_rate': sum(e['success'] for e in episodes) / done,
+    'mean_episode_length': sum(e['steps'] for e in episodes) / done,
+    'episodes': episodes,
+}))
+print('evaluation complete')
+"""
+
+
 def _wait(manager: EvaluationJobManager, evaluation_id: str, timeout: float = 5.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -60,22 +111,7 @@ def _wait(manager: EvaluationJobManager, evaluation_id: str, timeout: float = 5.
 
 def test_evaluation_job_persists_results_and_video(tmp_path: Path) -> None:
     script = tmp_path / "fake_evaluate.py"
-    script.write_text(
-        "import argparse, json\n"
-        "from pathlib import Path\n"
-        "p=argparse.ArgumentParser()\n"
-        "p.add_argument('--result'); p.add_argument('--video-dir')\n"
-        "a,_=p.parse_known_args()\n"
-        "v=Path(a.video_dir); v.mkdir(parents=True, exist_ok=True)\n"
-        "(v/'episode_000_success.mp4').write_bytes(b'video')\n"
-        "Path(a.result).write_text(json.dumps({"
-        "'task_name':'Lift','success_rate':2/3,'mean_episode_length':42.0,"
-        "'episodes':[{'seed':5000,'success':True,'steps':30,'video':'episode_000_success.mp4'},"
-        "{'seed':5001,'success':False,'steps':50,'video':None},"
-        "{'seed':5002,'success':True,'steps':46,'video':None}]}))\n"
-        "print('evaluation complete')\n",
-        encoding="utf-8",
-    )
+    script.write_text(_FAKE_EVALUATE, encoding="utf-8")
     checkpoint = tmp_path / "model.pth"
     checkpoint.touch()
     manager = EvaluationJobManager(
@@ -93,7 +129,7 @@ def test_evaluation_job_persists_results_and_video(tmp_path: Path) -> None:
     assert finished.task_name == "Lift"
     assert finished.success_rate == 2 / 3
     assert len(finished.episodes) == 3
-    video = manager.video(created.id, "episode_000_success.mp4")
+    video = manager.video(created.id, "seed_5000_success.mp4")
     assert video is not None and video.read_bytes() == b"video"
     assert manager.video(created.id, "../job.json") is None
     job_file = tmp_path / "training" / "training-1" / "evaluations" / created.id / "job.json"
@@ -461,3 +497,86 @@ def test_state_bank_reloads_the_same_saved_states(tmp_path: Path) -> None:
     assert np.array_equal(created[5000], loaded[5000])
     assert np.array_equal(created[5001], loaded[5001])
     assert not np.array_equal(loaded[5000], loaded[5001])
+
+
+# --- chia rollout cho nhiều process -------------------------------------------
+
+
+def test_split_gives_every_rollout_exactly_one_owner():
+    from src.training.evaluation_jobs import split_rollouts
+
+    chunks = split_rollouts(5000, 20, 3)
+
+    assert sum(size for _, size in chunks) == 20
+    seeds = [seed + offset for seed, size in chunks for offset in range(size)]
+    assert seeds == list(range(5000, 5020))  # không trùng, không sót
+
+
+def test_split_never_makes_more_processes_than_rollouts():
+    from src.training.evaluation_jobs import split_rollouts
+
+    assert len(split_rollouts(5000, 2, 8)) == 2
+
+
+def test_merge_recomputes_the_summary_from_the_merged_list():
+    from src.training.evaluation_jobs import merge_results
+
+    # Hai phần không bằng nhau: lấy trung bình của các trung bình sẽ ra 0.75,
+    # con số đúng là 2/3.
+    parts = [
+        {"task_name": "Lift", "success_rate": 1.0, "mean_episode_length": 10.0,
+         "episodes": [{"seed": 5001, "success": True, "steps": 10}]},
+        {"task_name": "Lift", "success_rate": 0.5, "mean_episode_length": 20.0,
+         "episodes": [
+             {"seed": 5002, "success": True, "steps": 20},
+             {"seed": 5000, "success": False, "steps": 20},
+         ]},
+    ]
+
+    merged = merge_results(parts, requested=3)
+
+    assert merged["success_rate"] == 2 / 3
+    assert merged["completed_episodes"] == 3
+    assert [item["seed"] for item in merged["episodes"]] == [5000, 5001, 5002]
+
+
+def test_merge_keeps_what_finished_when_a_process_died():
+    from src.training.evaluation_jobs import merge_results
+
+    merged = merge_results(
+        [{"task_name": "Lift", "episodes": [{"seed": 5000, "success": True, "steps": 10}]}],
+        requested=4,
+    )
+
+    assert merged["num_episodes"] == 4  # người dùng đã yêu cầu 4
+    assert merged["completed_episodes"] == 1  # nhưng chỉ 1 chạy xong
+
+
+def test_a_split_run_produces_the_same_episodes_as_a_single_process(tmp_path, monkeypatch):
+    """Chia việc là chi tiết vận hành: kết quả phải không đổi."""
+    from src.config import get_settings
+
+    script = tmp_path / "fake_evaluate.py"
+    script.write_text(_FAKE_EVALUATE, encoding="utf-8")
+    checkpoint = tmp_path / "model.pth"
+    checkpoint.touch()
+
+    def run(workers: int, root: str):
+        monkeypatch.setattr(get_settings(), "evaluation_workers", workers)
+        manager = EvaluationJobManager(
+            tmp_path / root,
+            TrainingJobsStub(checkpoint),  # type: ignore[arg-type]
+            repo_root=tmp_path,
+            python_executable=sys.executable,
+            evaluation_script=script,
+        )
+        return _wait(manager, manager.submit(_request(num_rollouts=7)).id)
+
+    single = run(1, "one")
+    split = run(3, "three")
+
+    assert single.status == split.status == JobStatus.SUCCEEDED
+    assert [(e.seed, e.success, e.steps) for e in single.episodes] == [
+        (e.seed, e.success, e.steps) for e in split.episodes
+    ]
+    assert single.success_rate == split.success_rate

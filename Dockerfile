@@ -7,8 +7,9 @@ WORKDIR /app
 # by the web backend) pulls evdev>=1.3 on Linux, which has no prebuilt wheel
 # and compiles a C extension against linux/input*.h. Without these, `pip
 # install -r requirements.txt` fails outright on a fresh Linux image.
+# git: robomimic 0.5 is only on GitHub, so pip clones it (see below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential linux-libc-dev \
+    build-essential linux-libc-dev git \
     && rm -rf /var/lib/apt/lists/*
 
 # A venv rather than `pip install --user`: the final stage runs as `appuser`
@@ -23,6 +24,27 @@ ENV PATH=/opt/venv/bin:$PATH
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Evaluation runs rollouts here, which needs torch and robomimic — the same
+# pieces the training image installs, minus CUDA. Training itself still does
+# not happen on this box; it is the policy rollout that has to.
+#
+# The CPU index is not an optimisation, it is the whole point: PyPI's default
+# torch wheel bundles the CUDA runtime and costs ~2.5 GB on a machine with no
+# GPU to use it. The +cpu build is around 200 MB.
+RUN pip install --no-cache-dir "torch>=2.5.0" "torchvision>=0.20.0" \
+        --index-url https://download.pytorch.org/whl/cpu
+
+# Same install dance as Dockerfile.train, and for the same reasons — see the
+# comments there. --no-deps keeps robomimic from pulling numpy 2.x, which
+# breaks robosuite and numba, so its real dependencies go in by hand;
+# huggingface_hub in particular is imported at the top of
+# robomimic/utils/file_utils.py, and without it every rollout fails on import.
+RUN pip install --no-cache-dir --no-deps \
+        "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.5" \
+    && pip install --no-cache-dir imageio imageio-ffmpeg tensorboard tensorboardX matplotlib \
+    && pip install --no-cache-dir huggingface-hub diffusers transformers safetensors \
+    && pip install --no-cache-dir "numpy>=1.26.0,<2.0.0"
 
 # ---- Stage 2: Production ----
 FROM python:3.11-slim
