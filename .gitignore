@@ -127,3 +127,6 @@ local_app/electron/*.log
 local_app/data-test/
 local_app/data-desktop-test/
 local_app/data-desktop-auth-test/
+
+# Backups copied off the VPS before a deploy.
+_vps-backups/

@@ -51,6 +51,7 @@ services:
         NEXT_PUBLIC_API_ORIGIN: https://${PROJECT_DOMAIN}
         NEXT_PUBLIC_WS_BASE: wss://${PROJECT_DOMAIN}
         NEXT_PUBLIC_TRAINING_ENABLED: ${NEXT_PUBLIC_TRAINING_ENABLED:-false}
+        NEXT_PUBLIC_COLLECTION_ENABLED: ${NEXT_PUBLIC_COLLECTION_ENABLED:-1}
     networks:
       - internal
     restart: unless-stopped
