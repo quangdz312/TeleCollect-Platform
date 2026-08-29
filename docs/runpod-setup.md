@@ -2,7 +2,15 @@
 
 Hướng dẫn thao tác trên web. Làm sau khi image đã đẩy lên Docker Hub.
 
-Địa chỉ image của dự án: **`pakerpp/telecollect-train:v1`**
+Địa chỉ image của dự án: **`pakerpp/telecollect-train:v3`**
+
+Lịch sử tag — endpoint phải trỏ tag mới nhất, RunPod cache theo tag:
+
+| Tag | Có gì |
+|---|---|
+| `v1` | Bản đầu. Thiếu `wandb`, bật W&B là hỏng. |
+| `v2` | Thêm `wandb`, nhưng khoá không tới được tiến trình train nên run vẫn không hiện trên W&B. Chỉ đẩy về `last.pth` và `best_validation`. |
+| `v3` | Khoá W&B tới đúng chỗ. Giữ cả checkpoint theo `save_every_n_epochs`. In mức VRAM đỉnh vào log để chọn batch size. |
 
 ---
 
@@ -25,7 +33,7 @@ Image đã dựng và kiểm tra xong ở máy local — **5.55 GB**, nội dung
 hành vi lạ ở tầng Python thì đây là chỗ đáng nghi đầu tiên; sửa bằng cách thêm
 kho `deadsnakes` vào `Dockerfile.train`.
 
-Vào https://hub.docker.com/r/pakerpp/telecollect-train/tags — phải thấy tag `v1`.
+Vào https://hub.docker.com/r/pakerpp/telecollect-train/tags — phải thấy tag `v3`.
 
 Nếu chưa thấy, image chưa được đẩy lên. RunPod không tải được từ máy bạn, chỉ
 tải được từ kho công khai.
@@ -81,7 +89,7 @@ Chọn **Docker Image** (không phải GitHub Repo, không phải template có s
 Ô **Container Image** điền đúng chuỗi này:
 
 ```
-pakerpp/telecollect-train:v1
+pakerpp/telecollect-train:v3
 ```
 
 Không thêm `docker.io/` ở đầu, không thêm `https://`.
@@ -264,10 +272,10 @@ Nạp 10 USD đủ cho khoảng 17 giờ train.
 |---|---|
 | Job nằm mãi ở `IN_QUEUE` | Chưa nạp tiền, hoặc Max Workers = 0 |
 | Lỗi kéo image | Repository để Private, hoặc gõ sai tag |
-| `ModuleNotFoundError` | Image thiếu gói — sửa `Dockerfile.train`, build lại với tag `v2` |
+| `ModuleNotFoundError` | Image thiếu gói — sửa `Dockerfile.train`, build lại với tag kế tiếp |
 | Handler báo không tải được dataset | `PUBLIC_BASE_URL` sai, hoặc server không truy cập được từ ngoài |
 | 403 khi đẩy checkpoint | `MACHINE_TOKEN_SECRET` trên server đã đổi sau khi job bắt đầu |
 | `torch.cuda.is_available()` False | Image cài nhầm torch bản CPU |
 
 **Sửa image thì phải đổi tag** (`v2`, `v3`...) rồi cập nhật endpoint trỏ sang
-tag mới. RunPod cache theo tag, đẩy đè lên `v1` thì worker vẫn chạy bản cũ.
+tag mới. RunPod cache theo tag, đẩy đè lên tag cũ thì worker vẫn chạy bản cũ.

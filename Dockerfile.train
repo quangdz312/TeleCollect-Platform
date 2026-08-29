@@ -4,8 +4,8 @@
 # trong khi server chỉ nhận dữ liệu và điều phối, không train.
 #
 # Build và đẩy lên Docker Hub:
-#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v2 .
-#   docker push <tài-khoản>/telecollect-train:v2
+#   docker build -f Dockerfile.train -t <tài-khoản>/telecollect-train:v3 .
+#   docker push <tài-khoản>/telecollect-train:v3
 #
 # Đặt tag phiên bản, đừng dùng `latest`: RunPod cache image, `latest` khiến
 # không biết endpoint đang chạy bản nào.
@@ -17,7 +17,12 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Image này kéo vài GB bánh xe; một lần đọc chậm không được làm đổ cả lần
+    # build 20 phút. Đã gặp: `pip install --upgrade pip` chết vì ReadTimeout
+    # tới files.pythonhosted.org dù máy build vẫn vào PyPI bình thường.
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10
 
 # python3.11: khớp bản của image server, tránh lệch hành vi giữa hai nơi.
 # build-essential + linux-libc-dev: pynput kéo theo evdev, gói này không có
