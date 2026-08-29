@@ -13,6 +13,7 @@ import {
   type TrainingCheckpoint,
   type TrainingRun,
 } from "@/lib/api";
+import { EVALUATION_ENABLED } from "@/lib/features";
 import { percent, timeAgo } from "@/lib/format";
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
@@ -229,11 +230,19 @@ export default function EvaluatePage() {
               <NumberField label="Videos" value={form.record_videos} min={0} onChange={(record_videos) => setForm({ ...form, record_videos })} />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button variant="primary" disabled={busy || !form.checkpoint_id || invalidVideos} onClick={() => void startEvaluation()}>
+              <Button variant="primary" disabled={!EVALUATION_ENABLED || busy || !form.checkpoint_id || invalidVideos} onClick={() => void startEvaluation()}>
                 {busy ? "Starting…" : "Run evaluation"}
               </Button>
               <span className="text-xs text-ink-400">Seeds {form.seed}–{form.seed + form.num_rollouts - 1}</span>
             </div>
+            {!EVALUATION_ENABLED && (
+              <div className="mt-3">
+                <Alert tone="info">
+                  This deployment does not run evaluations. Existing results stay
+                  readable below.
+                </Alert>
+              </div>
+            )}
             {invalidVideos && <div className="mt-3"><Alert>The video count cannot exceed the rollout count.</Alert></div>}
           </>
         )}

@@ -15,3 +15,22 @@
  */
 export const COLLECTION_ENABLED =
   process.env.NEXT_PUBLIC_COLLECTION_ENABLED !== "0";
+
+/**
+ * Whether this deployment can train, and whether it can evaluate.
+ *
+ * Two flags, because the two jobs need different machines: training wants a
+ * GPU, while an evaluation rollout runs on CPU in a minute or two. The staging
+ * server rents a GPU for training but evaluates locally, so it turns the first
+ * off and the second on.
+ *
+ * Evaluation falls back to the training flag when it is not set, matching the
+ * backend, so an existing deployment keeps behaving the way it did.
+ */
+export const TRAINING_ENABLED = process.env.NEXT_PUBLIC_TRAINING_ENABLED !== "false";
+
+export const EVALUATION_ENABLED =
+  process.env.NEXT_PUBLIC_EVALUATION_ENABLED === undefined ||
+  process.env.NEXT_PUBLIC_EVALUATION_ENABLED === ""
+    ? TRAINING_ENABLED
+    : process.env.NEXT_PUBLIC_EVALUATION_ENABLED !== "false";

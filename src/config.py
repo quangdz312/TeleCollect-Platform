@@ -162,12 +162,27 @@ class Settings(BaseSettings):
     """
 
     training_enabled: bool = True
-    """Cho phép tạo training/evaluation job thật (spawn subprocess).
+    """Cho phép tạo training job thật.
 
-    Mặc định bật để không đổi hành vi dev/test hiện có. CPU staging (chưa có
-    GPU, image production core chưa cài `requirements-train`) đặt biến này
+    Mặc định bật để không đổi hành vi dev/test hiện có. CPU staging đặt
     `false` qua `.env.production` — endpoint tạo job trả 403 thay vì spawn
     subprocess rồi lỗi giữa chừng."""
+
+    evaluation_enabled: bool | None = None
+    """Cho phép chạy rollout đánh giá checkpoint.
+
+    Tách khỏi `training_enabled` vì hai việc có yêu cầu khác nhau: train cần
+    GPU, còn rollout chạy được trên CPU — chậm hơn nhưng vẫn trong khoảng một
+    hai phút. Server staging vì thế train qua GPU thuê nhưng đánh giá tại chỗ.
+
+    `None` (mặc định) nghĩa là theo `training_enabled`, giữ nguyên hành vi cũ
+    cho mọi cấu hình đã có. Đặt rõ `true`/`false` để tách hẳn hai bên."""
+
+    @property
+    def evaluation_is_enabled(self) -> bool:
+        if self.evaluation_enabled is None:
+            return self.training_enabled
+        return self.evaluation_enabled
 
     training_runner: Literal["local", "runpod"] = "local"
     """Nơi chạy training job.

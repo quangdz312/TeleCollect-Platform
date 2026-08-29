@@ -58,6 +58,15 @@ def _require_training_enabled() -> None:
         )
 
 
+def _require_evaluation_enabled() -> None:
+    """Đánh giá chạy được ở nơi không train được: rollout chỉ cần CPU."""
+    if not get_settings().evaluation_is_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Đánh giá chưa khả dụng trên máy chủ này",
+        )
+
+
 @lru_cache
 def job_manager() -> TrainingJobManager:
     settings = get_settings()
@@ -287,7 +296,7 @@ async def create_evaluation(
     body: EvaluationJobRequest,
     _user: User = Depends(require_min_role(UserRole.REVIEWER)),
 ) -> EvalResultResponse:
-    _require_training_enabled()
+    _require_evaluation_enabled()
     if body.training_run_id != job_id:
         raise HTTPException(status_code=422, detail="training_run_id không khớp URL")
     training_job = _job_or_404(job_id)
