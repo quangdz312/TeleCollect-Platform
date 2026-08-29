@@ -40,6 +40,15 @@ def parse_args() -> argparse.Namespace:
         help="Persistent NPZ mapping evaluation seeds to initial simulator states.",
     )
     parser.add_argument(
+        "--prepare-state-bank-only",
+        action="store_true",
+        help=(
+            "Dựng state bank cho trọn dải seed rồi thoát, không chạy rollout. "
+            "Dùng khi một lần evaluate được chia cho nhiều process: chúng chỉ "
+            "được đọc bank, nên bank phải có sẵn và đủ seed từ trước."
+        ),
+    )
+    parser.add_argument(
         "--success-tail-steps",
         type=int,
         default=30,
@@ -274,11 +283,15 @@ def _prepare_state_bank(
             raise ValueError("State bank không thuộc đúng task evaluation")
         if schema_version == 2 and metadata.get("environment_hash") != environment_hash:
             raise ValueError("State bank không tương thích với environment của checkpoint")
-        if metadata.get("seeds") != seeds:
-            raise ValueError("State bank không chứa đúng dải seed được yêu cầu")
+        # Bao hàm chứ không đẳng thức: một lần evaluate chia cho nhiều process
+        # thì bank mang trọn dải seed, còn mỗi process chỉ hỏi phần của mình.
+        # Đòi bằng nhau khiến mọi process con đều hỏng ngay từ bước này.
+        stored_seeds = metadata.get("seeds") or []
+        if not set(seeds).issubset(set(stored_seeds)):
+            raise ValueError("State bank không chứa đủ dải seed được yêu cầu")
         with np.load(path, allow_pickle=False) as bank:
-            if set(bank.files) != expected_keys:
-                raise ValueError("State bank thiếu hoặc thừa seed so với metadata")
+            if not expected_keys.issubset(set(bank.files)):
+                raise ValueError("State bank thiếu seed so với metadata")
             states = {
                 seed: np.asarray(bank[f"seed_{seed}"], dtype=np.float64).copy()
                 for seed in seeds
@@ -500,6 +513,8 @@ def main() -> int:
         if args.state_bank is not None
         else None
     )
+    if args.prepare_state_bank_only:
+        return 0
 
     episodes: list[dict[str, object]] = []
     for index in range(args.n_rollouts):

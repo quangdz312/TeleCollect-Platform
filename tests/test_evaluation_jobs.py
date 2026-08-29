@@ -62,12 +62,25 @@ p.add_argument('--seed', type=int, default=5000)
 p.add_argument('--n-rollouts', type=int, default=1)
 p.add_argument('--record-videos', type=int, default=0)
 p.add_argument('--state-bank')
+p.add_argument('--prepare-state-bank-only', action='store_true')
 a, _ = p.parse_known_args()
 
+# Bank ghi ra đúng dải seed và đọc lại thì kiểm tra dải đó, y như script
+# thật. Bản giả cũ ghi một chuỗi cố định nên không bao giờ phát hiện được
+# việc bank bị dựng thiếu seed — lỗi đó chỉ lộ ra trên server.
+seeds = list(range(a.seed, a.seed + a.n_rollouts))
 if a.state_bank:
     bank = Path(a.state_bank)
-    bank.parent.mkdir(parents=True, exist_ok=True)
-    bank.write_bytes(b'bank')
+    if bank.is_file():
+        saved = json.loads(bank.read_text())
+        if not set(seeds).issubset(set(saved)):
+            raise SystemExit('State bank khong chua du dai seed duoc yeu cau')
+    else:
+        bank.parent.mkdir(parents=True, exist_ok=True)
+        bank.write_text(json.dumps(seeds))
+
+if a.prepare_state_bank_only:
+    raise SystemExit(0)
 
 v = Path(a.video_dir)
 v.mkdir(parents=True, exist_ok=True)

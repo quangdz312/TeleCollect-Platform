@@ -184,6 +184,7 @@ class EvaluationJobManager:
         rollouts: int | None = None,
         result: Path | None = None,
         record_videos: int | None = None,
+        prepare_only: bool = False,
     ) -> list[str]:
         """Dòng lệnh cho một phần công việc. Bỏ trống các tham số thì chạy trọn
         dải seed vào `result.json` — đúng hành vi khi chỉ có một process."""
@@ -204,6 +205,8 @@ class EvaluationJobManager:
         ]
         if config.get("horizon") is not None:
             command.extend(["--horizon", str(config["horizon"])])
+        if prepare_only:
+            command.append("--prepare-state-bank-only")
         return command
 
     def _worker_count(self, rollouts: int) -> int:
@@ -270,8 +273,8 @@ class EvaluationJobManager:
             log.write(f"preparing state bank for {rollouts} seeds\n")
             log.flush()
             warmup = self._spawn(
-                self._command(record, rollouts=1, result=directory / "warmup.json",
-                              record_videos=0),
+                self._command(record, result=directory / "warmup.json",
+                              record_videos=0, prepare_only=True),
                 log,
                 creationflags,
             )
