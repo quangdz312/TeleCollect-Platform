@@ -725,6 +725,9 @@ class TrainingJobResponse(BaseModel):
     # dựa trên số thật thay vì tăng đại rồi hỏng giữa chừng.
     gpu_peak_gb: float | None = Field(default=None, ge=0.0)
     gpu_total_gb: float | None = Field(default=None, ge=0.0)
+    # Tên card: RunPod cấp máy nào sẵn có nên mỗi lần thuê một loại khác nhau,
+    # biết đã chạy trên card gì thì con số VRAM ở trên mới so sánh được.
+    gpu_name: str | None = None
 
 
 class EvaluationJobRequest(BaseModel):

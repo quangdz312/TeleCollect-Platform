@@ -71,11 +71,17 @@ def _report_gpu_memory(batch_size: int) -> None:
         return
     if not torch.cuda.is_available():
         return
-    peak = torch.cuda.max_memory_allocated() / 1024**3
-    total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    # `max_memory_reserved` chứ không phải `max_memory_allocated`: cái sau chỉ
+    # đếm tensor đang sống, bỏ qua bộ đệm PyTorch giữ lại và workspace của
+    # cuDNN. Đo bằng nó ra 0.1 GB cho một lần train thật, thấp tới mức vô
+    # dụng khi cần biết batch bao nhiêu thì hết VRAM.
+    properties = torch.cuda.get_device_properties(0)
+    peak = torch.cuda.max_memory_reserved() / 1024**3
+    total = properties.total_memory / 1024**3
     print(
         f"GPU memory: peak {peak:.2f} GB of {total:.1f} GB "
-        f"({100 * peak / total:.0f}%) at batch size {batch_size}",
+        f"({100 * peak / total:.0f}%) at batch size {batch_size} "
+        f"on {properties.name}",
         flush=True,
     )
 

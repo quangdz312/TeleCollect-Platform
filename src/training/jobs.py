@@ -41,6 +41,9 @@ _EPOCH_BLOCK = re.compile(
 )
 _GPU_MEMORY = re.compile(
     r"GPU memory: peak (?P<peak>[0-9.]+) GB of (?P<total>[0-9.]+) GB"
+    # Phần tên card là tùy chọn: job chạy trước khi thêm nó vẫn phải đọc được
+    # peak, nếu không mở lại một job cũ sẽ thấy VRAM trống trơn.
+    r"(?:.*? on (?P<device>.+))?"
 )
 # Công khai: `runpod_handler.selected_checkpoints` lọc theo cùng quy ước tên.
 CHECKPOINT_EPOCH = re.compile(r"^model_epoch_(?P<epoch>\d+)(?=_|\.pth$)")
@@ -80,14 +83,15 @@ def parse_gpu_memory(text: str) -> dict[str, float | None]:
     for match in _GPU_MEMORY.finditer(text):
         pass  # lấy lần cuối: một job chạy lại sẽ in thêm dòng mới
     if match is None:
-        return {"gpu_peak_gb": None, "gpu_total_gb": None}
+        return {"gpu_peak_gb": None, "gpu_total_gb": None, "gpu_name": None}
     try:
         return {
             "gpu_peak_gb": float(match.group("peak")),
             "gpu_total_gb": float(match.group("total")),
+            "gpu_name": (match.group("device") or "").strip() or None,
         }
     except ValueError:
-        return {"gpu_peak_gb": None, "gpu_total_gb": None}
+        return {"gpu_peak_gb": None, "gpu_total_gb": None, "gpu_name": None}
 
 
 def discover_checkpoints(output_dir: Path, current_epoch: int = 0) -> list[dict[str, Any]]:
@@ -306,6 +310,7 @@ class TrainingJobManager:
             "validation_loss": None,
             "gpu_peak_gb": None,
             "gpu_total_gb": None,
+            "gpu_name": None,
             "error": None,
             "checkpoints": [],
             "cancel_requested": False,

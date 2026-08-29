@@ -422,8 +422,27 @@ async def test_a_job_records_who_started_it(
 def test_gpu_memory_is_read_from_the_log():
     from src.training.jobs import parse_gpu_memory
 
-    text = "Train Epoch 1\nGPU memory: peak 3.42 GB of 16.0 GB (21%) at batch size 32\n"
-    assert parse_gpu_memory(text) == {"gpu_peak_gb": 3.42, "gpu_total_gb": 16.0}
+    text = (
+        "Train Epoch 1\n"
+        "GPU memory: peak 3.42 GB of 16.0 GB (21%) at batch size 32 on NVIDIA L4\n"
+    )
+    assert parse_gpu_memory(text) == {
+        "gpu_peak_gb": 3.42,
+        "gpu_total_gb": 16.0,
+        "gpu_name": "NVIDIA L4",
+    }
+
+
+def test_gpu_memory_reads_a_log_written_before_the_device_name_existed():
+    """Job chạy trước khi thêm tên card vẫn phải đọc ra được đỉnh VRAM."""
+    from src.training.jobs import parse_gpu_memory
+
+    text = "GPU memory: peak 3.42 GB of 16.0 GB (21%) at batch size 32\n"
+    assert parse_gpu_memory(text) == {
+        "gpu_peak_gb": 3.42,
+        "gpu_total_gb": 16.0,
+        "gpu_name": None,
+    }
 
 
 def test_gpu_memory_absent_on_a_cpu_run():
@@ -432,6 +451,7 @@ def test_gpu_memory_absent_on_a_cpu_run():
     assert parse_gpu_memory("Train Epoch 1\n{}\n") == {
         "gpu_peak_gb": None,
         "gpu_total_gb": None,
+        "gpu_name": None,
     }
 
 

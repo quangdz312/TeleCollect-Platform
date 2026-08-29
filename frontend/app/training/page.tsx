@@ -524,7 +524,7 @@ export default function TrainingPage() {
                     value={`${selected.gpu_peak_gb.toFixed(1)} GB`}
                     hint={
                       selected.gpu_total_gb
-                        ? `${Math.round((100 * selected.gpu_peak_gb) / selected.gpu_total_gb)}% of ${selected.gpu_total_gb.toFixed(0)} GB · batch ${selected.config.batch_size}`
+                        ? `${Math.round((100 * selected.gpu_peak_gb) / selected.gpu_total_gb)}% of ${selected.gpu_total_gb.toFixed(0)} GB · batch ${selected.config.batch_size}${selected.gpu_name ? ` · ${selected.gpu_name}` : ""}`
                         : `batch ${selected.config.batch_size}`
                     }
                   />
