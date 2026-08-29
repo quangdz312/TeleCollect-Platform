@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -25,6 +27,8 @@ from src.models.schemas import (
     TrainingJobResponse,
 )
 from src.training.runpod_runner import RunPodError
+
+logger = logging.getLogger(__name__)
 
 # Số lần hỏi trạng thái hỏng liên tiếp trước khi coi là mất liên lạc thật.
 # Với `runpod_poll_interval_s` mặc định 10 giây thì đây là khoảng 5 phút —
@@ -402,6 +406,9 @@ class TrainingJobManager:
                     ) from exc
                 poll_failures = 0
                 status = result["status"]
+                if result.get("execution_s") is not None:
+                    with self._lock:
+                        self._jobs[job_id]["gpu_seconds"] = float(result["execution_s"])
                 if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
                     with self._lock:
                         record = self._jobs[job_id]
@@ -409,6 +416,8 @@ class TrainingJobManager:
                         record["finished_at"] = _now()
                         record["error"] = result.get("error")
                         self._write(record)
+                        billed = self._billed_hours(record)
+                    self._charge_hours(record.get("owner_id"), billed)
                     return
                 if time.monotonic() > deadline:
                     # Trần thời gian: job vẫn chạy nhưng đã hết ngân sách giờ.
@@ -431,6 +440,8 @@ class TrainingJobManager:
                             "checkpoint đã lưu vẫn dùng được"
                         )
                         self._write(record)
+                        billed = self._billed_hours(record)
+                    self._charge_hours(record.get("owner_id"), billed)
                     return
             with self._lock:
                 snapshot = dict(self._jobs[job_id])
@@ -451,6 +462,52 @@ class TrainingJobManager:
             self.runner.cancel(record)
         except Exception:
             pass
+
+    @staticmethod
+    def _billed_hours(record: dict[str, Any]) -> float:
+        """Số giờ tính cho một lần chạy trên GPU thuê.
+
+        Ưu tiên `gpu_seconds` — thời gian RunPod tính tiền, không gồm lúc nằm
+        chờ hàng đợi. RunPod không trả con số đó (job huỷ sớm, hoặc trường bị
+        thiếu) thì lùi về thời gian tường; thà tính hơi rộng còn hơn cho chạy
+        miễn phí.
+        """
+        seconds = record.get("gpu_seconds")
+        if isinstance(seconds, (int, float)) and seconds > 0:
+            return float(seconds) / 3600.0
+        started, finished = record.get("started_at"), record.get("finished_at")
+        if not started or not finished:
+            return 0.0
+        try:
+            elapsed = datetime.fromisoformat(finished) - datetime.fromisoformat(started)
+        except ValueError:
+            return 0.0
+        return max(elapsed.total_seconds(), 0.0) / 3600.0
+
+    def _charge_hours(self, owner_id: str | None, hours: float) -> None:
+        """Cộng giờ đã dùng vào tài khoản đã bấm Train.
+
+        Chạy sau khi job kết thúc, nên KHÔNG được ném ra ngoài: hỏng phần ghi
+        sổ mà làm mất luôn kết quả training là đánh đổi sai. Job cũ và job chạy
+        bằng runner local không có chủ và không tốn giờ thuê.
+        """
+        if not owner_id or hours <= 0:
+            return
+        try:
+            asyncio.run(self._add_used_hours(owner_id, hours))
+        except Exception:  # noqa: BLE001 - xem docstring
+            logger.exception("Không ghi được %.4f giờ GPU cho user %s", hours, owner_id)
+
+    @staticmethod
+    async def _add_used_hours(owner_id: str, hours: float) -> None:
+        from src.models.db import User, get_engine, session_factory
+
+        async with session_factory(get_engine())() as session:
+            user = await session.get(User, owner_id)
+            if user is None:
+                return
+            user.gpu_hours_used = (user.gpu_hours_used or 0.0) + hours
+            await session.commit()
 
     def _finish_cancelled(self, record: dict[str, Any]) -> None:
         # A user may cancel while optional post-training work (for example,

@@ -145,7 +145,19 @@ class RunPodRunner:
         error = None
         if status == JobStatus.FAILED:
             error = str(body.get("error") or f"RunPod báo {raw}")
-        return {"status": status, "error": error}
+        # `executionTime` (ms) là thời gian RunPod TÍNH TIỀN — không gồm lúc
+        # nằm chờ hàng đợi. Trừ giờ theo con số này thay vì thời gian tường thì
+        # người dùng không mất giờ vì hàng đợi dài.
+        execution_ms = body.get("executionTime")
+        return {
+            "status": status,
+            "error": error,
+            "execution_s": (
+                float(execution_ms) / 1000.0
+                if isinstance(execution_ms, (int, float))
+                else None
+            ),
+        }
 
     def cancel(self, record: dict[str, Any]) -> None:
         api_key, endpoint_id, _ = self._config()

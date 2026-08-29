@@ -133,3 +133,40 @@ def test_running_out_of_gpu_hours_cancels_rather_than_fails(fast_poll, tmp_path,
     assert "checkpoint" in record["error"]
     # Vẫn phải hủy bên RunPod, nếu không hóa đơn cứ chạy.
     assert runner.cancelled is True
+
+
+def test_hours_come_from_runpod_execution_time_not_wall_clock(tmp_path):
+    """Giờ trừ theo thời gian RunPod tính tiền, không tính lúc chờ hàng đợi."""
+    manager = TrainingJobManager(tmp_path / "training", runner=FakeRunner([]))
+    record = {
+        "gpu_seconds": 1800.0,  # RunPod báo 30 phút chạy thật
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "finished_at": "2026-01-01T02:00:00+00:00",  # 2 giờ tường vì chờ hàng đợi
+    }
+
+    assert manager._billed_hours(record) == pytest.approx(0.5)
+
+
+def test_wall_clock_is_the_fallback_when_runpod_reports_nothing(tmp_path):
+    """Thiếu số liệu thì tính hơi rộng còn hơn cho chạy miễn phí."""
+    manager = TrainingJobManager(tmp_path / "training", runner=FakeRunner([]))
+    record = {
+        "gpu_seconds": None,
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "finished_at": "2026-01-01T00:45:00+00:00",
+    }
+
+    assert manager._billed_hours(record) == pytest.approx(0.75)
+
+
+def test_a_job_that_never_started_is_not_charged(tmp_path):
+    manager = TrainingJobManager(tmp_path / "training", runner=FakeRunner([]))
+
+    assert manager._billed_hours({"started_at": None, "finished_at": None}) == 0.0
+
+
+def test_charging_a_job_with_no_owner_does_nothing(tmp_path):
+    """Job cũ và job chạy runner local không có chủ, và không tốn giờ thuê."""
+    manager = TrainingJobManager(tmp_path / "training", runner=FakeRunner([]))
+
+    manager._charge_hours(None, 1.0)  # không được ném
