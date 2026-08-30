@@ -11,7 +11,7 @@ import {
   type TrainingRequest,
   type TrainingRun,
 } from "@/lib/api";
-import { bytes, checkpointName, timeAgo } from "@/lib/format";
+import { bytes, timeAgo } from "@/lib/format";
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
   succeeded: "ok",
@@ -539,15 +539,17 @@ export default function TrainingPage() {
               {!selected.checkpoints?.length ? <Empty>No checkpoint yet.</Empty> : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">Created</th><th className="px-2 py-2">File</th><th className="px-2 py-2">Tags</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
+                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">Created</th><th className="px-2 py-2">Tags</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
                     <tbody className="divide-y divide-ink-700/60">
                       {compactCheckpoints.map((checkpoint) => (
                         <tr key={checkpoint.id}>
-                          <td className="px-2 py-2 tabular">{checkpoint.epoch}</td>
+                          {/* Đường dẫn file nằm ở tooltip chứ không còn cột riêng:
+                              sau khi bỏ thư mục và đuôi validation loss, tên file
+                              chỉ còn nhắc lại số epoch của chính cột này. */}
+                          <td className="px-2 py-2 tabular" title={checkpoint.filename}>{checkpoint.epoch}</td>
                           <td className="px-2 py-2 tabular">{checkpoint.validation_loss == null ? "—" : checkpoint.validation_loss.toFixed(8)}</td>
                           <td className="px-2 py-2">{bytes(checkpoint.size_bytes)}</td>
                           <td className="px-2 py-2 text-xs text-ink-400">{timeAgo(checkpoint.created_at)}</td>
-                          <td className="px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpointName(checkpoint.filename)}</td>
                           <td className="px-2 py-2"><div className="flex gap-1">{checkpoint.is_best_validation && <Badge tone="ok">best validation</Badge>}{checkpoint.is_latest && <Badge tone="info">latest</Badge>}</div></td>
                           <td className="px-2 py-2"><div className="flex justify-end gap-2">
                             <a href={api.checkpointDownloadUrl(selected.id, checkpoint.id)}><Button variant="subtle">Download</Button></a>

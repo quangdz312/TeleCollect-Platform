@@ -29,17 +29,3 @@ export function frameTime(frame: number, fps: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds % 60).toFixed(2).padStart(5, "0")}`;
 }
-
-/**
- * Tên checkpoint đủ ngắn để đọc trong một cột hẹp.
- *
- * Tên đầy đủ mà robomimic sinh ra là
- * `lift2/20260829172036/models/model_epoch_242_best_validation_0.002359669259749353.pth`:
- * thư mục đứng trước giống hệt nhau ở mọi dòng, còn đuôi validation loss thì
- * bảng đã có riêng một cột và một nhãn "best validation". Cắt cả hai chỉ còn
- * `model_epoch_242.pth`; đường dẫn đầy đủ vẫn nằm trong tooltip của ô.
- */
-export function checkpointName(path: string): string {
-  const file = path.split("/").pop() ?? path;
-  return file.replace(/_best_validation_[\d.eE+-]+(?=\.pth$)/, "");
-}
