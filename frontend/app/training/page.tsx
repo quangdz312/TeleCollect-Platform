@@ -11,7 +11,7 @@ import {
   type TrainingRequest,
   type TrainingRun,
 } from "@/lib/api";
-import { bytes, timeAgo } from "@/lib/format";
+import { bytes, checkpointName, timeAgo } from "@/lib/format";
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
   succeeded: "ok",
@@ -547,11 +547,7 @@ export default function TrainingPage() {
                           <td className="px-2 py-2 tabular">{checkpoint.validation_loss == null ? "—" : checkpoint.validation_loss.toFixed(8)}</td>
                           <td className="px-2 py-2">{bytes(checkpoint.size_bytes)}</td>
                           <td className="px-2 py-2 text-xs text-ink-400">{timeAgo(checkpoint.created_at)}</td>
-                          {/* Chỉ tên file: phần thư mục đứng trước giống hệt nhau ở
-                              mọi dòng, mà truncate lại cắt từ cuối nên đúng phần
-                              phân biệt được các checkpoint là phần bị mất. Đường dẫn
-                              đầy đủ vẫn còn trong tooltip. */}
-                          <td className="px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpoint.filename.split("/").pop()}</td>
+                          <td className="px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpointName(checkpoint.filename)}</td>
                           <td className="px-2 py-2"><div className="flex gap-1">{checkpoint.is_best_validation && <Badge tone="ok">best validation</Badge>}{checkpoint.is_latest && <Badge tone="info">latest</Badge>}</div></td>
                           <td className="px-2 py-2"><div className="flex justify-end gap-2">
                             <a href={api.checkpointDownloadUrl(selected.id, checkpoint.id)}><Button variant="subtle">Download</Button></a>
