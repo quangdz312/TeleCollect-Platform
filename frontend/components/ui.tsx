@@ -155,6 +155,55 @@ export function Field({
   );
 }
 
+/**
+ * Một nhóm trường có tiêu đề, dùng cho form dài.
+ *
+ * Một lưới phẳng gồm mười mấy ô bắt người dùng đọc hết mới biết ô nào cần đổi;
+ * chia nhóm cho thấy ngay đâu là phần thường sửa và đâu là phần để mặc định.
+ */
+export function FieldGroup({
+  title,
+  hint,
+  children,
+  columns = 4,
+}: {
+  title: string;
+  hint?: string;
+  children: ReactNode;
+  columns?: 2 | 3 | 4;
+}) {
+  const grid = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }[columns];
+  return (
+    <fieldset className="min-w-0">
+      <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-300">{title}</legend>
+      {hint && <p className="mb-3 text-[11px] text-ink-400">{hint}</p>}
+      <div className={cx("grid gap-3", grid, !hint && "mt-3")}>{children}</div>
+    </fieldset>
+  );
+}
+
+/** Nhóm trường mặc định gập lại — các tham số hiếm khi phải đổi. */
+export function AdvancedGroup({
+  title,
+  children,
+  columns = 4,
+}: {
+  title: string;
+  children: ReactNode;
+  columns?: 2 | 3 | 4;
+}) {
+  const grid = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }[columns];
+  return (
+    <details className="group min-w-0 rounded-lg border border-ink-700 px-3 py-2">
+      <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-ink-300 outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40">
+        <span className="mr-1 inline-block transition-transform group-open:rotate-90">›</span>
+        {title}
+      </summary>
+      <div className={cx("mt-3 grid gap-3", grid)}>{children}</div>
+    </details>
+  );
+}
+
 const CONTROL =
   "w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 " +
   "outline-none transition-colors hover:border-ink-400/60 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/15";

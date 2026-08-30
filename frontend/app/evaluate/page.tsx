@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { Alert, Badge, Button, Card, Empty, Field, Input, Select, Stat } from "@/components/ui";
+import { Alert, Badge, Button, Card, Empty, Field, FieldGroup, Input, Select, Stat } from "@/components/ui";
 import {
   api,
   mediaUrl,
@@ -208,26 +208,33 @@ export default function EvaluatePage() {
       <Card title="New evaluation" subtitle="Selecting a checkpoint only prepares this form; evaluation starts after confirmation.">
         {eligibleRuns.length === 0 ? <Empty>Complete a training run with at least one checkpoint first.</Empty> : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Training run">
-                <Select value={form.training_run_id} onChange={(event) => selectRun(event.target.value)}>
-                  {eligibleRuns.map((run) => <option key={run.id} value={run.id}>{run.name}</option>)}
-                </Select>
-              </Field>
-              <Field label="Checkpoint">
-                <Select value={form.checkpoint_id} onChange={(event) => setForm({ ...form, checkpoint_id: event.target.value })}>
-                  {checkpoints.map((checkpoint) => (
-                    <option key={checkpoint.id} value={checkpoint.id}>
-                      epoch {checkpoint.epoch}{checkpoint.is_best_validation ? " · best validation" : ""}{checkpoint.is_latest ? " · latest" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Task"><Input readOnly value={selectedDataset?.tasks.join(", ") || "Unknown task"} /></Field>
-              <NumberField label="Rollouts" value={form.num_rollouts} min={1} onChange={(num_rollouts) => setForm({ ...form, num_rollouts })} />
-              <NumberField label="Horizon" value={form.horizon ?? 250} min={1} onChange={(horizon) => setForm({ ...form, horizon })} />
-              <NumberField label="Start seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} />
-              <NumberField label="Videos" value={form.record_videos} min={0} onChange={(record_videos) => setForm({ ...form, record_videos })} />
+            <div className="space-y-5">
+              <FieldGroup title="What to evaluate" columns={3}>
+                <Field label="Training run">
+                  <Select value={form.training_run_id} onChange={(event) => selectRun(event.target.value)}>
+                    {eligibleRuns.map((run) => <option key={run.id} value={run.id}>{run.name}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Checkpoint">
+                  <Select value={form.checkpoint_id} onChange={(event) => setForm({ ...form, checkpoint_id: event.target.value })}>
+                    {checkpoints.map((checkpoint) => (
+                      <option key={checkpoint.id} value={checkpoint.id}>
+                        epoch {checkpoint.epoch}{checkpoint.is_best_validation ? " · best validation" : ""}{checkpoint.is_latest ? " · latest" : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Task" hint="Comes from the dataset the run trained on">
+                  <Input readOnly value={selectedDataset?.tasks.join(", ") || "Unknown task"} />
+                </Field>
+              </FieldGroup>
+
+              <FieldGroup title="Rollouts" columns={4}>
+                <NumberField label="Rollouts" value={form.num_rollouts} min={1} onChange={(num_rollouts) => setForm({ ...form, num_rollouts })} hint="More episodes, steadier success rate" />
+                <NumberField label="Horizon" value={form.horizon ?? 250} min={1} onChange={(horizon) => setForm({ ...form, horizon })} hint="Steps before an episode is cut off" />
+                <NumberField label="Start seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} hint="Same seeds compare checkpoints fairly" />
+                <NumberField label="Videos" value={form.record_videos} min={0} onChange={(record_videos) => setForm({ ...form, record_videos })} hint="Recorded from the first episodes" />
+              </FieldGroup>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button variant="primary" disabled={!EVALUATION_ENABLED || busy || !form.checkpoint_id || invalidVideos} onClick={() => void startEvaluation()}>
@@ -314,8 +321,10 @@ function latestByCheckpoint(items: EvaluationRun[]) {
   return Array.from(latest.values());
 }
 
-function NumberField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (value: number) => void }) {
-  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+function NumberField({ label, value, min, onChange, hint }: { label: string; value: number; min: number; onChange: (value: number) => void; hint?: string }) {
+  // max-w-32 như bên training: các ô này chứa số ngắn, để rộng cả cột thì mắt
+  // phải đi hết chiều ngang mới tới ô kế tiếp.
+  return <Field label={label} hint={hint}><Input type="number" className="max-w-32" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
 }
 
 function DetailTabs({ value, onChange }: { value: DetailTab; onChange: (value: DetailTab) => void }) {

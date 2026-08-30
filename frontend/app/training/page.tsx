@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { Alert, Badge, Button, Card, Empty, Field, Input, Select, Stat } from "@/components/ui";
+import { AdvancedGroup, Alert, Badge, Button, Card, Empty, Field, FieldGroup, Input, Select, Stat } from "@/components/ui";
 import {
   api,
   type DatasetExport,
@@ -357,98 +357,109 @@ export default function TrainingPage() {
             <Empty>Export at least one RoboMimic dataset in the ready state first.</Empty>
           ) : (
             <>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Run name">
-                  <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-                </Field>
-                <Field label="Dataset">
-                  <Select value={form.dataset_id} onChange={(event) => setForm({ ...form, dataset_id: event.target.value })}>
-                    {datasets.map((dataset) => (
-                      <option key={dataset.id} value={dataset.id}>
-                        {dataset.name} · {dataset.num_episodes} episodes
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Policy">
-                  <Select value={form.policy} onChange={(event) => setForm({ ...form, policy: event.target.value as "bc" | "bc-rnn" })}>
-                    <option value="bc">BC</option>
-                    <option value="bc-rnn">BC-RNN (LSTM)</option>
-                  </Select>
-                </Field>
-                <Field label="Device">
-                  <Select value={form.device} onChange={(event) => setForm({ ...form, device: event.target.value as TrainingRequest["device"] })}>
-                    <option value="auto">Auto</option>
-                    <option value="cuda">CUDA GPU</option>
-                    <option value="cpu">CPU</option>
-                  </Select>
-                </Field>
-                <NumberField label="Epochs" value={form.epochs} min={1} onChange={(epochs) => setForm({ ...form, epochs })} />
-                <NumberField label="Batch size" value={form.batch_size} min={1} onChange={(batch_size) => setForm({ ...form, batch_size })} />
-                <NumberField label="Workers" value={form.num_workers} min={0} onChange={(num_workers) => setForm({ ...form, num_workers })} />
-                <Field label="Learning rate">
-                  <Input type="number" min="0.0000001" step="0.00001" value={form.learning_rate} onChange={(event) => setForm({ ...form, learning_rate: Number(event.target.value) })} />
-                </Field>
-                <NumberField label="Seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} />
-                <NumberField label="Save every N epochs" value={form.save_every_n_epochs ?? 1} min={1} onChange={(save_every_n_epochs) => setForm({ ...form, save_every_n_epochs })} />
-                {form.policy === "bc-rnn" && (
-                  <>
-                    <NumberField label="Sequence length" value={form.sequence_length} min={1} onChange={(sequence_length) => setForm({ ...form, sequence_length })} />
-                    <NumberField label="RNN hidden dim" value={form.rnn_hidden_dim} min={1} onChange={(rnn_hidden_dim) => setForm({ ...form, rnn_hidden_dim })} />
-                    <NumberField label="RNN layers" value={form.rnn_layers} min={1} onChange={(rnn_layers) => setForm({ ...form, rnn_layers })} />
-                  </>
-                )}
-                <Field label="Observation profile">
-                  <Select value={form.observation_profile} onChange={(event) => setForm({ ...form, observation_profile: event.target.value as TrainingRequest["observation_profile"] })}>
-                    <option value="minimal">Minimal task state</option>
-                    <option value="all">All dataset observations</option>
-                  </Select>
-                </Field>
-                <Field label="Normalize observations">
-                  <Select value={form.normalize_observations ? "yes" : "no"} onChange={(event) => setForm({ ...form, normalize_observations: event.target.value === "yes" })}>
-                    <option value="yes">Enabled</option>
-                    <option value="no">Disabled (keeps validation loss)</option>
-                  </Select>
-                </Field>
-                <Field label="Training rollouts">
-                  <Select value={form.rollout_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, rollout_enabled: event.target.value === "yes" })}>
-                    <option value="yes">Enabled</option>
-                    <option value="no">Disabled</option>
-                  </Select>
-                </Field>
-                {form.rollout_enabled && (
-                  <>
-                    <NumberField label="Rollout every N epochs" value={form.rollout_every_n_epochs} min={1} onChange={(rollout_every_n_epochs) => setForm({ ...form, rollout_every_n_epochs })} />
-                    <NumberField label="Rollouts per check" value={form.rollout_episodes} min={1} onChange={(rollout_episodes) => setForm({ ...form, rollout_episodes })} />
-                    <NumberField label="Training rollout horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} />
-                  </>
-                )}
-                <Field label="Weights & Biases">
-                  <Select value={form.wandb_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, wandb_enabled: event.target.value === "yes" })}>
-                    <option value="no">Disabled</option>
-                    <option value="yes">Track this run</option>
-                  </Select>
-                </Field>
-                {form.wandb_enabled && wandbConfigured === false && (
-                  <div className="sm:col-span-2">
-                    <Alert tone="bad">
-                      You have not connected a W&B account, so this run would be
-                      refused. Add your API key in{" "}
-                      <Link href="/settings" className="underline">Settings</Link>, or set
-                      Weights &amp; Biases back to Disabled.
-                    </Alert>
-                  </div>
-                )}
-                {form.wandb_enabled && (
-                  <>
-                    <Field label="W&B project">
-                      <Input value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
-                    </Field>
-                    <Field label="W&B entity" hint="Filled in from Settings; change it to log this run elsewhere">
-                      <Input value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
-                    </Field>
-                  </>
-                )}
+              <div className="space-y-5">
+                <FieldGroup title="Run" columns={4}>
+                  <Field label="Run name">
+                    <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+                  </Field>
+                  <Field label="Dataset">
+                    <Select value={form.dataset_id} onChange={(event) => setForm({ ...form, dataset_id: event.target.value })}>
+                      {datasets.map((dataset) => (
+                        <option key={dataset.id} value={dataset.id}>
+                          {dataset.name} · {dataset.num_episodes} episodes
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Policy" hint="BC-RNN adds an LSTM over a window of steps">
+                    <Select value={form.policy} onChange={(event) => setForm({ ...form, policy: event.target.value as "bc" | "bc-rnn" })}>
+                      <option value="bc">BC</option>
+                      <option value="bc-rnn">BC-RNN (LSTM)</option>
+                    </Select>
+                  </Field>
+                  <Field label="Device" hint="Auto picks the GPU when one is available">
+                    <Select value={form.device} onChange={(event) => setForm({ ...form, device: event.target.value as TrainingRequest["device"] })}>
+                      <option value="auto">Auto</option>
+                      <option value="cuda">CUDA GPU</option>
+                      <option value="cpu">CPU</option>
+                    </Select>
+                  </Field>
+                </FieldGroup>
+
+                <FieldGroup title="Training" columns={4}>
+                  <NumberField label="Epochs" value={form.epochs} min={1} onChange={(epochs) => setForm({ ...form, epochs })} hint="One pass over the dataset each" />
+                  <NumberField label="Batch size" value={form.batch_size} min={1} onChange={(batch_size) => setForm({ ...form, batch_size })} hint="Larger uses more VRAM per step" />
+                  <Field label="Learning rate">
+                    <Input type="number" className="max-w-32" min="0.0000001" step="0.00001" value={form.learning_rate} onChange={(event) => setForm({ ...form, learning_rate: Number(event.target.value) })} />
+                  </Field>
+                  <NumberField label="Save every N epochs" value={form.save_every_n_epochs ?? 1} min={1} onChange={(save_every_n_epochs) => setForm({ ...form, save_every_n_epochs })} hint="Checkpoints you can evaluate later" />
+                  {form.policy === "bc-rnn" && (
+                    <>
+                      <NumberField label="Sequence length" value={form.sequence_length} min={1} onChange={(sequence_length) => setForm({ ...form, sequence_length })} hint="Steps the LSTM sees at once" />
+                      <NumberField label="RNN hidden dim" value={form.rnn_hidden_dim} min={1} onChange={(rnn_hidden_dim) => setForm({ ...form, rnn_hidden_dim })} />
+                      <NumberField label="RNN layers" value={form.rnn_layers} min={1} onChange={(rnn_layers) => setForm({ ...form, rnn_layers })} />
+                    </>
+                  )}
+                </FieldGroup>
+
+                <FieldGroup title="Weights &amp; Biases" columns={3}>
+                  <Field label="Tracking">
+                    <Select value={form.wandb_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, wandb_enabled: event.target.value === "yes" })}>
+                      <option value="no">Disabled</option>
+                      <option value="yes">Track this run</option>
+                    </Select>
+                  </Field>
+                  {form.wandb_enabled && (
+                    <>
+                      <Field label="Project">
+                        <Input value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
+                      </Field>
+                      <Field label="Entity" hint="Filled in from Settings; change it to log this run elsewhere">
+                        <Input value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
+                      </Field>
+                    </>
+                  )}
+                  {form.wandb_enabled && wandbConfigured === false && (
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <Alert tone="bad">
+                        You have not connected a W&amp;B account, so this run would be
+                        refused. Add your API key in{" "}
+                        <Link href="/settings" className="underline">Settings</Link>, or set
+                        tracking back to Disabled.
+                      </Alert>
+                    </div>
+                  )}
+                </FieldGroup>
+
+                <AdvancedGroup title="Advanced" columns={4}>
+                  <NumberField label="Workers" value={form.num_workers} min={0} onChange={(num_workers) => setForm({ ...form, num_workers })} hint="Dataloader processes; 0 loads inline" />
+                  <NumberField label="Seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} hint="Same seed reproduces the run" />
+                  <Field label="Observation profile" hint="What the policy sees at each step">
+                    <Select value={form.observation_profile} onChange={(event) => setForm({ ...form, observation_profile: event.target.value as TrainingRequest["observation_profile"] })}>
+                      <option value="minimal">Minimal task state</option>
+                      <option value="all">All dataset observations</option>
+                    </Select>
+                  </Field>
+                  <Field label="Normalize observations">
+                    <Select value={form.normalize_observations ? "yes" : "no"} onChange={(event) => setForm({ ...form, normalize_observations: event.target.value === "yes" })}>
+                      <option value="yes">Enabled</option>
+                      <option value="no">Disabled (keeps validation loss)</option>
+                    </Select>
+                  </Field>
+                  <Field label="Training rollouts" hint="Try the policy in the simulator while training">
+                    <Select value={form.rollout_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, rollout_enabled: event.target.value === "yes" })}>
+                      <option value="yes">Enabled</option>
+                      <option value="no">Disabled</option>
+                    </Select>
+                  </Field>
+                  {form.rollout_enabled && (
+                    <>
+                      <NumberField label="Rollout every N epochs" value={form.rollout_every_n_epochs} min={1} onChange={(rollout_every_n_epochs) => setForm({ ...form, rollout_every_n_epochs })} />
+                      <NumberField label="Rollouts per check" value={form.rollout_episodes} min={1} onChange={(rollout_episodes) => setForm({ ...form, rollout_episodes })} hint="Episodes run at each check" />
+                      <NumberField label="Training rollout horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} hint="Steps before an episode is cut off" />
+                    </>
+                  )}
+                </AdvancedGroup>
               </div>
               {selectedTrainingDataset && (
                 <div className="mt-3">
@@ -589,6 +600,8 @@ export default function TrainingPage() {
   );
 }
 
-function NumberField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (value: number) => void }) {
-  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+function NumberField({ label, value, min, onChange, hint }: { label: string; value: number; min: number; onChange: (value: number) => void; hint?: string }) {
+  // max-w-32: các ô này chứa số hai tới bốn chữ số, để rộng cả cột thì mắt phải
+  // đi hết chiều ngang mới tới ô kế tiếp.
+  return <Field label={label} hint={hint}><Input type="number" className="max-w-32" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
 }
