@@ -169,10 +169,20 @@ export default function TrainingPage() {
 
   useEffect(() => {
     if (!user) return;
-    // Only the flag, never the key — the endpoint does not return one.
+    // Only the flag and the entity, never the key — the endpoint returns none.
     void api
       .wandbSettings()
-      .then((settings) => setWandbConfigured(settings.configured))
+      .then((settings) => {
+        setWandbConfigured(settings.configured);
+        // Entity đã khai một lần ở Settings; bắt gõ lại cho từng run là hỏi
+        // lại thứ hệ thống đã biết. Chỉ điền khi ô còn trống, để không giẫm
+        // lên giá trị người dùng vừa sửa riêng cho run này.
+        if (settings.entity) {
+          setForm((current) =>
+            current.wandb_entity ? current : { ...current, wandb_entity: settings.entity },
+          );
+        }
+      })
       .catch(() => setWandbConfigured(null));
   }, [user]);
 
@@ -434,7 +444,7 @@ export default function TrainingPage() {
                     <Field label="W&B project">
                       <Input value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
                     </Field>
-                    <Field label="W&B entity" hint="Your W&B username or team name">
+                    <Field label="W&B entity" hint="Filled in from Settings; change it to log this run elsewhere">
                       <Input value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
                     </Field>
                   </>
@@ -451,7 +461,7 @@ export default function TrainingPage() {
                 <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
               )}
               {form.wandb_enabled && !form.wandb_entity && (
-                <div className="mt-3"><Alert tone="info">Enter a W&B entity to enable the Open W&B button for this run.</Alert></div>
+                <div className="mt-3"><Alert tone="info">Set an entity in Settings, or enter one here, to enable the Open W&B button for this run.</Alert></div>
               )}
               <div className="mt-4 flex items-center gap-3">
                 <Button variant="primary" disabled={busy || !trainingEnabled || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
