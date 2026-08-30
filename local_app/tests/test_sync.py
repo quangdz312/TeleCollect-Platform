@@ -168,7 +168,7 @@ def test_an_expired_token_is_refreshed_and_the_upload_retried(
         token = (headers or {}).get("Authorization", "")
         seen.append(token)
         if token == "Bearer expired":
-            raise sync.SyncError("Máy chủ từ chối: đăng nhập lại")
+            raise sync.SyncError("Máy chủ từ chối: đăng nhập lại", status=401)
         return {"episodes": 2, "videos": 2, "sources": [], "skipped": []}
 
     _fake_request(monkeypatch, handler)
@@ -191,11 +191,32 @@ def test_a_failed_refresh_reports_the_original_error(
         if url.endswith("/auth/refresh"):
             raise sync.SyncError("refresh token hết hạn")
         attempts.append(url)
-        raise sync.SyncError("Máy chủ từ chối: đăng nhập lại")
+        raise sync.SyncError("Máy chủ từ chối: đăng nhập lại", status=401)
 
     _fake_request(monkeypatch, handler)
 
     with pytest.raises(sync.SyncError, match="từ chối"):
+        sync.upload_batch(workspace, batch)
+    assert len(attempts) == 1
+
+
+def test_a_rejected_archive_is_not_uploaded_a_second_time(
+    tmp_path, _isolated_settings, monkeypatch,
+):
+    """422 không phải token hết hạn, nên đừng đẩy lại cả gói."""
+
+    workspace, batch = _prepare(tmp_path, _isolated_settings)
+    attempts: list[str] = []
+
+    def handler(url, *, headers=None, **kwargs):
+        if url.endswith("/auth/refresh"):
+            return {"access_token": "fresh", "refresh_token": "refresh-2"}
+        attempts.append(url)
+        raise sync.SyncError("Đợt thu này đã có trên máy chủ", status=422)
+
+    _fake_request(monkeypatch, handler)
+
+    with pytest.raises(sync.SyncError, match="đã có trên máy chủ"):
         sync.upload_batch(workspace, batch)
     assert len(attempts) == 1
 

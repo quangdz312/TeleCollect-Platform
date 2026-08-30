@@ -42,7 +42,16 @@ API_TIMEOUT_S = 30
 
 
 class SyncError(RuntimeError):
-    """Anything the person needs to read and act on."""
+    """Anything the person needs to read and act on.
+
+    `status` là mã HTTP khi lỗi đến từ máy chủ, `None` khi lỗi là mạng hoặc do
+    chính app. Có nó thì bên gọi phân biệt được "token hết hạn, thử lại đi" với
+    "máy chủ từ chối nội dung này", thay vì gửi lại cả gói vài MB một cách vô ích.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -87,10 +96,14 @@ def _request(
         except (ValueError, OSError):
             detail = ""
         if exc.code in (401, 403):
-            raise SyncError(detail or "Máy chủ từ chối: đăng nhập lại") from exc
+            raise SyncError(
+                detail or "Máy chủ từ chối: đăng nhập lại", status=exc.code
+            ) from exc
         if exc.code == 507:
-            raise SyncError(detail or "Máy chủ hết dung lượng lưu trữ") from exc
-        raise SyncError(detail or f"Máy chủ trả lỗi {exc.code}") from exc
+            raise SyncError(
+                detail or "Máy chủ hết dung lượng lưu trữ", status=exc.code
+            ) from exc
+        raise SyncError(detail or f"Máy chủ trả lỗi {exc.code}", status=exc.code) from exc
     except urllib.error.URLError as exc:
         raise SyncError(f"Không kết nối được tới máy chủ: {exc.reason}") from exc
     return json.loads(body) if body else {}
@@ -252,9 +265,14 @@ def upload_batch(workspace: Path, batch: dict[str, Any]) -> dict[str, Any]:
         token = str(_load_settings().get("sync_token") or "")
         try:
             result = send(token)
-        except SyncError:
-            # One retry, and only after a refresh actually produced a new token:
-            # retrying the same expired token would just fail the same way.
+        except SyncError as exc:
+            # Chỉ 401 mới đáng thử lại. Trước đây bắt mọi SyncError, nên một lỗi
+            # 422 ("đợt thu này đã có trên máy chủ") cũng khiến app đẩy lại trọn
+            # gói vài MB lần nữa rồi báo đúng lỗi cũ.
+            if exc.status != 401:
+                raise
+            # Và chỉ khi refresh thật sự cho token mới: gửi lại token đã hết hạn
+            # thì cũng hỏng y như lần đầu.
             renewed = _refresh()
             if not renewed:
                 raise
