@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,21 @@ ROLE_RANK: dict[UserRole, int] = {
 }
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login", auto_error=False)
+
+#: Tài khoản mở sẵn cho người ngoài vào xem hệ thống thật.
+#:
+#: Nhận theo username chứ không theo một cột riêng trong bảng `users`: dự án
+#: chưa dùng Alembic, `init_db` chỉ gọi `create_all`, nên thêm cột là buộc phải
+#: dựng lại DB — không làm được với máy chủ đang chứa dữ liệu thật.
+DEMO_USERNAME = "demo"
+
+#: Phương thức chỉ đọc. Mọi phương thức còn lại đều đổi dữ liệu.
+_READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+_DEMO_READ_ONLY = HTTPException(
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail="Tài khoản dùng thử chỉ xem được, không thay đổi được dữ liệu",
+)
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -115,14 +130,26 @@ async def get_user_for_refresh(token: str, session: AsyncSession) -> User:
     return user
 
 
-async def _load_active_user(payload: dict[str, Any], session: AsyncSession) -> User:
+async def _load_active_user(
+    payload: dict[str, Any], session: AsyncSession, request: Request | None = None,
+) -> User:
     user = await session.get(User, payload["sub"])
     if user is None or not user.is_active:
         raise _UNAUTHORIZED
+    # Chặn ở đây vì đây là cửa duy nhất mọi request có xác thực đi qua: chặn
+    # theo phương thức thay vì liệt kê từng endpoint, nên endpoint ghi thêm về
+    # sau được bảo vệ sẵn thay vì phải nhớ bổ sung vào một danh sách.
+    if (
+        user.username == DEMO_USERNAME
+        and request is not None
+        and request.method.upper() not in _READ_ONLY_METHODS
+    ):
+        raise _DEMO_READ_ONLY
     return user
 
 
 async def current_user(
+    request: Request,
     token: str | None = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
@@ -134,10 +161,11 @@ async def current_user(
     if not token:
         raise _UNAUTHORIZED
     payload = _decode_typed_token(token, "access")
-    return await _load_active_user(payload, session)
+    return await _load_active_user(payload, session, request)
 
 
 async def current_user_allow_query_token(
+    request: Request,
     token: str | None = Query(default=None, description="Chỉ dùng cho endpoint media"),
     header_token: str | None = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
@@ -162,7 +190,7 @@ async def current_user_allow_query_token(
     if not resolved_token:
         raise _UNAUTHORIZED
     payload = _decode_typed_token(resolved_token, "access")
-    return await _load_active_user(payload, session)
+    return await _load_active_user(payload, session, request)
 
 
 def _machine_secret() -> str:

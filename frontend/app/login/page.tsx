@@ -16,6 +16,12 @@ const SEEDS: [string, string, string][] = [
 // working passwords on its front door would hand the site to anyone.
 const SHOW_SEEDS = process.env.NODE_ENV !== "production";
 
+// The one account the deployed site does advertise. Signing up puts an account
+// in front of an administrator, so someone invited to look around would stop
+// at the door. This one reads everything and writes nothing -- the server
+// refuses every write it makes, so the password being public costs nothing.
+const DEMO: [string, string] = ["demo", "telecollect"];
+
 export default function LoginPage() {
   const { login } = useAuth();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -169,29 +175,29 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {SHOW_SEEDS && (
             <div className="border-t border-ink-700 px-5 pb-5 pt-4">
               <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-ink-400">
-                Development accounts
+                {SHOW_SEEDS ? "Development accounts" : "Try it out"}
               </p>
               <div className="space-y-1.5">
-                {SEEDS.map(([name, pass, description]) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => {
-                      setUsername(name);
-                      setPassword(pass);
-                    }}
-                    className="flex w-full items-center justify-between rounded-lg border border-ink-700 bg-ink-900 px-3.5 py-2.5 text-left text-xs transition-all hover:translate-x-0.5 hover:border-accent-500 hover:bg-accent-500/5"
-                  >
-                    <span className="font-bold text-accent-500">{name}</span>
-                    <span className="text-ink-400">{description}</span>
-                  </button>
-                ))}
+                {(SHOW_SEEDS ? SEEDS : [[...DEMO, "Browse everything, read-only"] as [string, string, string]]).map(
+                  ([name, pass, description]) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => {
+                        setUsername(name);
+                        setPassword(pass);
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg border border-ink-700 bg-ink-900 px-3.5 py-2.5 text-left text-xs transition-all hover:translate-x-0.5 hover:border-accent-500 hover:bg-accent-500/5"
+                    >
+                      <span className="font-bold text-accent-500">{name}</span>
+                      <span className="text-ink-400">{description}</span>
+                    </button>
+                  ),
+                )}
               </div>
             </div>
-            )}
           </Card>
         </div>
       </div>
