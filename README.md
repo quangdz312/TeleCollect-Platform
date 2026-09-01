@@ -2,6 +2,20 @@
 
 Nền tảng teleoperation & thu thập demonstration cho imitation learning (đề bài RAV-12).
 
+## Dùng thử
+
+| | |
+|---|---|
+| **Web** | [telecollect.io.vn](https://telecollect.io.vn) — duyệt dữ liệu, đóng gói dataset, huấn luyện, đánh giá |
+| **App desktop** | [Tải bản cài Windows](https://drive.google.com/drive/folders/1RR_behNMTDSdjDQ_tcsquJ3DFx4yJ_Y6?usp=drive_link) — thu dữ liệu ngay trên máy |
+
+App chạy độc lập, không cần cài Python hay Node — MuJoCo, robosuite và FFmpeg
+đều nằm sẵn trong bản cài. Thu xong đăng nhập vào tài khoản máy chủ rồi bấm
+**Push** ở trang Review để đẩy đợt thu lên web.
+
+Phần huấn luyện và đánh giá chỉ có trên web: chúng cần GPU và kho dữ liệu chung
+của cả nhóm.
+
 ---
 
 ## Tài liệu
