@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
-import { useLeftBar } from "@/components/AppShell";
+import { useLeftBar, useRailBack } from "@/components/AppShell";
 import { BatchGallery } from "@/components/raw/BatchGallery";
 import { RawEpisodeFilters, type RawFiltersValue } from "@/components/raw/RawEpisodeFilters";
 import { RawEpisodeTable } from "@/components/raw/RawEpisodeTable";
@@ -122,7 +122,13 @@ export default function RawEpisodesPage() {
   const [batchTask, setBatchTask] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<"episodes" | "diversity">("episodes");
-  const [importing, setImporting] = useState(false);
+  /**
+   * Dialog nạp dữ liệu: `null` là đóng, `{ batch: null }` là nạp một đợt thu
+   * mới, `{ batch }` là nạp thêm tập vào đúng đợt thu đó. Một boolean không
+   * mang nổi "vào đợt thu nào", mà bọc trong object thì `batch: null` vẫn phân
+   * biệt được với "đang đóng".
+   */
+  const [importing, setImporting] = useState<{ batch: CollectionBatch | null } | null>(null);
 
   const loadBatches = useCallback(async () => {
     if (!user || user.role === "operator") return;
@@ -303,6 +309,9 @@ export default function RawEpisodesPage() {
 
   // Above the early returns below: a hook has to run on every render.
   useLeftBar(reviewRail);
+  useRailBack(
+    insideBatch ? { label: "All batches", onClick: () => updateFilters({ collectionBatch: "" }) } : null,
+  );
 
   if (authLoading || !user) return null;
   if (user.role === "operator") {
@@ -423,7 +432,8 @@ export default function RawEpisodesPage() {
     return (
       <div className="-mx-5 -my-6">
         <div className="sticky top-0 z-20 border-b border-ink-700 bg-ink-950/95 px-5 py-3 backdrop-blur-md">
-          <h1 className="font-heading text-lg font-bold tracking-tight">Raw episodes</h1>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent-500">Data quality control</p>
+          <h1 className="mt-0.5 font-heading text-xl font-bold tracking-tight">Review episodes</h1>
           <p className="text-xs text-ink-400">
             Captures grouped by collection batch.
           </p>
@@ -453,13 +463,13 @@ export default function RawEpisodesPage() {
             // gallery are stale too, not just the batch counts.
             if (purgeEpisodes) await load();
           }}
-          onImport={() => setImporting(true)}
+          onImport={(batch) => setImporting({ batch })}
         />
 
         {importing && (
           <BatchImportDialog
-            batches={batchList}
-            onClose={() => setImporting(false)}
+            target={importing.batch}
+            onClose={() => setImporting(null)}
             onImported={() => {
               // The import rescores the whole corpus, so the episode counts on
               // every card can move, not just the batch that was uploaded.
@@ -467,17 +477,6 @@ export default function RawEpisodesPage() {
               void load();
             }}
           />
-        )}
-
-        {summary.total > 0 && (
-          <Card
-            title="Episodes without a batch"
-            subtitle="Captures recorded before batches existed are still browsable and reviewable."
-          >
-            <Button variant="subtle" onClick={() => updateFilters({ collectionBatch: ALL_BATCHES })}>
-              Browse all episodes ({summary.total})
-            </Button>
-          </Card>
         )}
 
         </div>
@@ -503,13 +502,6 @@ export default function RawEpisodesPage() {
       */}
       <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-ink-700 bg-ink-950/95 px-5 py-2.5 backdrop-blur-md">
         <div className="min-w-0">
-          <button
-            type="button"
-            onClick={() => updateFilters({ collectionBatch: "" })}
-            className="rounded text-xs text-ink-400 hover:text-ink-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
-          >
-            ← All batches
-          </button>
           <h1 className="truncate font-heading text-lg font-bold tracking-tight">
             {filters.collectionBatch === ALL_BATCHES
               ? "All episodes"
@@ -528,6 +520,18 @@ export default function RawEpisodesPage() {
           />
           <HeaderStat label="Pending" value={summary.pending} />
         </div>
+
+        {/* Nạp thêm tập ngay trong đợt thu đang mở. Bắt người dùng quay ra
+            danh sách batch rồi tìm lại đúng thẻ vừa rời khỏi là bắt đi vòng,
+            trong khi họ đã đứng sẵn ở nơi dữ liệu sẽ rơi vào. Ẩn ở "All
+            episodes" vì khi đó không có đợt thu nào để nạp vào. */}
+        {activeBatch ? (
+          <div className="ml-auto">
+            <Button variant="subtle" onClick={() => setImporting({ batch: activeBatch })}>
+              Add episodes
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid px-5 pb-6 pt-5">
@@ -650,6 +654,17 @@ export default function RawEpisodesPage() {
           episodes={selectedEpisodes}
           onClose={() => setExporting(false)}
           onExported={() => setSelected(new Map())}
+        />
+      )}
+
+      {importing && (
+        <BatchImportDialog
+          target={importing.batch}
+          onClose={() => setImporting(null)}
+          onImported={() => {
+            void loadBatches();
+            void load();
+          }}
         />
       )}
     </div>

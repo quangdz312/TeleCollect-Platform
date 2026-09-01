@@ -12,8 +12,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Card, cx, Empty, Field, Input, Select, TextArea } from "@/components/ui";
+import { COLLECTION_ENABLED } from "@/lib/features";
 import { labeling, type TaskOption } from "@/lib/labeling";
-import type { CollectionBatch } from "@/lib/raw";
+import { rawApi, type CollectionBatch } from "@/lib/raw";
 
 /**
  * Turn a display name into a batch id.
@@ -141,6 +142,36 @@ function RenameIcon() {
   );
 }
 
+/**
+ * Hai viec nay khac nhau ve huong, nen hai icon phai khac nhau ve huong.
+ *
+ * Push la day RA mot may khac: dam may, mui ten roi khoi may nay. Add episodes
+ * la nap VAO cho dang mo: mui ten di xuong mot cai khay. Ban dau ca hai cung la
+ * "mui ten len tren mot cai khay", lech nhau vai pixel — nhin khong the phan
+ * biet, va hai nut canh nhau lam cung mot viec la giao dien noi doi.
+ */
+function PushIcon() {
+  return (
+    <svg className={ICON} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path
+        d="M5.5 14.5a3 3 0 01-.4-5.97 4 4 0 017.74-1.06A3.25 3.25 0 0116 14.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 17v-6.5M7.5 13L10 10.5l2.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AddEpisodesIcon() {
+  return (
+    <svg className={ICON} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M10 3v8.5M7 8.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 12.5v3a1 1 0 001 1h11a1 1 0 001-1v-3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function DeleteIcon() {
   return (
     <svg className={ICON} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
@@ -155,12 +186,19 @@ function BatchCard({
   onRename,
   onConvert,
   onDelete,
+  onAddEpisodes,
+  onPush,
+  pushState,
 }: {
   batch: CollectionBatch;
   onOpen: (batchId: string) => void;
   onRename: (batch: CollectionBatch) => void;
   onConvert: (batch: CollectionBatch) => void;
   onDelete: (batch: CollectionBatch) => void;
+  onAddEpisodes: (batch: CollectionBatch) => void;
+  /** `null` khi bản dựng này không phải app — khi đó không có nút Push. */
+  onPush: ((batch: CollectionBatch) => void) | null;
+  pushState: { busy: boolean; message: string | null } | undefined;
 }) {
   return (
     <Card className="flex min-h-[210px] flex-col">
@@ -186,15 +224,27 @@ function BatchCard({
 
       <Progress batch={batch} />
 
+      {/* Bon icon canh mot nhan chu: "Review episodes →" dai toi muc mui ten bi
+          day xuong dong va de len hang icon o the hep. Rut con "Review" — the
+          da mang ten dot thu va so tap ngay tren, nen chu "episodes" khong noi
+          them gi. `shrink-0` de nhan khong bao gio bi ep xuong dong nua. */}
+      {/* Ket qua day len nam ngay tren the vua bam, khong phai mot thong bao
+          chung o dau trang: day mot luc vai dot thu thi phai biet cai nao xong. */}
+      {pushState?.message && (
+        <p className="mt-2 truncate text-[11px] text-ink-400" title={pushState.message}>
+          {pushState.message}
+        </p>
+      )}
+
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-ink-700 pt-3">
         <button
           type="button"
           onClick={() => onOpen(batch.id)}
-          className="rounded text-sm font-semibold text-accent-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
+          className="shrink-0 whitespace-nowrap rounded text-sm font-semibold text-accent-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
         >
-          Review episodes →
+          Review →
         </button>
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           <IconAction
             label="Convert"
             hint={batch.approved === 0 ? "No approved episodes yet" : "Convert to a dataset"}
@@ -202,6 +252,29 @@ function BatchCard({
             disabled={batch.approved === 0}
           >
             <ConvertIcon />
+          </IconAction>
+          {onPush && (
+            <IconAction
+              label="Push to server"
+              hint={
+                pushState?.busy
+                  ? "Uploading…"
+                  : batch.episodes === 0
+                    ? "Nothing to push yet"
+                    : "Send this batch to the shared server"
+              }
+              disabled={pushState?.busy || batch.episodes === 0}
+              onClick={() => onPush(batch)}
+            >
+              <PushIcon />
+            </IconAction>
+          )}
+          <IconAction
+            label="Add episodes"
+            hint="Upload more episodes into this batch"
+            onClick={() => onAddEpisodes(batch)}
+          >
+            <AddEpisodesIcon />
           </IconAction>
           <IconAction label="Rename" onClick={() => onRename(batch)}>
             <RenameIcon />
@@ -337,10 +410,21 @@ export function BatchGallery({
   onCreate: (input: { id: string; name: string; task_name?: string; description?: string }) => Promise<void>;
   onUpdate: (batchId: string, changes: { name?: string; description?: string; archived?: boolean }) => Promise<void>;
   onDelete: (batchId: string, purgeEpisodes: boolean) => Promise<void>;
-  onImport: () => void;
+  // `batch` trong khi nap them tap vao mot dot thu co san, `null` khi nap ca
+  // mot dot thu moi tu file zip.
+  onImport: (batch: CollectionBatch | null) => void;
 }) {
   const [editing, setEditing] = useState<CollectionBatch | null>(null);
   const [deleting, setDeleting] = useState<CollectionBatch | null>(null);
+  /**
+   * Trạng thái đẩy lên, theo từng đợt thu.
+   *
+   * Một cờ chung không đủ: đẩy một đợt thu chạy vài phút, người dùng bấm tiếp
+   * cái thứ hai, và khi đó "đang đẩy" phải nói về đúng cái thẻ đang đẩy.
+   */
+  const [pushing, setPushing] = useState<Record<string, { busy: boolean; message: string | null }>>({});
+  /** `null` cho tới khi biết: nút Push chỉ có nghĩa khi app đã đăng nhập máy chủ. */
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ id: "", name: "", task_name: "", description: "" });
   // The id follows the name until someone edits it directly; after that it is
@@ -383,6 +467,46 @@ export function BatchGallery({
       cancelled = true;
     };
   }, []);
+
+  // Chỉ hỏi khi bản dựng này là app; trên web đã dựng, đường `/local` không tồn
+  // tại và một lần 404 mỗi lần mở trang là tiếng ồn vô ích trong console.
+  useEffect(() => {
+    if (!COLLECTION_ENABLED) return;
+    let cancelled = false;
+    rawApi
+      .syncSession()
+      .then((session) => {
+        if (!cancelled) setSignedIn(session !== null);
+      })
+      .catch(() => {
+        if (!cancelled) setSignedIn(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function pushBatch(batch: CollectionBatch) {
+    setPushing((current) => ({ ...current, [batch.id]: { busy: true, message: "Uploading…" } }));
+    try {
+      const result = await rawApi.pushBatch(batch.id);
+      setPushing((current) => ({
+        ...current,
+        [batch.id]: {
+          busy: false,
+          message: `Pushed ${result.episodes.toLocaleString()} episode${result.episodes === 1 ? "" : "s"}`,
+        },
+      }));
+    } catch (problem) {
+      setPushing((current) => ({
+        ...current,
+        [batch.id]: {
+          busy: false,
+          message: problem instanceof Error ? problem.message : "Push failed",
+        },
+      }));
+    }
+  }
 
   function startCreate() {
     setForm({ id: "", name: "", task_name: "", description: "" });
@@ -466,12 +590,22 @@ export function BatchGallery({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <Button onClick={onImport}>Import batch</Button>
+          <Button onClick={() => onImport(null)}>Import batch</Button>
           <Button variant="primary" onClick={startCreate}>
             New batch
           </Button>
         </div>
       </div>
+
+      {/* Chua dang nhap thi khong the co nut Push tren the nao. Im lang o day
+          khien nguoi dung tuong tinh nang khong ton tai, thay vi biet minh con
+          thieu mot buoc. */}
+      {COLLECTION_ENABLED && signedIn === false ? (
+        <Alert tone="info">
+          Connect to the shared server to push these batches. Use Connect at the bottom of the
+          sidebar; your batches stay on this computer until you do.
+        </Alert>
+      ) : null}
 
       {error ? <Alert tone="bad">{error}</Alert> : null}
 
@@ -567,6 +701,9 @@ export function BatchGallery({
               onRename={startRename}
               onConvert={onConvert}
               onDelete={setDeleting}
+              onAddEpisodes={onImport}
+              onPush={COLLECTION_ENABLED && signedIn ? pushBatch : null}
+              pushState={pushing[batch.id]}
             />
           ))}
         </div>
