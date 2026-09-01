@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1041,3 +1042,37 @@ async def test_delete_unnamed_batch_with_purge_works(
     assert response.status_code == 204
     db_session.expunge_all()
     assert await db_session.get(Episode, episode.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_scripted_run_registers_the_batch_it_collects_into(
+    client, db_session, raw_workspace, monkeypatch
+):
+    """Thu scripted vào một đợt thu phải tạo bản ghi cho đợt thu đó.
+
+    Không có bản ghi thì `_batch_payload` lấy mã làm tên, nên trang Data hiện
+    `lift-scripted-v1` thay cho tên người dùng đặt, và trang đó cũng không cho
+    đổi tên hay xoá một đợt thu chưa từng tồn tại trong bảng.
+    """
+    reviewer = await _create_user(db_session, "scripted_batch_rev", UserRole.REVIEWER)
+
+    # Việc thu thật cần simulator; ở đây chỉ cần biết endpoint có ghi bảng không.
+    from src.labeling import jobs
+
+    monkeypatch.setattr(
+        jobs, "submit_collection",
+        lambda *args, **kwargs: SimpleNamespace(as_dict=lambda: {"id": "job-1"}),
+    )
+
+    response = await client.post(
+        "/api/v1/labeling/runs",
+        headers=_auth_headers(reviewer),
+        json={"task": "lift", "quality": "clean", "episodes": 1,
+              "seed": 0, "collection_batch_id": "lift-scripted-v1"},
+    )
+
+    assert response.status_code == 202, response.text
+    listing = await client.get(BATCHES, headers=_auth_headers(reviewer))
+    entries = {item["id"]: item for item in listing.json()}
+    assert "lift-scripted-v1" in entries, entries
+    assert entries["lift-scripted-v1"]["named"] is True

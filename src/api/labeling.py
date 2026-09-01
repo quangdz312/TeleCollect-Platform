@@ -26,8 +26,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.db import User
+from src.models.db import CollectionBatch, User, get_session
 from src.models.enums import UserRole
 from src.models.schemas import ScriptedLabelRequest, ScriptedRunRequest
 from src.services.security import ROLE_RANK, current_user_allow_query_token, require_min_role
@@ -217,15 +218,47 @@ async def diversity(
 # --- thu dữ liệu ------------------------------------------------------------
 
 
+async def _register_batch(
+    session: AsyncSession, batch_id: str, task: str, user_id: str,
+) -> None:
+    """Ghi đợt thu vào bảng nếu nó chưa có ở đó.
+
+    Mã đợt thu đi vào provenance của episode, nên trang Data thấy đợt thu ngay
+    cả khi bảng `collection_batches` không có dòng nào cho nó — và khi thiếu
+    dòng đó thì mã hiện ra thay cho tên, còn đổi tên hay xoá đều 404 vì không
+    có gì để sửa. Thu scripted là một trong hai đường tạo ra đợt thu mới, nên
+    nó phải đăng ký đợt thu giống như lúc nạp gói từ app.
+
+    Tên để bằng mã: yêu cầu thu không mang theo tên nào, và người dùng đổi
+    được ở trang Data.
+    """
+    if batch_id == "legacy" or await session.get(CollectionBatch, batch_id) is not None:
+        return
+    # Lưu tên task dạng chuẩn, giống đường nạp gói: chỗ chặn trộn hai task khi
+    # nạp thêm so sánh sau khi chuẩn hoá, nên hai đường phải ghi cùng một dạng.
+    from src.api.raw import _canonical_task
+
+    session.add(
+        CollectionBatch(
+            id=batch_id, name=batch_id[:150],
+            task_name=_canonical_task(task) or None,
+            description="", created_by=user_id,
+        )
+    )
+    await session.commit()
+
+
 @router.post("/runs", status_code=202)
 async def start_run(
     request: ScriptedRunRequest,
-    _user: User = Depends(reviewer_required),
+    user: User = Depends(reviewer_required),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     if request.task not in supported_tasks():
         raise HTTPException(400, f"task không hợp lệ: {request.task}")
     if request.quality not in supported_qualities():
         raise HTTPException(400, f"quality không hợp lệ: {request.quality}")
+    await _register_batch(session, request.collection_batch_id, request.task, user.id)
     space = workspace()
     from src.labeling.jobs import submit_collection
 
