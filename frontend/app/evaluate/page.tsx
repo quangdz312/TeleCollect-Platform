@@ -42,7 +42,7 @@ const INITIAL_FORM: EvaluationRequest = {
 type DetailTab = "summary" | "seeds" | "videos" | "log";
 type VideoModalState = { evaluation: EvaluationRun; index: number };
 
-/** Ô số cho thanh trái: hẹp và không chú thích, vì cột chỉ rộng 240px. */
+/** Ô số cho thanh trái: hẹp và không chú thích, vì cột chỉ rộng 288px. */
 function RailNumber({
   label,
   value,
@@ -185,16 +185,17 @@ export default function EvaluatePage() {
   const invalidVideos = form.record_videos > form.num_rollouts;
 
   /**
-   * Thanh trái: cấu hình ở trên, lịch sử ở dưới.
+   * Thanh trái chỉ giữ phần cấu hình.
    *
    * Cấu hình là thứ người dùng đụng vào mỗi lần chạy, nên nó đứng yên một chỗ
-   * thay vì nằm trong một thẻ bị đẩy xuống khi kết quả dài ra. Phần dưới liệt
-   * kê các lần đã chạy của chính run đang chọn — bấm một dòng là mở chi tiết
-   * bên phải, không phải cuộn đi tìm.
+   * thay vì nằm trong một thẻ bị đẩy xuống khi kết quả dài ra. Danh sách các
+   * lần đã chạy từng nằm dưới đây, nhưng Evaluation history giữa trang đã có
+   * đúng danh sách đó — nhắc lại chỉ làm thanh dài quá màn hình rồi mọc thêm
+   * một thanh cuộn riêng.
    */
   const evaluateRail = useMemo(
     () => (
-      <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <div className="space-y-2.5">
           <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
             Configuration
@@ -239,48 +240,10 @@ export default function EvaluatePage() {
           {invalidVideos && <p className="text-[11px] text-bad-400">Videos cannot exceed rollouts.</p>}
         </div>
 
-        <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
-          <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-            Evaluations
-          </p>
-          {selectedEvaluations.length === 0 ? (
-            <p className="px-1 text-xs text-ink-400">No evaluation for this run yet.</p>
-          ) : (
-            <ul className="space-y-1">
-              {selectedEvaluations.map((evaluation) => {
-                const checkpoint = checkpoints.find((item) => item.id === evaluation.checkpoint_id);
-                return (
-                  <li key={evaluation.id}>
-                    <button
-                      onClick={() => setExpandedId(expandedId === evaluation.id ? null : evaluation.id)}
-                      className={cx(
-                        "w-full rounded-lg border px-2.5 py-2 text-left transition-colors",
-                        expandedId === evaluation.id
-                          ? "border-accent-500/60 bg-ink-850"
-                          : "border-transparent hover:bg-ink-850",
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {checkpoint ? `Epoch ${checkpoint.epoch}` : evaluation.checkpoint_id}
-                        </span>
-                        <Badge tone={TONES[evaluation.status]}>{evaluation.status}</Badge>
-                      </div>
-                      <div className="mt-0.5 truncate text-[11px] text-ink-400">
-                        {evaluation.success_rate != null ? `${percent(evaluation.success_rate, 0)} · ` : ""}
-                        {timeAgo(evaluation.created_at)}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
       </div>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form, eligibleRuns, checkpoints, selectedEvaluations, expandedId, busy, invalidVideos],
+    [form, eligibleRuns, checkpoints, busy, invalidVideos],
   );
 
   // Trên các early return: hook phải chạy ở mọi lần render.

@@ -150,7 +150,7 @@ export function Nav({
         </div>
       ) : null}
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col gap-5 border-r border-ink-700 bg-ink-900 px-4 py-5 shadow-[4px_0_22px_rgba(15,23,42,0.025)] lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col gap-5 border-r border-ink-700 bg-ink-900 px-4 py-5 shadow-[4px_0_22px_rgba(15,23,42,0.025)] lg:flex">
         {brand}
         {/* Scrolls on its own so a long rail never pushes the account block
             off the bottom of the column. */}

@@ -69,7 +69,7 @@ function wandbProjectUrl(run: TrainingRun): string | null {
   return `https://wandb.ai/${encodeURIComponent(config.wandb_entity)}/${encodeURIComponent(project)}`;
 }
 
-/** Truong cho thanh trai: nhan nho, khong chu thich -- cot chi rong 240px. */
+/** Truong cho thanh trai: nhan nho, khong chu thich -- cot chi rong 288px. */
 function RailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -473,8 +473,14 @@ export default function TrainingPage() {
         </div>
       </div>
     ),
+    // `form` và `datasets` phải nằm đây: cả biểu mẫu nằm trong thanh này, nên
+    // thiếu chúng thì thanh giữ nguyên bản vẽ cũ và mọi ô trở nên gõ không được
+    // — `setForm` đổi state nhưng không có gì vẽ lại.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleRuns, selectedId, selectedTask, runView, taskNames, preferences, canTrain, showNewRun],
+    [
+      visibleRuns, selectedId, selectedTask, runView, taskNames, preferences,
+      canTrain, showNewRun, form, datasets, busy, trainingEnabled, wandbConfigured,
+    ],
   );
 
   // Trên early return: hook phải chạy ở mọi lần render.

@@ -3,7 +3,7 @@
 /**
  * Chrome around every page: the left bar, and the content column beside it.
  *
- * The left bar is one fixed 240px column that never moves or resizes. What it
+ * The left bar is one fixed 288px column that never moves or resizes. What it
  * *contains* can change: Review swaps its own rail — review status, then
  * filters — in once a batch is open, because inside a batch that rail is the
  * navigation and the app links are not. Swapping the contents rather than
@@ -65,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [rail, setRail] = useState<ReactNode | null>(null);
   const [railBack, setRailBack] = useState<RailBack | null>(null);
   // `Nav` renders nothing until someone is signed in, so the gutter it reserves
-  // has to disappear with it — otherwise the login screen sits 240px right of
+  // has to disappear with it — otherwise the login screen sits 288px right of
   // a bar that is not there.
   const { user } = useAuth();
 
@@ -81,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         `/login` cancels it with a negative margin to go full-bleed. Moving it
         into the pages left the rest flush against the window edge.
       */}
-      <main className={user ? "app-main min-w-0 w-full py-6 lg:pl-60 xl:py-7" : "w-full px-5 py-6"}>
+      <main className={user ? "app-main min-w-0 w-full py-6 lg:pl-72 xl:py-7" : "w-full px-5 py-6"}>
         <div className={user ? "mx-auto w-full max-w-[1600px] px-5 xl:px-8" : "mx-auto w-full max-w-[1500px]"}>{children}</div>
       </main>
       </RailBackContext.Provider>
