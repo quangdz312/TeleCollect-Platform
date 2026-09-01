@@ -4,12 +4,16 @@ Team NEURA · 25/07 – 01/09/2026 · 177 commit trên nhánh `main`
 
 ## Thành viên
 
+### Phân công
+
 | Tên | GitHub | Vai trò chính |
 |---|---|---|
 | Bùi Xuân Tùng | @PakerPP | Backend, frontend, mô phỏng, task ToolHang, triển khai server |
 | Trần Gia Thế | @TranGiaThe2004 | Backend, frontend, triển khai server |
 | Đặng Minh Quang | @quangdz312 | Mô phỏng, frontend, điều khiển cử chỉ tay, scripted 3 task, huấn luyện policy, đánh giá |
 | Nguyễn Nhật Minh | @Helooeverybody | Khảo sát công nghệ, khởi tạo dự án, kiểm thử web |
+
+### Số commit theo tuần
 
 | Tuần | Ngày | Tùng | Thế | Quang | Minh | Tổng |
 |---|---|---:|---:|---:|---:|---:|
