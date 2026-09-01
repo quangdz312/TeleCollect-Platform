@@ -18,6 +18,8 @@
     page: 1,
     loading: false,
     loaded: false,
+    /** Đã nạp lại danh sách đợt thu cho lượt vào trang Collect hiện tại chưa. */
+    collectListing: false,
   };
 
   const nativeFetch = window.fetch.bind(window);
@@ -478,8 +480,16 @@
     // Returning early only skipped building the bar; one already prepended to
     // `main` stayed there for the rest of the session, so every other page
     // grew a batch picker it has no use for. Remove it on the way out.
-    if (location.pathname !== '/collect') { document.getElementById('tc-collect-batch')?.remove(); return; }
+    if (location.pathname !== '/collect') { document.getElementById('tc-collect-batch')?.remove(); state.collectListing = false; return; }
     if (!state.loaded && !state.loading) { loadReview(); return; }
+    // Đợt thu tạo từ màn hình React không đi qua nút "New batch" của thanh này,
+    // nên `state.batches` giữ nguyên danh sách cũ và đợt thu mới không xuất
+    // hiện trong ô chọn. Nạp lại một lần mỗi lượt vào trang; `loadReview` gọi
+    // ngược lại hàm này lúc xong nên cần cờ, không thì thành vòng lặp.
+    if (!state.collectListing && !state.loading) {
+      state.collectListing = true;
+      loadReview(true);
+    }
     const main = document.querySelector('main:not(#tc-local-review)'); if (!main) return;
     const active = state.batches.find((batch) => batch.active);
     const available = state.batches;

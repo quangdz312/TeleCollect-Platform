@@ -1,6 +1,7 @@
 /** Source-neutral metadata contract for teleop and scripted raw episodes. */
 
 import { apiUrl, getToken } from "./api";
+import { COLLECTION_ENABLED } from "./features";
 
 export type RawEpisodeSource = "teleop" | "scripted";
 export type RawEpisodeQuality = "clean" | "good" | "medium" | "poor";
@@ -273,12 +274,57 @@ export const rawApi = {
     request<CollectionBatch[]>(
       `/batches${includeArchived ? "?include_archived=true" : ""}`,
     ),
-  createBatch: (input: CollectionBatchInput) =>
-    request<CollectionBatch>("/batches", {
+  /**
+   * Dựng một đợt thu mới.
+   *
+   * Trong app phải đi qua `/local`, không phải `/raw`. App giữ hai kho đợt thu
+   * riêng: bảng trong cơ sở dữ liệu, và `catalog` cùng thư mục thật trên đĩa.
+   * `/raw` chỉ ghi vào kho thứ nhất, nên đợt thu tạo từ đây hiện trên trang
+   * Review mà không có trong ô chọn ở màn hình thu dữ liệu — ô đó đọc đĩa — và
+   * cũng không có thư mục để ghi tập vào. `/local` ghi cả hai.
+   *
+   * Trên web dựng sẵn thì đường `/local` không tồn tại, và ở đó chỉ có một kho
+   * nên `/raw` là đúng.
+   */
+  createBatch: async (input: CollectionBatchInput): Promise<CollectionBatch> => {
+    if (!COLLECTION_ENABLED) {
+      return request<CollectionBatch>("/batches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+    }
+    const headers = new Headers({ "Content-Type": "application/json" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(apiUrl("/local/batches"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    }),
+      headers,
+      // App tự sinh mã và gọi tên trường là `task`; `id` bên này bị bỏ qua.
+      body: JSON.stringify({
+        name: input.name,
+        task: input.task_name ?? "",
+        description: input.description ?? "",
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new RawApiError(
+        (body as { detail?: string } | null)?.detail ?? `${response.status} ${response.statusText}`,
+        response.status,
+      );
+    }
+    // App trả bản ghi của riêng nó (`task`, `folder`), không phải hình dạng của
+    // `/raw`. Bên gọi nạp lại danh sách sau khi tạo nên không đọc giá trị này;
+    // dựng lại đúng vài trường chung thay vì ép kiểu một thứ khác hẳn.
+    const created = (body ?? {}) as { id?: string; name?: string; task?: string };
+    return {
+      ...(body as object),
+      id: created.id ?? "",
+      name: created.name ?? input.name,
+      task_name: created.task ?? input.task_name ?? null,
+    } as CollectionBatch;
+  },
   updateBatch: (
     batchId: string,
     changes: Partial<Omit<CollectionBatch, "id" | "named" | "created_at">>,

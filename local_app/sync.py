@@ -33,7 +33,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from local_app import batch_storage
 from local_app.config import _load_settings, _save_settings
 
 #: Máy chủ của dự án. App đóng gói cho một dự án nên địa chỉ này là hằng số,
@@ -201,16 +200,110 @@ def _refresh() -> str | None:
 # --- uploading ---------------------------------------------------------------
 
 
-def pack_batch(workspace: Path, batch: dict[str, Any], destination: Path) -> Path:
-    """Zip one batch folder, exactly as a person would from the file explorer."""
+def _pack_from_review(workspace: Path, batch: dict[str, Any], destination: Path) -> int:
+    """Dựng gói từ `review/datasets`, nơi dữ liệu thu bằng app thật sự nằm.
 
-    root = batch_storage.batch_folder(workspace, batch)
-    if not root.is_dir():
-        raise SyncError(f"Không tìm thấy thư mục của đợt thu: {root}")
+    Đợt thu có hai chỗ chứa tập. Thư mục `batches/<tên>/episodes/` là chỗ cũ,
+    một thư mục cho mỗi tập. Còn màn hình thu dữ liệu ghi vào `review/datasets/`
+    dưới dạng một file HDF5 nhiều demo, vì cả phần chấm điểm lẫn phần duyệt đọc
+    ở đó — chấm điểm so tương đối trên toàn kho nên không tách theo đợt thu được.
+
+    Push trước đây chỉ quét thư mục thứ nhất, nên mọi tập thu bằng app đều không
+    lọt vào gói: đợt thu mới thì gói rỗng, đợt thu cũ thì gói chỉ có phần đã
+    import từ trước và máy chủ trả về "đã có hết rồi".
+
+    Mỗi file mang sẵn `telecollect_collection_batch_id`, nên biết được demo nào
+    thuộc đợt thu nào mà không cần tra thêm ở đâu. Ở đây tách ngược mỗi demo
+    thành một thư mục đúng định dạng máy chủ đòi — nghịch đảo của `_rebuild`
+    bên `src/labeling/batch_import.py`.
+    """
+
+    import h5py
+
+    from src.labeling.workspace import Workspace, video_filename
+
+    space = Workspace(workspace / "review")
+    if not space.datasets_dir.is_dir():
+        return 0
+
+    batch_id = str(batch.get("id") or "")
+    task = str(batch.get("task") or "")
+    written = 0
+
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(root.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(root).as_posix())
+        archive.writestr("batch.json", json.dumps(batch, ensure_ascii=False, indent=2))
+        for source in sorted(space.datasets_dir.glob("*.hdf5")):
+            with h5py.File(source, "r") as handle:
+                if "data" not in handle:
+                    continue
+                data = handle["data"]
+                for demo in sorted(data.keys()):
+                    node = data[demo]
+                    # Demo thắng file: `_rebuild` đóng dấu ở cả hai mức, và một
+                    # mã cũ sót lại trên file sẽ xếp tập vào nhầm đợt thu.
+                    owner = str(
+                        node.attrs.get("telecollect_collection_batch_id")
+                        or data.attrs.get("telecollect_collection_batch_id")
+                        or ""
+                    )
+                    if owner != batch_id:
+                        continue
+
+                    episode_id = f"{source.name}::{demo}"
+                    folder = f"episodes/{source.stem}__{demo}"
+
+                    single = destination.parent / f"{uuid.uuid4().hex}.hdf5"
+                    try:
+                        with h5py.File(single, "w") as output:
+                            group = output.create_group("data")
+                            for key, value in data.attrs.items():
+                                group.attrs[key] = value
+                            handle.copy(node, group, name="demo_0")
+                            group.attrs["total"] = int(node.attrs.get("num_samples", 0))
+                        archive.write(single, f"{folder}/trajectory.hdf5")
+                    finally:
+                        single.unlink(missing_ok=True)
+
+                    archive.writestr(
+                        f"{folder}/meta.json",
+                        json.dumps(
+                            {
+                                "format_version": 1,
+                                "episode_id": episode_id,
+                                "task_name": str(node.attrs.get("telecollect_task") or task),
+                                "source": "scripted",
+                                "num_steps": int(node.attrs.get("num_samples", 0)),
+                                "requested_quality": str(
+                                    node.attrs.get("telecollect_requested_quality") or "",
+                                ),
+                                "recorded_success": bool(node.attrs.get("success", False)),
+                                "original_source": source.name,
+                                "original_demo": demo,
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                    )
+
+                    video = space.videos_dir / video_filename(episode_id)
+                    if video.is_file():
+                        archive.write(video, f"{folder}/review.mp4")
+                    written += 1
+    return written
+
+
+def pack_batch(workspace: Path, batch: dict[str, Any], destination: Path) -> Path:
+    """Đóng gói mọi tập của một đợt thu, lấy từ `review/datasets`.
+
+    Không quét `batches/<tên>/episodes/` nữa, kể cả khi thư mục đó có sẵn tập.
+    Nó chỉ chứa những gì import từ zip lúc trước, còn tập thu bằng app thì
+    không, nên gói dựng theo nó vừa thiếu tập mới vừa lặp lại tập máy chủ đã có
+    — đúng cảnh `can` đẩy lên và nhận về "đã có hết rồi" trong khi tập vừa thu
+    chưa từng lọt vào gói.
+    """
+
+    if _pack_from_review(workspace, batch, destination) == 0:
+        raise SyncError("Đợt thu này chưa có tập nào để đẩy lên")
     return destination
 
 

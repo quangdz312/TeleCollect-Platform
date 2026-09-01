@@ -18,6 +18,32 @@ from local_app import sync
 PASSWORD = "correct-horse-battery-staple"
 
 
+def _seed_review(workspace: Path, batch_id: str, *, demos: int = 1, name: str = "run.hdf5") -> Path:
+    """Dựng kho `review/datasets` như màn hình thu dữ liệu ghi ra.
+
+    Đây mới là chỗ tập của app nằm; `pack_batch` đọc ở đây chứ không đọc
+    `batches/<tên>/episodes/`, nên fixture phải dựng đúng cái thật.
+    """
+
+    import h5py
+    import numpy as np
+
+    datasets = workspace / "review" / "datasets"
+    datasets.mkdir(parents=True, exist_ok=True)
+    path = datasets / name
+    with h5py.File(path, "w") as handle:
+        data = handle.create_group("data")
+        data.attrs["telecollect_collection_batch_id"] = batch_id
+        data.attrs["telecollect_task"] = "lift"
+        for index in range(demos):
+            demo = data.create_group(f"demo_{index}")
+            demo.attrs["telecollect_collection_batch_id"] = batch_id
+            demo.attrs["num_samples"] = 2
+            demo.attrs["success"] = True
+            demo.create_dataset("actions", data=np.zeros((2, 7), dtype="float32"))
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _isolated_settings(tmp_path, monkeypatch):
     """Keep every test out of the real app settings file."""
@@ -122,21 +148,42 @@ def test_a_half_written_session_is_treated_as_signed_out(_isolated_settings):
 def test_packing_produces_the_layout_the_import_endpoint_expects(tmp_path):
     workspace = tmp_path / "ws"
     batch = {"id": "lift-v1", "name": "Lift v1", "task": "lift"}
-    root = workspace / "batches" / "Lift v1"
-    (root / "episodes" / "ep1").mkdir(parents=True)
-    (root / "batch.json").write_text(json.dumps(batch), encoding="utf-8")
-    (root / "episodes" / "ep1" / "meta.json").write_text("{}", encoding="utf-8")
+    _seed_review(workspace, "lift-v1")
 
     archive = sync.pack_batch(workspace, batch, tmp_path / "out.zip")
 
     with zipfile.ZipFile(archive) as handle:
         names = set(handle.namelist())
+        meta = json.loads(handle.read("episodes/run__demo_0/meta.json"))
     assert "batch.json" in names
-    assert "episodes/ep1/meta.json" in names
+    assert "episodes/run__demo_0/trajectory.hdf5" in names
+    # Máy chủ nhóm các tập theo hai trường này; thiếu chúng thì tập bị bỏ qua.
+    assert meta["original_source"] == "run.hdf5"
+    assert meta["original_demo"] == "demo_0"
 
 
-def test_packing_a_missing_batch_folder_says_so(tmp_path):
-    with pytest.raises(sync.SyncError, match="Không tìm thấy thư mục"):
+def test_packing_takes_only_the_episodes_of_that_batch(tmp_path):
+    """Một file chung kho không được kéo theo tập của đợt thu khác.
+
+    Mọi đợt thu dùng chung `review/datasets`, nên lọc theo mã đợt thu là thứ duy
+    nhất giữ cho gói đúng phạm vi.
+    """
+
+    workspace = tmp_path / "ws"
+    _seed_review(workspace, "lift-v1", demos=2, name="mine.hdf5")
+    _seed_review(workspace, "other-v9", demos=3, name="theirs.hdf5")
+
+    archive = sync.pack_batch(
+        workspace, {"id": "lift-v1", "name": "Lift v1", "task": "lift"}, tmp_path / "o.zip",
+    )
+
+    with zipfile.ZipFile(archive) as handle:
+        episodes = {name.split("/")[1] for name in handle.namelist() if name.startswith("episodes/")}
+    assert episodes == {"mine__demo_0", "mine__demo_1"}
+
+
+def test_packing_a_batch_with_no_episodes_says_so(tmp_path):
+    with pytest.raises(sync.SyncError, match="chưa có tập nào"):
         sync.pack_batch(tmp_path, {"id": "x", "name": "Missing"}, tmp_path / "o.zip")
 
 
@@ -146,9 +193,7 @@ def test_packing_a_missing_batch_folder_says_so(tmp_path):
 def _prepare(tmp_path, settings) -> tuple[Path, dict]:
     workspace = tmp_path / "ws"
     batch = {"id": "lift-v1", "name": "Lift v1"}
-    root = workspace / "batches" / "Lift v1" / "episodes" / "ep1"
-    root.mkdir(parents=True)
-    (root / "meta.json").write_text("{}", encoding="utf-8")
+    _seed_review(workspace, "lift-v1")
     settings.update(
         {
             "sync_server": "https://telecollect.io.vn",
