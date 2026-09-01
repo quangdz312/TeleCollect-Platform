@@ -4,7 +4,18 @@ Nền tảng teleoperation & thu thập demonstration cho imitation learning (đ
 
 ---
 
-## Tài liệu theo giai đoạn
+## Tài liệu
+
+| Tài liệu | Nội dung |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kiến trúc và trạng thái hệ thống hiện tại |
+| [`docs/DATA_QUALITY.md`](docs/DATA_QUALITY.md) | Chấm điểm, gắn nhãn tự động, các mức nhiễu |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Triển khai lên VPS, sao lưu, khôi phục |
+| [`docs/runpod-integration.md`](docs/runpod-integration.md) | Huấn luyện trên GPU thuê |
+| [`docs/weekly-log.md`](docs/weekly-log.md) | Nhật ký tuần và phân công |
+| [`docs/HANDOVER.md`](docs/HANDOVER.md) | Bàn giao — lỗi đã biết, quyết định đã chốt |
+
+**Bài nộp theo giai đoạn:**
 
 | Giai đoạn | Thư mục | Nội dung |
 |---|---|---|
@@ -300,9 +311,9 @@ Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh,
 - **Auth/Users, Tasks, Demos** (upload, xem, tua, trim, gắn nhãn, duyệt), **Datasets**
   (đóng gói zip, tải về).
 - **Teleoperation thật** — điều khiển realtime qua WebSocket trên robosuite/MuJoCo,
-  ghi episode vào DB. Xem [`docs/system-overview.md`](docs/system-overview.md).
+  ghi episode vào DB. Xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - **Thu scripted tự động** cho 4 task: `lift`, `can`, `square`, `tool_hang`.
-- **Chấm nhãn tự động (MVP)** — xem `docs/auto_labeling_mvp.md`.
+- **Chấm nhãn tự động (MVP)** — xem [`docs/DATA_QUALITY.md`](docs/DATA_QUALITY.md).
 
 Chưa làm: Training/Eval (PyTorch) và export LeRobot/RLDS/DVC.
 

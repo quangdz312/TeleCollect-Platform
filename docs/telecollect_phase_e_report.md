@@ -66,7 +66,7 @@ still validate.
 
 ### 4. Documentation
 
-`docs/scripted_collection_quality.md` is the shared contract page; the three
+`docs/DATA_QUALITY.md` is the shared contract page; the three
 per-task collection docs link to it and show a `--quality` example.
 
 ## Verification

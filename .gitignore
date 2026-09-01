@@ -134,3 +134,6 @@ local_app/data-desktop-auth-test/
 
 # Backups copied off the VPS before a deploy.
 _vps-backups/
+
+# Slide trình bày: bản nguồn giữ ở máy, không đưa lên repo.
+*.pptx

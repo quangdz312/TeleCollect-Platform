@@ -9,7 +9,7 @@ Team NEURA · 25/07 – 01/09/2026 · 177 commit trên nhánh `main`
 | Bùi Xuân Tùng | @PakerPP | Backend, frontend, triển khai server |
 | Trần Gia Thế | @TranGiaThe2004 | Mô phỏng, triển khai server |
 | Đặng Minh Quang | @quangdz312 | Huấn luyện policy, đánh giá |
-| Nguyễn Nhật Minh | @Helooeverybody | Khảo sát công nghệ, khởi tạo dự án |
+| Nguyễn Nhật Minh | @Helooeverybody | Khảo sát công nghệ, khởi tạo dự án, kiểm thử web |
 
 | Tuần | Ngày | Tùng | Thế | Quang | Minh | Tổng |
 |---|---|---:|---:|---:|---:|---:|
@@ -65,7 +65,8 @@ chuyển sang bản thiết kế mới, hàng đợi duyệt mở đúng thứ n
 
 ## W35 · 24–30/08 — Từ công cụ thành nền tảng nhiều người dùng
 
-*Tùng và Thế triển khai server; Quang huấn luyện policy và đánh giá.*
+*Tùng và Thế triển khai server; Quang huấn luyện policy và đánh giá; Minh kiểm
+thử web sau mỗi lần triển khai.*
 
 - **GPU thuê theo giây** qua RunPod, tính giờ theo từng tài khoản
 - **App desktop** tách khỏi bản web, đăng nhập và đẩy dữ liệu lên máy chủ
@@ -76,7 +77,7 @@ chuyển sang bản thiết kế mới, hàng đợi duyệt mở đúng thứ n
 ## W36 · 01/09 — Đồng bộ app–server và dọn dẹp
 
 *Tiếp nối tuần trước: Tùng và Thế lo đồng bộ app–server, Quang tiếp tục huấn
-luyện và đánh giá.*
+luyện và đánh giá, Minh kiểm thử web.*
 
 Sửa để app và máy chủ khớp nhau — nút Push trước đó chưa từng gửi được tập nào
 thu bằng app vì đóng gói nhầm thư mục. Kèm theo: đợt thu hiện đúng tên, tập nhập

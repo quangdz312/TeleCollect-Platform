@@ -154,7 +154,7 @@ lỗ hổng của pipeline.
 **Lỗi chấm điểm đã biết.** `wandering_path` chấm theo tương quan trong lô thay
 vì so với ngưỡng tuyệt đối, nên cùng một episode đem chấm ở hai lô khác nhau sẽ
 ra hai điểm khác nhau — nó bắn ở mức 0.9987 trên lô hỗn hợp và kéo `auto_score`
-xuống 0.001253. Đã hoãn xử lý, ghi lại trong `docs/auto_labeling_mvp.md`.
+xuống 0.001253. Đã hoãn xử lý, ghi lại trong `docs/DATA_QUALITY.md`.
 
 ---
 

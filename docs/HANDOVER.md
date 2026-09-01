@@ -1,14 +1,17 @@
 # Bàn giao công việc — TeleCollect
 
-Tài liệu bàn giao tính đến **25/08/2026**, nhánh `main @ 49fc2f2`.
+> **Ảnh chụp tại `main @ 49fc2f2` (25/08/2026).** Phần trạng thái repo và số
+> liệu bên dưới đã cũ; đọc [ARCHITECTURE.md](ARCHITECTURE.md) để biết hiện
+> trạng. Giữ tài liệu này vì phần lỗi đã biết và việc đang dở vẫn còn giá trị.
 
 Đọc theo thứ tự:
 
 | Tài liệu | Nội dung |
 |---|---|
-| [system-overview.md](system-overview.md) | Hệ thống hiện có gì |
-| [platform-spec.md](platform-spec.md) | Sẽ xây thêm gì, đặc tả 5 tính năng |
-| File này | Trạng thái, việc đang dở, lỗi đã biết |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Hệ thống hiện có gì |
+| [DATA_QUALITY.md](DATA_QUALITY.md) | Chấm điểm, gắn nhãn, mức nhiễu |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Triển khai, sao lưu, khôi phục |
+| File này | Trạng thái tại mốc bàn giao, việc đang dở, lỗi đã biết |
 
 ---
 
@@ -16,14 +19,8 @@ Tài liệu bàn giao tính đến **25/08/2026**, nhánh `main @ 49fc2f2`.
 
 **Nhánh `main` sạch, đã đồng bộ với remote.** Không có nhánh tạm nào chờ xử lý.
 
-Hai tệp chưa commit, đều là tài liệu mới viết:
-
-```
-docs/platform-spec.md
-docs/system-overview.md
-```
-
-Chưa commit vì chờ chủ dự án duyệt nội dung.
+Hai tệp tài liệu khi đó chưa commit đã được đưa vào repo, và về sau gộp thành
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 **Kiểm thử:** 343 test đạt, 1 thất bại. Test thất bại là
 `test_release_check::test_reference_lift_episode_reads_as_lifted` — episode `lift`
@@ -72,7 +69,7 @@ chờ gắn nhãn. Người thu xong nhìn vào thấy trống, tưởng mất d
 
 ## 3. Việc tiếp theo
 
-Đặc tả đầy đủ ở [platform-spec.md](platform-spec.md). Tóm tắt:
+Đặc tả gốc đã gộp vào [ARCHITECTURE.md](ARCHITECTURE.md). Tóm tắt kế hoạch khi bàn giao:
 
 ```
 Tính năng 1 (Team và phân quyền)
