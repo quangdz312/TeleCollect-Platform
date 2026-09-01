@@ -270,7 +270,7 @@ phải `rm -rf data/` rồi seed lại như trên, không tự động migrate.
 
 ### Chuẩn bị demo trực tiếp (test tay luồng review)
 
-Từ khi chặn tự duyệt (`ensure_not_self_review` — xem `detail_backend_withoutRobot.md` §6.3),
+Từ khi chặn tự duyệt (`ensure_not_self_review` trong `src/services/demo_rules.py`),
 luồng demo → review cần **HAI tài khoản khác nhau**: một tài khoản upload demo (operator), một
 tài khoản khác duyệt (reviewer/admin). Dùng tài khoản admin có sẵn (`create_admin`) để tạo thêm
 một user role `reviewer`:
@@ -300,16 +300,15 @@ Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh,
 - **Auth/Users, Tasks, Demos** (upload, xem, tua, trim, gắn nhãn, duyệt), **Datasets**
   (đóng gói zip, tải về).
 - **Teleoperation thật** — điều khiển realtime qua WebSocket trên robosuite/MuJoCo,
-  ghi episode vào DB. Xem `SIM_BACKEND_FRONTEND_INTEGRATION.md`.
+  ghi episode vào DB. Xem [`docs/system-overview.md`](docs/system-overview.md).
 - **Thu scripted tự động** cho 4 task: `lift`, `can`, `square`, `tool_hang`.
 - **Chấm nhãn tự động (MVP)** — xem `docs/auto_labeling_mvp.md`.
 
 Chưa làm: Training/Eval (PyTorch) và export LeRobot/RLDS/DVC.
 
-> `plan_backend_core.md`, `plan_backend.md` và `detail_backend_withoutRobot.md` là
-> **tài liệu kế hoạch cũ**, giữ lại làm lịch sử. Chúng nói Teleoperation "không làm" —
-> điều đó **không còn đúng**. Đọc mục này và các file trong `docs/` để biết trạng
-> thái thật.
+> Tài liệu kế hoạch giai đoạn đầu đã được gỡ khỏi repo — chúng mô tả kiến trúc dự
+> kiến (ROS2, DVC làm trục chính) chứ không phải thứ đã xây, nên để lại chỉ gây
+> hiểu nhầm. Lịch sử vẫn nằm trong git. Trạng thái thật: mục này và `docs/`.
 
 ### Task ToolHang
 
