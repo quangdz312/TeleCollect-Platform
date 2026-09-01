@@ -411,6 +411,7 @@ def test_rollout_records_tail_after_first_success() -> None:
         policy=_PolicyStub(),
         env=env,
         horizon=10,
+        success_hold_steps=1,
         success_tail_steps=3,
         video_writer=None,
         video_skip=1,
@@ -427,6 +428,46 @@ def test_rollout_records_tail_after_first_success() -> None:
     assert stats["first_action"] == [0.0]
     assert stats["action_prefix"] == [[0.0], [1.0], [2.0], [3.0], [4.0]]
     assert len(stats["state_prefix_hashes"]) == 5
+
+
+def test_rollout_requires_ten_consecutive_success_steps() -> None:
+    env = _RolloutEnvStub(success_at=2)
+
+    stats = _rollout_with_success_tail(
+        policy=_PolicyStub(),
+        env=env,
+        horizon=20,
+        success_hold_steps=10,
+        success_tail_steps=0,
+        video_writer=None,
+        video_skip=1,
+        camera_names=[],
+    )
+
+    assert stats["Success_Rate"] == 1.0
+    assert stats["Horizon"] == 11
+    assert stats["Held_Steps"] == 10
+    assert stats["Required_Hold_Steps"] == 10
+
+
+def test_rollout_resets_hold_streak_when_task_condition_drops() -> None:
+    class _IntermittentEnv(_RolloutEnvStub):
+        def is_success(self):
+            return {"task": self.steps in {1, 2, 3, 4, 6, 7, 8, 9, 10}}
+
+    stats = _rollout_with_success_tail(
+        policy=_PolicyStub(),
+        env=_IntermittentEnv(success_at=None),
+        horizon=10,
+        success_hold_steps=10,
+        success_tail_steps=0,
+        video_writer=None,
+        video_skip=1,
+        camera_names=[],
+    )
+
+    assert stats["Success_Rate"] == 0.0
+    assert stats["Held_Steps"] == 5
 
 
 def test_unsuccessful_rollout_still_stops_at_horizon() -> None:

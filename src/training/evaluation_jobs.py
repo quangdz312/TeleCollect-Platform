@@ -201,6 +201,7 @@ class EvaluationJobManager:
             "--record-videos", str(
                 config["record_videos"] if record_videos is None else record_videos
             ),
+            "--success-hold-steps", str(config.get("success_hold_steps", 10)),
             "--state-bank", str(self._state_bank(record)),
         ]
         if config.get("horizon") is not None:

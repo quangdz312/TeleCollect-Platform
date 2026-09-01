@@ -739,6 +739,7 @@ class EvaluationJobRequest(BaseModel):
     horizon: int | None = Field(default=None, ge=1, le=20_000)
     seed: int = Field(default=5000, ge=0, le=2_147_483_647)
     record_videos: int = Field(default=3, ge=0, le=20)
+    success_hold_steps: int = Field(default=10, ge=1, le=1_000)
 
     @model_validator(mode="after")
     def video_count_fits_rollouts(self) -> "EvaluationJobRequest":
@@ -752,6 +753,10 @@ class EvaluationEpisodeResponse(BaseModel):
     success: bool
     steps: int = Field(..., ge=0)
     video: str | None = None
+    # Optional so evaluation JSON produced before the strict-hold rule remains
+    # readable. New runs always populate both values.
+    held_steps: int | None = Field(default=None, ge=0)
+    required_hold_steps: int | None = Field(default=None, ge=1)
 
 
 class EvalResultResponse(BaseModel):

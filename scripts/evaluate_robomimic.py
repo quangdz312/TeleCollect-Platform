@@ -42,17 +42,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prepare-state-bank-only",
         action="store_true",
-        help=(
-            "Dựng state bank cho trọn dải seed rồi thoát, không chạy rollout. "
-            "Dùng khi một lần evaluate được chia cho nhiều process: chúng chỉ "
-            "được đọc bank, nên bank phải có sẵn và đủ seed từ trước."
-        ),
+        help="Build the complete state bank, then exit before running rollouts.",
+    )
+    parser.add_argument(
+        "--success-hold-steps",
+        type=int,
+        default=10,
+        help="Require task success for this many consecutive steps.",
     )
     parser.add_argument(
         "--success-tail-steps",
         type=int,
-        default=30,
-        help="Continue the policy for this many steps after first success.",
+        default=0,
+        help="Optional extra video steps after strict success is confirmed.",
     )
     return parser.parse_args()
 
@@ -283,9 +285,8 @@ def _prepare_state_bank(
             raise ValueError("State bank không thuộc đúng task evaluation")
         if schema_version == 2 and metadata.get("environment_hash") != environment_hash:
             raise ValueError("State bank không tương thích với environment của checkpoint")
-        # Bao hàm chứ không đẳng thức: một lần evaluate chia cho nhiều process
-        # thì bank mang trọn dải seed, còn mỗi process chỉ hỏi phần của mình.
-        # Đòi bằng nhau khiến mọi process con đều hỏng ngay từ bước này.
+        # The warm-up process creates the complete bank, while each parallel
+        # rollout worker asks for only its own contiguous subset.
         stored_seeds = metadata.get("seeds") or []
         if not set(seeds).issubset(set(stored_seeds)):
             raise ValueError("State bank không chứa đủ dải seed được yêu cầu")
@@ -360,6 +361,7 @@ def _rollout_with_success_tail(
     policy: object,
     env: object,
     horizon: int,
+    success_hold_steps: int = 10,
     success_tail_steps: int,
     video_writer: object | None,
     video_skip: int,
@@ -368,11 +370,12 @@ def _rollout_with_success_tail(
     initial_state_vector: object | None = None,
     initial_model_xml: str | None = None,
 ) -> dict[str, object]:
-    """Run one episode and keep recording briefly after its first success.
+    """Run one episode and require sustained task success.
 
-    ``horizon`` remains the maximum number of steps allowed to *reach* success.
-    Tail steps are only added after success, so failed evaluations do not become
-    more expensive and the success metric is not changed by the extra footage.
+    A one-step threshold crossing is not success. The task condition must stay
+    true for ``success_hold_steps`` consecutive simulator steps; a false step
+    resets the streak. Hold confirmation and any optional video tail both fit
+    inside ``horizon``, keeping checkpoint comparisons equally budgeted.
     """
     if episode_seed is not None:
         _seed_episode(episode_seed, env)
@@ -400,12 +403,14 @@ def _rollout_with_success_tail(
     video_count = 0
     succeeded = False
     tail_remaining = 0
+    consecutive_success = 0
+    best_held_steps = 0
     actions: list[object] = []
     action_prefix: list[list[float]] = []
     state_prefix_hashes: list[str] = []
 
     try:
-        while total_steps < horizon or (succeeded and tail_remaining > 0):
+        while total_steps < horizon:
             action = policy(ob=obs)  # type: ignore[operator]
             import numpy as np
 
@@ -432,16 +437,17 @@ def _rollout_with_success_tail(
                 video_writer.append_data(np.concatenate(frames, axis=1))  # type: ignore[attr-defined]
             video_count += 1
 
-            first_success = not succeeded and bool(env.is_success()["task"])  # type: ignore[attr-defined]
-            if first_success:
-                succeeded = True
-                tail_remaining = success_tail_steps
-            elif succeeded and tail_remaining > 0:
+            task_success = bool(env.is_success()["task"])  # type: ignore[attr-defined]
+            if not succeeded:
+                consecutive_success = consecutive_success + 1 if task_success else 0
+                best_held_steps = max(best_held_steps, consecutive_success)
+                if consecutive_success >= success_hold_steps:
+                    succeeded = True
+                    tail_remaining = success_tail_steps
+            elif tail_remaining > 0:
                 tail_remaining -= 1
 
-            if done or (not succeeded and total_steps >= horizon) or (
-                succeeded and tail_remaining <= 0
-            ):
+            if done or (succeeded and tail_remaining <= 0):
                 break
             obs = deepcopy(next_obs)
     except env.rollout_exceptions as exc:  # type: ignore[attr-defined]
@@ -451,6 +457,8 @@ def _rollout_with_success_tail(
         "Return": total_reward,
         "Horizon": float(total_steps),
         "Success_Rate": float(succeeded),
+        "Held_Steps": int(best_held_steps),
+        "Required_Hold_Steps": int(success_hold_steps),
         "initial_state_hash": initial_state_hash,
         "action_hash": _array_fingerprint(actions),
         "first_action": action_prefix[0] if action_prefix else [],
@@ -466,6 +474,7 @@ def main() -> int:
         or args.record_videos < 0
         or args.record_videos > args.n_rollouts
         or args.video_skip < 1
+        or args.success_hold_steps < 1
         or args.success_tail_steps < 0
     ):
         raise SystemExit("n-rollouts/record-videos không hợp lệ")
@@ -520,9 +529,8 @@ def main() -> int:
     for index in range(args.n_rollouts):
         episode_seed = args.seed + index
         writer = None
-        # Tên theo seed, không theo chỉ số trong lần chạy: khi một lần evaluate
-        # được chia cho nhiều process, mỗi process đều bắt đầu từ index 0 và
-        # hai process sẽ ghi đè lên video của nhau.
+        # Parallel workers all start at local index zero. Seed-based names keep
+        # their temporary and final videos from overwriting one another.
         temporary_video = args.video_dir / f"seed_{episode_seed}.tmp.mp4"
         if args.record_videos > 0:
             writer = imageio.get_writer(temporary_video, fps=30)
@@ -531,6 +539,7 @@ def main() -> int:
                 policy=policy,
                 env=env,
                 horizon=horizon,
+                success_hold_steps=args.success_hold_steps,
                 success_tail_steps=args.success_tail_steps,
                 video_writer=writer,
                 video_skip=args.video_skip,
@@ -561,6 +570,8 @@ def main() -> int:
             "success": success,
             "steps": int(stats["Horizon"]),
             "video": video_name,
+            "held_steps": int(stats["Held_Steps"]),
+            "required_hold_steps": int(stats["Required_Hold_Steps"]),
             "initial_state_hash": str(stats["initial_state_hash"]),
             "action_hash": str(stats["action_hash"]),
             "first_action": stats["first_action"],
@@ -579,7 +590,8 @@ def main() -> int:
         _write_result(args.result, payload)
         print(
             f"evaluation episode {index + 1}/{args.n_rollouts} "
-            f"seed={episode_seed} success={success} steps={int(stats['Horizon'])}",
+            f"seed={episode_seed} success={success} steps={int(stats['Horizon'])} "
+            f"held={int(stats['Held_Steps'])}/{int(stats['Required_Hold_Steps'])}",
             flush=True,
         )
     return 0
