@@ -1,5 +1,13 @@
 (() => {
   const STORAGE_KEY = 'telecollect.local.review.v1';
+  /**
+   * Trang chỉ có nghĩa trên máy chủ, không phải trên máy này.
+   *
+   * Training và Evaluate cần GPU cùng dữ liệu đã gom của cả nhóm; Settings đổi
+   * cấu hình máy chủ. App là chỗ thu dữ liệu rồi đẩy lên — làm mấy việc kia ở
+   * đây chỉ ra kết quả rời rạc trên một máy.
+   */
+  const HIDDEN_PATHS = new Set(['/training', '/evaluate', '/settings']);
   const PAGE_SIZE = 50;
   let searchTimer = null;
   let lastShellPath = '';
@@ -609,9 +617,9 @@
     if (path === '/login') { location.replace('/'); return; }
     // Xoa link Users thoi thi go thang dia chi van vao duoc trang do.
     if (path === '/admin') { location.replace('/'); return; }
+    if (HIDDEN_PATHS.has(path)) { location.replace('/'); return; }
     // The shared web moved navigation from a top bar into a left sidebar, so
-    // the rail is `aside nav`, not `header nav`. Every link stays visible: the
-    // app runs that same web, so Training, Evaluate and the rest work here too.
+    // the rail is `aside nav`, not `header nav`.
     const nav = document.querySelector('aside nav');
     if (nav && !document.getElementById('tc-project-button')) {
       const project = button('Project folder', 'rounded-lg px-3.5 py-2 text-left text-[13px] font-medium text-ink-300'); project.id = 'tc-project-button'; project.onclick = () => openProject().catch((error) => alert(error.message)); nav.appendChild(project);
@@ -623,6 +631,19 @@
     // quyen gi tren may chu, chi lam nguoi dung tuong nguoc lai. Phan quyen
     // that nam o trang Users cua web.
     nav?.querySelector('a[href="/admin"]')?.remove();
+    HIDDEN_PATHS.forEach((hidden) => nav?.querySelector(`a[href="${hidden}"]`)?.remove());
+    // Trang Overview còn dẫn tới Training và Evaluate ở thẻ số liệu lẫn mục
+    // "Action required". Bỏ riêng link ở thanh bên thì bấm vào đó vẫn nhảy
+    // sang rồi bị đá ngược về — vô nghĩa hơn là không cho bấm. Vô hiệu hoá
+    // ngay tại chỗ, giữ nguyên con số vì chúng vẫn nói lên tình hình.
+    document.querySelectorAll('main a[href]').forEach((link) => {
+      const target = link.getAttribute('href') || '';
+      const base = target.split('?')[0];
+      if (!HIDDEN_PATHS.has(base)) return;
+      link.removeAttribute('href');
+      link.style.cursor = 'default';
+      link.style.opacity = '0.55';
+    });
     applyAccountPanel();
     if (path === '/review') {
       showReview();

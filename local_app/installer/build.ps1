@@ -39,6 +39,10 @@ try {
   $env:NEXT_PUBLIC_API_URL = "http://telecollect-api.invalid"
   $env:NEXT_PUBLIC_API_ORIGIN = "http://telecollect-api.invalid"
   $env:NEXT_PUBLIC_WS_BASE = "ws://telecollect-api.invalid"
+  # Đây là nơi thu dữ liệu, nên bản đóng gói phải có màn hình thu. Chạy từ mã
+  # nguồn thì `web_shell.py` đặt cờ này; ở đây thiếu nó, Next đọc `.env.local`
+  # với giá trị "0" của bản web và cài xong app không có chỗ thu dữ liệu.
+  $env:NEXT_PUBLIC_COLLECTION_ENABLED = "1"
   if (-not $SkipChecks) {
     & npm.cmd run typecheck
     if ($LASTEXITCODE -ne 0) { throw "Frontend typecheck failed" }
