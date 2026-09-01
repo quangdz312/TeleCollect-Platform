@@ -28,6 +28,10 @@ env/
 .DS_Store
 Thumbs.db
 
+# Office: file khoá tạm khi đang mở. `*~` ở trên không bắt được vì dấu nằm
+# ở đầu tên, không phải cuối.
+~$*
+
 # Data — chặn payload, GIỮ con trỏ DVC (*.dvc, dvc.lock, .gitignore do DVC sinh)
 /data/episodes/
 /data/runs/
