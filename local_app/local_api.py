@@ -329,11 +329,38 @@ def install(app: FastAPI, workspace: Path) -> None:
         return batch if isinstance(batch, dict) else None
 
     @app.post("/api/v1/local/batches")
-    def create_batch(body: BatchCreate):
+    async def create_batch(body: BatchCreate):
         try:
-            return catalog.create_batch(workspace, body.name, body.task, body.description)
+            batch = catalog.create_batch(workspace, body.name, body.task, body.description)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Đợt thu sống ở hai nơi: catalog trên đĩa, và bảng `collection_batches`
+        # mà trang Review đọc. Chỉ ghi catalog thì trang đó không tìm thấy bản
+        # ghi và lấy luôn mã làm tên, nên người dùng thấy `testv2-83217045` ở
+        # chỗ đáng lẽ là `testv2`. `bootstrap._index_batches` vá lại chuyện này
+        # nhưng chỉ chạy lúc khởi động, tức phải tắt mở app mới thấy tên đúng.
+        await _record_batch(batch)
+        return batch
+
+    async def _record_batch(batch: dict) -> None:
+        from src.models.db import CollectionBatch, get_engine, session_factory
+
+        async with session_factory(get_engine())() as session:
+            if await session.get(CollectionBatch, batch["id"]) is not None:
+                return
+            session.add(
+                CollectionBatch(
+                    id=batch["id"],
+                    name=str(batch["name"])[:150],
+                    task_name=str(batch.get("task") or "") or None,
+                    description=str(batch.get("description") or ""),
+                    # Cột này không cho trống. App một máy một người nên không
+                    # có gì để phân biệt, và nó cũng không hiện ở đâu — ghi
+                    # thẳng tên tài khoản app tự dùng, khỏi phải tra bảng.
+                    created_by="local-desktop",
+                ),
+            )
+            await session.commit()
 
     @app.patch("/api/v1/local/batches/{batch_id}")
     def patch_batch(batch_id: str, body: BatchPatch):

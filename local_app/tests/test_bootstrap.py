@@ -84,3 +84,43 @@ async def test_a_renamed_batch_updates_its_record(tmp_path, engine) -> None:
 
     assert record is not None
     assert record.name == "can round 2"
+
+
+@pytest.mark.asyncio
+async def test_creating_a_batch_records_its_name(tmp_path, engine) -> None:
+    """Đợt thu tạo trong app phải có bản ghi ngay, không đợi khởi động lại.
+
+    Đợt thu sống ở hai nơi: catalog trên đĩa và bảng `collection_batches` mà
+    trang Review đọc. Chỉ ghi catalog thì trang đó lấy mã làm tên và người dùng
+    thấy `testv2-83217045` ở chỗ đáng lẽ là `testv2`. `_index_batches` vá được
+    nhưng chỉ chạy lúc mở app, tức phải tắt mở lại mới thấy tên đúng.
+    """
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from local_app import catalog
+    from local_app.local_api import install
+    from src.models.db import CollectionBatch, session_factory
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    app = FastAPI()
+    install(app, workspace)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/local/batches",
+        json={"name": "testv2", "task": "lift_cube", "description": ""},
+    )
+    assert response.status_code == 200, response.text
+    batch_id = response.json()["id"]
+    # Mã sinh từ tên nên có phần đuôi băm; đó chính là thứ lọt ra giao diện.
+    assert batch_id != "testv2"
+    assert catalog.load(workspace)["batches"][batch_id]["name"] == "testv2"
+
+    async with session_factory(engine)() as session:
+        record = await session.get(CollectionBatch, batch_id)
+    assert record is not None, "Không có bản ghi thì Review hiện mã thay cho tên"
+    assert record.name == "testv2"
+    assert record.task_name == "lift_cube"
