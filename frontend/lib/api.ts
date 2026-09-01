@@ -203,6 +203,8 @@ export interface EvaluationEpisode {
   success: boolean;
   steps: number;
   video: string | null;
+  held_steps?: number | null;
+  required_hold_steps?: number | null;
 }
 
 export interface EvaluationRun {
@@ -227,6 +229,7 @@ export interface EvaluationRequest {
   horizon: number | null;
   seed: number;
   record_videos: number;
+  success_hold_steps: number;
 }
 
 export interface EvalRun {

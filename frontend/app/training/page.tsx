@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLeftBar, useRailBack } from "@/components/AppShell";
 import { useAuth } from "@/components/AuthProvider";
-import { AdvancedGroup, Alert, Badge, Button, Card, Empty, Field, FieldGroup, Input, Select, Stat } from "@/components/ui";
+import { PageHeader } from "@/components/PageHeader";
+import { AdvancedGroup, Alert, Badge, Button, Card, cx, Empty, Field, Input, Select } from "@/components/ui";
 import {
   api,
   type DatasetExport,
@@ -12,6 +15,9 @@ import {
   type TrainingRun,
 } from "@/lib/api";
 import { bytes, timeAgo } from "@/lib/format";
+
+/** Ngoai component: object moi moi lan render se khien hook chay lai mai. */
+const BACK_TO_SECTIONS = { label: "All sections", href: "/" };
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
   succeeded: "ok",
@@ -63,8 +69,43 @@ function wandbProjectUrl(run: TrainingRun): string | null {
   return `https://wandb.ai/${encodeURIComponent(config.wandb_entity)}/${encodeURIComponent(project)}`;
 }
 
+/** Truong cho thanh trai: nhan nho, khong chu thich -- cot chi rong 240px. */
+function RailField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-medium text-ink-300">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function RailNumber({
+  label,
+  value,
+  min,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <RailField label={label}>
+      <Input
+        type="number"
+        className="px-2 py-1 text-xs"
+        min={min}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </RailField>
+  );
+}
+
 export default function TrainingPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [datasets, setDatasets] = useState<DatasetExport[]>([]);
   /** `null` until known — the warning must not flash before the check lands. */
   const [wandbConfigured, setWandbConfigured] = useState<boolean | null>(null);
@@ -77,9 +118,11 @@ export default function TrainingPage() {
   const [preferences, setPreferences] = useState<RunPreferences>({ archived: [], pinned: [] });
   const [showAllCheckpoints, setShowAllCheckpoints] = useState(false);
   const [showJobLog, setShowJobLog] = useState(false);
+  const [showNewRun, setShowNewRun] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestedDatasetApplied = useRef(false);
+  const requestedRunApplied = useRef(false);
 
   const canTrain = user?.role === "reviewer" || user?.role === "admin";
   // CPU staging sets this build-time flag to "false" (no GPU, no training
@@ -146,7 +189,20 @@ export default function TrainingPage() {
     );
     setDatasets(ready);
     setRuns(allRuns);
-    setSelectedId((current) => current ?? allRuns[0]?.id ?? null);
+    // A transient backend restart may make the first load fail. Once both
+    // requests succeed, clear that stale connectivity error; otherwise the
+    // page keeps showing "Cannot reach backend" even though its data and form
+    // have already loaded successfully.
+    setError(null);
+    // `?run=` đến từ trang Evaluate: mở đúng lần train đang được đánh giá.
+    // Chỉ áp một lần, sau đó lựa chọn là của người dùng.
+    const requestedRunId = new URLSearchParams(window.location.search).get("run");
+    if (requestedRunId && !requestedRunApplied.current && allRuns.some((run) => run.id === requestedRunId)) {
+      requestedRunApplied.current = true;
+      setSelectedId(requestedRunId);
+    } else {
+      setSelectedId((current) => current ?? allRuns[0]?.id ?? null);
+    }
     const requestedDatasetId = new URLSearchParams(window.location.search).get("dataset");
     if (requestedDatasetId && !requestedDatasetApplied.current) {
       requestedDatasetApplied.current = true;
@@ -169,20 +225,10 @@ export default function TrainingPage() {
 
   useEffect(() => {
     if (!user) return;
-    // Only the flag and the entity, never the key — the endpoint returns none.
+    // Only the flag, never the key — the endpoint does not return one.
     void api
       .wandbSettings()
-      .then((settings) => {
-        setWandbConfigured(settings.configured);
-        // Entity đã khai một lần ở Settings; bắt gõ lại cho từng run là hỏi
-        // lại thứ hệ thống đã biết. Chỉ điền khi ô còn trống, để không giẫm
-        // lên giá trị người dùng vừa sửa riêng cho run này.
-        if (settings.entity) {
-          setForm((current) =>
-            current.wandb_entity ? current : { ...current, wandb_entity: settings.entity },
-          );
-        }
-      })
+      .then((settings) => setWandbConfigured(settings.configured))
       .catch(() => setWandbConfigured(null));
   }, [user]);
 
@@ -229,6 +275,211 @@ export default function TrainingPage() {
       window.clearInterval(timer);
     };
   }, [selected?.status, selectedId]);
+
+  /**
+   * Thanh trái: nút mở cấu hình ở trên, danh sách các lần train ở dưới.
+   *
+   * Cùng khuôn với trang Evaluate — hai trang này làm hai việc song song nên
+   * để chúng khác bố cục là bắt người dùng học lại từ đầu ở trang thứ hai.
+   */
+  const trainingRail = useMemo(
+    () => (
+      <div className="flex min-h-0 flex-col gap-3">
+        {canTrain && (
+          <Button
+            variant="primary"
+            className="w-full justify-center"
+            onClick={() => setShowNewRun((value) => !value)}
+          >
+            {showNewRun ? "Close setup" : "+ New run"}
+          </Button>
+        )}
+
+        {/* Cau hinh nam ngay trong thanh, khong phai mot the giua trang: no la
+            thu nguoi dung dung vao moi lan chay, nen de no dung yen mot cho.
+            Mot cot doc chu khong phai luoi bon cot -- cot nay chi rong 240px.
+            Nhung tham so hiem khi doi gap vao Advanced de phan tren con doc duoc. */}
+        {canTrain && showNewRun && (
+          datasets.length === 0 ? (
+            <p className="px-1 text-xs text-ink-400">
+              Export a RoboMimic dataset in the ready state first.
+            </p>
+          ) : (
+            <div className="space-y-2.5 border-b border-ink-700 pb-3">
+              <RailField label="Run name">
+                <Input className="px-2 py-1 text-xs" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              </RailField>
+              <RailField label="Dataset">
+                <Select className="px-2 py-1 text-xs" value={form.dataset_id} onChange={(event) => setForm({ ...form, dataset_id: event.target.value })}>
+                  {datasets.map((dataset) => (
+                    <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.num_episodes} ep</option>
+                  ))}
+                </Select>
+              </RailField>
+              <RailField label="Policy">
+                <Select className="px-2 py-1 text-xs" value={form.policy} onChange={(event) => setForm({ ...form, policy: event.target.value as "bc" | "bc-rnn" })}>
+                  <option value="bc">BC</option>
+                  <option value="bc-rnn">BC-RNN (LSTM)</option>
+                </Select>
+              </RailField>
+              <div className="grid grid-cols-2 gap-2">
+                <RailNumber label="Epochs" value={form.epochs} min={1} onChange={(epochs) => setForm({ ...form, epochs })} />
+                <RailNumber label="Batch size" value={form.batch_size} min={1} onChange={(batch_size) => setForm({ ...form, batch_size })} />
+                <RailNumber label="Save every" value={form.save_every_n_epochs ?? 1} min={1} onChange={(save_every_n_epochs) => setForm({ ...form, save_every_n_epochs })} />
+                <RailField label="Learning rate">
+                  <Input type="number" className="px-2 py-1 text-xs" min="0.0000001" step="0.00001" value={form.learning_rate} onChange={(event) => setForm({ ...form, learning_rate: Number(event.target.value) })} />
+                </RailField>
+              </div>
+
+              <AdvancedGroup title="Advanced">
+                <div className="w-full space-y-2.5">
+                  <RailField label="Device">
+                    <Select className="px-2 py-1 text-xs" value={form.device} onChange={(event) => setForm({ ...form, device: event.target.value as TrainingRequest["device"] })}>
+                      <option value="auto">Auto</option>
+                      <option value="cuda">CUDA GPU</option>
+                      <option value="cpu">CPU</option>
+                    </Select>
+                  </RailField>
+                  <div className="grid grid-cols-2 gap-2">
+                    <RailNumber label="Workers" value={form.num_workers} min={0} onChange={(num_workers) => setForm({ ...form, num_workers })} />
+                    <RailNumber label="Seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} />
+                  </div>
+                  {form.policy === "bc-rnn" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <RailNumber label="Seq length" value={form.sequence_length} min={1} onChange={(sequence_length) => setForm({ ...form, sequence_length })} />
+                      <RailNumber label="RNN hidden" value={form.rnn_hidden_dim} min={1} onChange={(rnn_hidden_dim) => setForm({ ...form, rnn_hidden_dim })} />
+                      <RailNumber label="RNN layers" value={form.rnn_layers} min={1} onChange={(rnn_layers) => setForm({ ...form, rnn_layers })} />
+                    </div>
+                  )}
+                  <RailField label="Observations">
+                    <Select className="px-2 py-1 text-xs" value={form.observation_profile} onChange={(event) => setForm({ ...form, observation_profile: event.target.value as TrainingRequest["observation_profile"] })}>
+                      <option value="minimal">Minimal task state</option>
+                      <option value="all">All observations</option>
+                    </Select>
+                  </RailField>
+                  <RailField label="Normalize">
+                    <Select className="px-2 py-1 text-xs" value={form.normalize_observations ? "yes" : "no"} onChange={(event) => setForm({ ...form, normalize_observations: event.target.value === "yes" })}>
+                      <option value="yes">Enabled</option>
+                      <option value="no">Disabled</option>
+                    </Select>
+                  </RailField>
+                  <RailField label="Training rollouts">
+                    <Select className="px-2 py-1 text-xs" value={form.rollout_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, rollout_enabled: event.target.value === "yes" })}>
+                      <option value="yes">Enabled</option>
+                      <option value="no">Disabled</option>
+                    </Select>
+                  </RailField>
+                  {form.rollout_enabled && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <RailNumber label="Every N" value={form.rollout_every_n_epochs} min={1} onChange={(rollout_every_n_epochs) => setForm({ ...form, rollout_every_n_epochs })} />
+                      <RailNumber label="Per check" value={form.rollout_episodes} min={1} onChange={(rollout_episodes) => setForm({ ...form, rollout_episodes })} />
+                      <RailNumber label="Horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} />
+                    </div>
+                  )}
+                  <RailField label="Weights &amp; Biases">
+                    <Select className="px-2 py-1 text-xs" value={form.wandb_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, wandb_enabled: event.target.value === "yes" })}>
+                      <option value="no">Disabled</option>
+                      <option value="yes">Track this run</option>
+                    </Select>
+                  </RailField>
+                  {form.wandb_enabled && (
+                    <>
+                      <RailField label="W&amp;B project">
+                        <Input className="px-2 py-1 text-xs" value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
+                      </RailField>
+                      <RailField label="W&amp;B entity">
+                        <Input className="px-2 py-1 text-xs" value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
+                      </RailField>
+                    </>
+                  )}
+                </div>
+              </AdvancedGroup>
+
+              {form.wandb_enabled && wandbConfigured === false && (
+                <p className="text-[11px] text-bad-400">
+                  No W&amp;B account connected — add a key in Settings or disable tracking.
+                </p>
+              )}
+
+              <Button
+                variant="primary"
+                className="w-full justify-center"
+                disabled={busy || !trainingEnabled || !form.dataset_id || !form.name.trim()}
+                onClick={() => void startTraining()}
+              >
+                {busy ? "Starting…" : "Start training"}
+              </Button>
+            </div>
+          )
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Task">
+            <Select
+              className="px-2 py-1 text-xs"
+              value={selectedTask}
+              onChange={(event) => selectTask(event.target.value)}
+            >
+              <option value="all">All tasks</option>
+              {taskNames.map((task) => <option key={task} value={task}>{task}</option>)}
+            </Select>
+          </Field>
+          <Field label="Show">
+            <Select
+              className="px-2 py-1 text-xs"
+              value={runView}
+              onChange={(event) => setRunView(event.target.value as typeof runView)}
+            >
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="all">All</option>
+            </Select>
+          </Field>
+        </div>
+
+        <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
+          <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            Training runs
+          </p>
+          {visibleRuns.length === 0 ? (
+            <p className="px-1 text-xs text-ink-400">No run matches the filter.</p>
+          ) : (
+            <ul className="space-y-1">
+              {visibleRuns.map((run) => (
+                <li key={run.id}>
+                  <button
+                    onClick={() => setSelectedId(run.id)}
+                    className={cx(
+                      "w-full rounded-lg border px-2.5 py-2 text-left transition-colors",
+                      selectedId === run.id
+                        ? "border-accent-500/60 bg-ink-850"
+                        : "border-transparent hover:bg-ink-850",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {preferences.pinned.includes(run.id) ? "★ " : ""}{run.name}
+                      </span>
+                      <Badge tone={TONES[run.status]}>{run.status}</Badge>
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-ink-400">
+                      {taskForRun(run)} · {String(run.config.policy).toUpperCase()} · {timeAgo(run.created_at)}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleRuns, selectedId, selectedTask, runView, taskNames, preferences, canTrain, showNewRun],
+  );
+
+  // Trên early return: hook phải chạy ở mọi lần render.
+  useLeftBar(trainingRail);
+  useRailBack(BACK_TO_SECTIONS);
 
   if (!user) return null;
 
@@ -338,154 +589,20 @@ export default function TrainingPage() {
   const progress = totalEpochs ? Math.min(100, (currentEpoch / totalEpochs) * 100) : 0;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="font-heading text-[22px] font-bold tracking-tight">Imitation learning</h1>
-        <p className="mt-0.5 text-sm text-ink-400">
-          Train BC or BC-RNN from an approved HDF5 dataset and follow the checkpoints.
-        </p>
-      </div>
+    <div className="space-y-3">
+      <PageHeader
+        eyebrow="Imitation learning lab"
+        title="Training"
+        description="Train and manage robot policies with real-world demonstrations."
+      />
 
       {error && <Alert>{error}</Alert>}
       {canTrain && !trainingEnabled && (
         <Alert tone="info">Training chưa khả dụng trong bản CPU staging. Bản demo này chưa chạy trên GPU và chưa cài dependency huấn luyện.</Alert>
       )}
 
-      {canTrain && (
-        <Card title="New training run" subtitle="The backend runs one job at a time so runs do not contend for the GPU.">
-          {datasets.length === 0 ? (
-            <Empty>Export at least one RoboMimic dataset in the ready state first.</Empty>
-          ) : (
-            <>
-              <div className="space-y-5">
-                <FieldGroup title="Run" columns={4}>
-                  <Field label="Run name">
-                    <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-                  </Field>
-                  <Field label="Dataset">
-                    <Select value={form.dataset_id} onChange={(event) => setForm({ ...form, dataset_id: event.target.value })}>
-                      {datasets.map((dataset) => (
-                        <option key={dataset.id} value={dataset.id}>
-                          {dataset.name} · {dataset.num_episodes} episodes
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Policy" hint="BC-RNN adds an LSTM over a window of steps">
-                    <Select value={form.policy} onChange={(event) => setForm({ ...form, policy: event.target.value as "bc" | "bc-rnn" })}>
-                      <option value="bc">BC</option>
-                      <option value="bc-rnn">BC-RNN (LSTM)</option>
-                    </Select>
-                  </Field>
-                  <Field label="Device" hint="Auto picks the GPU when one is available">
-                    <Select value={form.device} onChange={(event) => setForm({ ...form, device: event.target.value as TrainingRequest["device"] })}>
-                      <option value="auto">Auto</option>
-                      <option value="cuda">CUDA GPU</option>
-                      <option value="cpu">CPU</option>
-                    </Select>
-                  </Field>
-                </FieldGroup>
 
-                <FieldGroup title="Training" columns={4}>
-                  <NumberField label="Epochs" value={form.epochs} min={1} onChange={(epochs) => setForm({ ...form, epochs })} hint="One pass over the dataset each" />
-                  <NumberField label="Batch size" value={form.batch_size} min={1} onChange={(batch_size) => setForm({ ...form, batch_size })} hint="Larger uses more VRAM per step" />
-                  <Field label="Learning rate">
-                    <Input type="number" className="max-w-32" min="0.0000001" step="0.00001" value={form.learning_rate} onChange={(event) => setForm({ ...form, learning_rate: Number(event.target.value) })} />
-                  </Field>
-                  <NumberField label="Save every N epochs" value={form.save_every_n_epochs ?? 1} min={1} onChange={(save_every_n_epochs) => setForm({ ...form, save_every_n_epochs })} hint="Checkpoints you can evaluate later" />
-                  {form.policy === "bc-rnn" && (
-                    <>
-                      <NumberField label="Sequence length" value={form.sequence_length} min={1} onChange={(sequence_length) => setForm({ ...form, sequence_length })} hint="Steps the LSTM sees at once" />
-                      <NumberField label="RNN hidden dim" value={form.rnn_hidden_dim} min={1} onChange={(rnn_hidden_dim) => setForm({ ...form, rnn_hidden_dim })} />
-                      <NumberField label="RNN layers" value={form.rnn_layers} min={1} onChange={(rnn_layers) => setForm({ ...form, rnn_layers })} />
-                    </>
-                  )}
-                </FieldGroup>
-
-                <FieldGroup title="Weights &amp; Biases" columns={3}>
-                  <Field label="Tracking">
-                    <Select value={form.wandb_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, wandb_enabled: event.target.value === "yes" })}>
-                      <option value="no">Disabled</option>
-                      <option value="yes">Track this run</option>
-                    </Select>
-                  </Field>
-                  {form.wandb_enabled && (
-                    <>
-                      <Field label="Project">
-                        <Input value={form.wandb_project} onChange={(event) => setForm({ ...form, wandb_project: event.target.value })} />
-                      </Field>
-                      <Field label="Entity" hint="Filled in from Settings; change it to log this run elsewhere">
-                        <Input value={form.wandb_entity ?? ""} onChange={(event) => setForm({ ...form, wandb_entity: event.target.value || null })} />
-                      </Field>
-                    </>
-                  )}
-                  {form.wandb_enabled && wandbConfigured === false && (
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <Alert tone="bad">
-                        You have not connected a W&amp;B account, so this run would be
-                        refused. Add your API key in{" "}
-                        <Link href="/settings" className="underline">Settings</Link>, or set
-                        tracking back to Disabled.
-                      </Alert>
-                    </div>
-                  )}
-                </FieldGroup>
-
-                <AdvancedGroup title="Advanced" columns={4}>
-                  <NumberField label="Workers" value={form.num_workers} min={0} onChange={(num_workers) => setForm({ ...form, num_workers })} hint="Dataloader processes; 0 loads inline" />
-                  <NumberField label="Seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} hint="Same seed reproduces the run" />
-                  <Field label="Observation profile" hint="What the policy sees at each step">
-                    <Select value={form.observation_profile} onChange={(event) => setForm({ ...form, observation_profile: event.target.value as TrainingRequest["observation_profile"] })}>
-                      <option value="minimal">Minimal task state</option>
-                      <option value="all">All dataset observations</option>
-                    </Select>
-                  </Field>
-                  <Field label="Normalize observations">
-                    <Select value={form.normalize_observations ? "yes" : "no"} onChange={(event) => setForm({ ...form, normalize_observations: event.target.value === "yes" })}>
-                      <option value="yes">Enabled</option>
-                      <option value="no">Disabled (keeps validation loss)</option>
-                    </Select>
-                  </Field>
-                  <Field label="Training rollouts" hint="Try the policy in the simulator while training">
-                    <Select value={form.rollout_enabled ? "yes" : "no"} onChange={(event) => setForm({ ...form, rollout_enabled: event.target.value === "yes" })}>
-                      <option value="yes">Enabled</option>
-                      <option value="no">Disabled</option>
-                    </Select>
-                  </Field>
-                  {form.rollout_enabled && (
-                    <>
-                      <NumberField label="Rollout every N epochs" value={form.rollout_every_n_epochs} min={1} onChange={(rollout_every_n_epochs) => setForm({ ...form, rollout_every_n_epochs })} />
-                      <NumberField label="Rollouts per check" value={form.rollout_episodes} min={1} onChange={(rollout_episodes) => setForm({ ...form, rollout_episodes })} hint="Episodes run at each check" />
-                      <NumberField label="Training rollout horizon" value={form.rollout_horizon} min={1} onChange={(rollout_horizon) => setForm({ ...form, rollout_horizon })} hint="Steps before an episode is cut off" />
-                    </>
-                  )}
-                </AdvancedGroup>
-              </div>
-              {selectedTrainingDataset && (
-                <div className="mt-3">
-                  <Alert tone="info">
-                    Training from <strong>{selectedTrainingDataset.name}</strong> · {selectedTrainingDataset.num_episodes.toLocaleString()} episodes · {selectedTrainingDataset.num_frames.toLocaleString()} frames · {selectedTrainingDataset.tasks.join(", ") || "unknown task"}
-                  </Alert>
-                </div>
-              )}
-              {form.normalize_observations && (
-                <div className="mt-3"><Alert tone="info">RoboMimic does not support normalization together with a validation split. This run picks its checkpoint by simulator rollout success instead of validation loss.</Alert></div>
-              )}
-              {form.wandb_enabled && !form.wandb_entity && (
-                <div className="mt-3"><Alert tone="info">Set an entity in Settings, or enter one here, to enable the Open W&B button for this run.</Alert></div>
-              )}
-              <div className="mt-4 flex items-center gap-3">
-                <Button variant="primary" disabled={busy || !trainingEnabled || !form.dataset_id || !form.name.trim()} onClick={() => void startTraining()}>
-                  {busy ? "Starting…" : "Start training"}
-                </Button>
-                <span className="text-xs text-ink-400">Training keeps running on the backend if you switch tabs.</span>
-              </div>
-            </>
-          )}
-        </Card>
-      )}
-
-      <Card title="Training workspace" subtitle="Pick a task and a run; archived runs can be reopened at any time.">
+      <Card className="shadow-sm">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Task">
             <Select value={selectedTask} onChange={(event) => selectTask(event.target.value)}>
@@ -513,46 +630,24 @@ export default function TrainingPage() {
         </div>
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <Card title="Training runs">
-          {visibleRuns.length === 0 ? <Empty>No training run matches the filter.</Empty> : (
-            <ul className="space-y-2">
-              {visibleRuns.map((run) => (
-                <li key={run.id}>
-                  <button onClick={() => setSelectedId(run.id)} className={`w-full rounded-lg border px-3 py-2 text-left ${selectedId === run.id ? "border-accent-500/60 bg-ink-850" : "border-ink-700/50 hover:bg-ink-850"}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">{preferences.pinned.includes(run.id) ? "★ " : ""}{run.name}</span>
-                      <Badge tone={TONES[run.status]}>{run.status}</Badge>
-                    </div>
-                    <div className="mt-1 text-xs text-ink-400">{taskForRun(run)} · {String(run.config.policy).toUpperCase()} · {timeAgo(run.created_at)}</div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
+      {/* Danh sách run đã chuyển sang thanh trái, nên phần chi tiết chiếm trọn
+          chiều ngang thay vì nhường một cột cho thứ đã có chỗ khác. */}
+      <div>
         {!selected ? <Empty>Select a training run to see its details.</Empty> : (
-          <div className="space-y-5">
-            <Card title={selected.name} subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`} actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge>{selectedWandbUrl && <Button variant="success" onClick={() => window.open(selectedWandbUrl, "_blank", "noopener,noreferrer")}>Open W&B</Button>}<Button variant="subtle" onClick={() => togglePinned(selected.id)}>{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}>{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}>Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}>Delete</Button>}</div>}>
-              <div className={selected.gpu_peak_gb == null ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
-                <Stat label="Epoch" value={`${currentEpoch} / ${totalEpochs}`} />
-                <Stat label="Train loss" value={selected.train_loss == null ? "—" : selected.train_loss.toFixed(6)} />
-                <Stat label="Validation loss" value={selected.validation_loss == null ? "—" : selected.validation_loss.toFixed(6)} />
-                {selected.gpu_peak_gb != null && (
-                  <Stat
-                    label="GPU memory"
-                    value={`${selected.gpu_peak_gb.toFixed(1)} GB`}
-                    hint={
-                      selected.gpu_total_gb
-                        ? `${Math.round((100 * selected.gpu_peak_gb) / selected.gpu_total_gb)}% of ${selected.gpu_total_gb.toFixed(0)} GB · batch ${selected.config.batch_size}${selected.gpu_name ? ` · ${selected.gpu_name}` : ""}`
-                        : `batch ${selected.config.batch_size}`
-                    }
-                  />
-                )}
+          <div className="space-y-3">
+            <Card
+              title={<span className="flex items-center gap-2"><TrainingArmIcon /><span>{selected.name}</span></span>}
+              subtitle={`${taskForRun(selected)} · ${String(selected.config.policy).toUpperCase()} · ${totalEpochs} epochs`}
+              actions={<div className="flex flex-wrap gap-2"><Badge tone={TONES[selected.status]}>{selected.status}</Badge>{selectedWandbUrl && <Button variant="subtle" onClick={() => window.open(selectedWandbUrl, "_blank", "noopener,noreferrer")}><ActionIcon kind="external" />Open W&B</Button>}<Button variant="subtle" onClick={() => togglePinned(selected.id)}><ActionIcon kind="pin" />{preferences.pinned.includes(selected.id) ? "Unpin" : "Pin"}</Button><Button variant="subtle" onClick={() => toggleArchived(selected.id)}><ActionIcon kind="archive" />{preferences.archived.includes(selected.id) ? "Restore" : "Archive"}</Button>{canTrain && (selected.status === "running" || selected.status === "pending") && <Button variant="danger" disabled={busy} onClick={() => void cancelTraining()}><ActionIcon kind="cancel" />Cancel</Button>}{user.role === "admin" && selected.status !== "running" && selected.status !== "pending" && <Button variant="danger" disabled={busy} onClick={() => void deleteTraining()}><ActionIcon kind="cancel" />Delete</Button>}</div>}
+            >
+              <div className="grid gap-2 sm:grid-cols-3">
+                <TrainingMetric label="Epoch" value={`${currentEpoch} / ${totalEpochs}`} />
+                <TrainingMetric label="Train loss" value={selected.train_loss == null ? "—" : selected.train_loss.toFixed(6)} />
+                <TrainingMetric label="Validation loss" value={selected.validation_loss == null ? "—" : selected.validation_loss.toFixed(6)} />
               </div>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink-800"><div className="h-full bg-accent-500 transition-all" style={{ width: `${progress}%` }} /></div>
               <div className="mt-1 text-right text-xs tabular text-ink-400">{progress.toFixed(1)}%</div>
+              <TrainingCurve checkpoints={selected.checkpoints ?? []} trainLoss={selected.train_loss} validationLoss={selected.validation_loss} />
               {selected.error && <div className="mt-3"><Alert><pre className="whitespace-pre-wrap text-xs">{selected.error}</pre></Alert></div>}
             </Card>
 
@@ -560,17 +655,15 @@ export default function TrainingPage() {
               {!selected.checkpoints?.length ? <Empty>No checkpoint yet.</Empty> : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">Created</th><th className="px-2 py-2">Tags</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
+                    <thead className="text-xs uppercase text-ink-400"><tr><th className="px-2 py-2">Epoch</th><th className="px-2 py-2">Validation loss</th><th className="px-2 py-2">Size</th><th className="px-2 py-2">Created</th><th className="px-2 py-2">File</th><th className="px-2 py-2">Tags</th><th className="px-2 py-2 text-right">Actions</th></tr></thead>
                     <tbody className="divide-y divide-ink-700/60">
                       {compactCheckpoints.map((checkpoint) => (
                         <tr key={checkpoint.id}>
-                          {/* Đường dẫn file nằm ở tooltip chứ không còn cột riêng:
-                              sau khi bỏ thư mục và đuôi validation loss, tên file
-                              chỉ còn nhắc lại số epoch của chính cột này. */}
-                          <td className="px-2 py-2 tabular" title={checkpoint.filename}>{checkpoint.epoch}</td>
+                          <td className="px-2 py-2 tabular">{checkpoint.epoch}</td>
                           <td className="px-2 py-2 tabular">{checkpoint.validation_loss == null ? "—" : checkpoint.validation_loss.toFixed(8)}</td>
                           <td className="px-2 py-2">{bytes(checkpoint.size_bytes)}</td>
                           <td className="px-2 py-2 text-xs text-ink-400">{timeAgo(checkpoint.created_at)}</td>
+                          <td className="max-w-72 truncate px-2 py-2 font-mono text-xs text-ink-300" title={checkpoint.filename}>{checkpoint.filename}</td>
                           <td className="px-2 py-2"><div className="flex gap-1">{checkpoint.is_best_validation && <Badge tone="ok">best validation</Badge>}{checkpoint.is_latest && <Badge tone="info">latest</Badge>}</div></td>
                           <td className="px-2 py-2"><div className="flex justify-end gap-2">
                             <a href={api.checkpointDownloadUrl(selected.id, checkpoint.id)}><Button variant="subtle">Download</Button></a>
@@ -600,8 +693,64 @@ export default function TrainingPage() {
   );
 }
 
-function NumberField({ label, value, min, onChange, hint }: { label: string; value: number; min: number; onChange: (value: number) => void; hint?: string }) {
-  // max-w-32: các ô này chứa số hai tới bốn chữ số, để rộng cả cột thì mắt phải
-  // đi hết chiều ngang mới tới ô kế tiếp.
-  return <Field label={label} hint={hint}><Input type="number" className="max-w-32" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+function NumberField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (value: number) => void }) {
+  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+}
+
+function TrainingMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,.03)]">
+      <p className="text-[10px] font-semibold text-ink-400">{label}</p>
+      <p className="mt-1.5 font-heading text-xl font-bold tabular-nums text-ink-100">{value}</p>
+    </div>
+  );
+}
+
+function TrainingArmIcon() {
+  return (
+    <svg className="h-8 w-8 shrink-0 text-accent-500" viewBox="0 0 36 36" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 30h14M7 30l2-7h7l2 7M10 23v-8l5-5 5 3 4 8" />
+      <circle cx="10" cy="15" r="2.5" /><circle cx="15" cy="10" r="2.5" /><circle cx="20" cy="13" r="2.5" /><circle cx="24" cy="21" r="2.5" />
+      <path d="m26 20 4-2 2 4-4 2M27 24l2 4M31 22l2 4" />
+    </svg>
+  );
+}
+
+function FunnelIcon() {
+  return <svg className="h-4 w-4 text-ink-400" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 4h14l-5.5 6v4.5l-3 1.5v-6L3 4Z" /></svg>;
+}
+
+function ActionIcon({ kind }: { kind: "external" | "pin" | "archive" | "cancel" }) {
+  const path = kind === "external"
+    ? <><path d="M11 4h5v5M16 4l-7 7"/><path d="M14 11v5H4V6h5"/></>
+    : kind === "pin"
+      ? <><path d="m7 3 6 6M6 8l6 6M9 5l4-2 2 2-2 4M6 11l-3 6 6-3"/></>
+      : kind === "archive"
+        ? <><rect x="3" y="5" width="14" height="12" rx="2"/><path d="M2 5h16V2H2v3M8 9h4"/></>
+        : <><circle cx="10" cy="10" r="7"/><path d="m8 8 4 4M12 8l-4 4"/></>;
+  return <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{path}</svg>;
+}
+
+function TrainingCurve({ checkpoints, trainLoss, validationLoss }: { checkpoints: NonNullable<TrainingRun["checkpoints"]>; trainLoss?: number | null; validationLoss?: number | null }) {
+  const values = checkpoints
+    .filter((item) => item.validation_loss != null)
+    .map((item) => ({ epoch: item.epoch, value: item.validation_loss as number }))
+    .sort((a, b) => a.epoch - b.epoch);
+  if (values.length < 2) return null;
+  const width = 900;
+  const height = 150;
+  const maxEpoch = Math.max(...values.map((item) => item.epoch), 1);
+  const maxLoss = Math.max(...values.map((item) => item.value), validationLoss ?? 0, trainLoss ?? 0, 0.000001);
+  const points = values.map((item) => `${(item.epoch / maxEpoch) * width},${height - (item.value / maxLoss) * (height - 18)}`).join(" ");
+  return (
+    <div className="mt-4 rounded-xl border border-ink-700/80 bg-ink-850/55 p-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[11px]"><span className="font-semibold uppercase tracking-wider text-ink-400">Validation loss history</span><span className="flex items-center gap-1.5 text-accent-500"><i className="h-0.5 w-5 bg-accent-500" /> checkpoint loss</span></div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible" preserveAspectRatio="none" role="img" aria-label="Validation loss across checkpoints">
+        {[0.25, 0.5, 0.75].map((ratio) => <line key={ratio} x1="0" x2={width} y1={height * ratio} y2={height * ratio} stroke="rgb(203 213 225 / .7)" strokeDasharray="4 5" />)}
+        <polyline points={points} fill="none" stroke="#2563eb" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+        {values.map((item) => <circle key={item.epoch} cx={(item.epoch / maxEpoch) * width} cy={height - (item.value / maxLoss) * (height - 18)} r="4" fill="#fff" stroke="#2563eb" strokeWidth="2" vectorEffect="non-scaling-stroke" />)}
+      </svg>
+      <div className="flex justify-between text-[10px] tabular text-ink-400"><span>Epoch {values[0].epoch}</span><span>Epoch {maxEpoch}</span></div>
+    </div>
+  );
 }

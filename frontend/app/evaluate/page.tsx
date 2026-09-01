@@ -1,8 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLeftBar, useRailBack } from "@/components/AppShell";
 import { useAuth } from "@/components/AuthProvider";
-import { Alert, Badge, Button, Card, Empty, Field, FieldGroup, Input, Select, Stat } from "@/components/ui";
+import { PageHeader } from "@/components/PageHeader";
+import { Alert, Badge, Button, Card, cx, Empty, Field, Input, Select, Stat } from "@/components/ui";
 import {
   api,
   mediaUrl,
@@ -13,8 +16,10 @@ import {
   type TrainingCheckpoint,
   type TrainingRun,
 } from "@/lib/api";
-import { EVALUATION_ENABLED } from "@/lib/features";
 import { percent, timeAgo } from "@/lib/format";
+
+/** Ngoai component: object moi moi lan render se khien hook chay lai mai. */
+const BACK_TO_SECTIONS = { label: "All sections", href: "/" };
 
 const TONES: Record<RunStatus, "ok" | "warn" | "bad" | "info" | "neutral"> = {
   succeeded: "ok",
@@ -31,10 +36,36 @@ const INITIAL_FORM: EvaluationRequest = {
   horizon: 250,
   seed: 5000,
   record_videos: 3,
+  success_hold_steps: 10,
 };
 
 type DetailTab = "summary" | "seeds" | "videos" | "log";
 type VideoModalState = { evaluation: EvaluationRun; index: number };
+
+/** Ô số cho thanh trái: hẹp và không chú thích, vì cột chỉ rộng 240px. */
+function RailNumber({
+  label,
+  value,
+  min,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <Field label={label}>
+      <Input
+        type="number"
+        className="px-2 py-1 text-xs"
+        min={min}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </Field>
+  );
+}
 
 function preferredCheckpoint(checkpoints: TrainingCheckpoint[]) {
   return checkpoints.find((item) => item.is_best_validation)
@@ -44,6 +75,7 @@ function preferredCheckpoint(checkpoints: TrainingCheckpoint[]) {
 
 export default function EvaluatePage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [runs, setRuns] = useState<TrainingRun[]>([]);
   const [datasets, setDatasets] = useState<DatasetExport[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
@@ -109,6 +141,38 @@ export default function EvaluatePage() {
     void api.evaluationLog(expandedId).then(setLog).catch(() => setLog(""));
   }, [detailTab, expandedId]);
 
+  /**
+   * Nhận checkpoint từ trang Training qua `?run=…&checkpoint=…`.
+   *
+   * Người dùng đang xem một lần train, bấm Evaluate ở đúng checkpoint đó —
+   * sang đây mà phải chọn lại run rồi chọn lại checkpoint là bắt làm lại thứ
+   * họ vừa chỉ. Chạy một lần cho mỗi tham số, sau đó form là của người dùng.
+   */
+  useEffect(() => {
+    // `window.location.search` chứ không phải `useSearchParams`: hook đó buộc
+    // trang phải nằm trong một <Suspense>, và thiếu nó thì `next build` hỏng ở
+    // bước prerender. Trang Training đọc query đúng theo cách này.
+    const query = new URLSearchParams(window.location.search);
+    const runId = query.get("run");
+    const checkpointId = query.get("checkpoint");
+    if (!runId || !eligibleRuns.some((run) => run.id === runId)) return;
+    setForm((current) =>
+      current.training_run_id === runId && current.checkpoint_id === checkpointId
+        ? current
+        : {
+            ...current,
+            training_run_id: runId,
+            checkpoint_id:
+              checkpointId
+              ?? preferredCheckpoint(
+                eligibleRuns.find((run) => run.id === runId)?.checkpoints ?? [],
+              )?.id
+              ?? "",
+          },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligibleRuns.length]);
+
   useEffect(() => {
     if (!videoModal) return;
     const close = (event: KeyboardEvent) => {
@@ -117,6 +181,111 @@ export default function EvaluatePage() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [videoModal]);
+
+  const invalidVideos = form.record_videos > form.num_rollouts;
+
+  /**
+   * Thanh trái: cấu hình ở trên, lịch sử ở dưới.
+   *
+   * Cấu hình là thứ người dùng đụng vào mỗi lần chạy, nên nó đứng yên một chỗ
+   * thay vì nằm trong một thẻ bị đẩy xuống khi kết quả dài ra. Phần dưới liệt
+   * kê các lần đã chạy của chính run đang chọn — bấm một dòng là mở chi tiết
+   * bên phải, không phải cuộn đi tìm.
+   */
+  const evaluateRail = useMemo(
+    () => (
+      <div className="flex min-h-0 flex-col gap-3">
+        <div className="space-y-2.5">
+          <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            Configuration
+          </p>
+          <Field label="Training run">
+            <Select
+              className="px-2 py-1 text-xs"
+              value={form.training_run_id}
+              onChange={(event) => selectRun(event.target.value)}
+            >
+              {eligibleRuns.map((run) => <option key={run.id} value={run.id}>{run.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Checkpoint">
+            <Select
+              className="px-2 py-1 text-xs"
+              value={form.checkpoint_id}
+              onChange={(event) => setForm({ ...form, checkpoint_id: event.target.value })}
+            >
+              {checkpoints.map((checkpoint) => (
+                <option key={checkpoint.id} value={checkpoint.id}>
+                  epoch {checkpoint.epoch}{checkpoint.is_best_validation ? " · best" : ""}{checkpoint.is_latest ? " · latest" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <RailNumber label="Rollouts" value={form.num_rollouts} min={1} onChange={(num_rollouts) => setForm({ ...form, num_rollouts })} />
+            <RailNumber label="Horizon" value={form.horizon ?? 250} min={1} onChange={(horizon) => setForm({ ...form, horizon })} />
+            <RailNumber label="Start seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} />
+            <RailNumber label="Videos" value={form.record_videos} min={0} onChange={(record_videos) => setForm({ ...form, record_videos })} />
+            <RailNumber label="Hold steps" value={form.success_hold_steps} min={1} onChange={(success_hold_steps) => setForm({ ...form, success_hold_steps })} />
+          </div>
+          <Button
+            variant="primary"
+            className="w-full justify-center"
+            disabled={busy || !form.checkpoint_id || invalidVideos}
+            onClick={() => void startEvaluation()}
+          >
+            {busy ? "Starting…" : "Run evaluation"}
+          </Button>
+          {invalidVideos && <p className="text-[11px] text-bad-400">Videos cannot exceed rollouts.</p>}
+        </div>
+
+        <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
+          <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            Evaluations
+          </p>
+          {selectedEvaluations.length === 0 ? (
+            <p className="px-1 text-xs text-ink-400">No evaluation for this run yet.</p>
+          ) : (
+            <ul className="space-y-1">
+              {selectedEvaluations.map((evaluation) => {
+                const checkpoint = checkpoints.find((item) => item.id === evaluation.checkpoint_id);
+                return (
+                  <li key={evaluation.id}>
+                    <button
+                      onClick={() => setExpandedId(expandedId === evaluation.id ? null : evaluation.id)}
+                      className={cx(
+                        "w-full rounded-lg border px-2.5 py-2 text-left transition-colors",
+                        expandedId === evaluation.id
+                          ? "border-accent-500/60 bg-ink-850"
+                          : "border-transparent hover:bg-ink-850",
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {checkpoint ? `Epoch ${checkpoint.epoch}` : evaluation.checkpoint_id}
+                        </span>
+                        <Badge tone={TONES[evaluation.status]}>{evaluation.status}</Badge>
+                      </div>
+                      <div className="mt-0.5 truncate text-[11px] text-ink-400">
+                        {evaluation.success_rate != null ? `${percent(evaluation.success_rate, 0)} · ` : ""}
+                        {timeAgo(evaluation.created_at)}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [form, eligibleRuns, checkpoints, selectedEvaluations, expandedId, busy, invalidVideos],
+  );
+
+  // Trên các early return: hook phải chạy ở mọi lần render.
+  useLeftBar(evaluateRail);
+  useRailBack(BACK_TO_SECTIONS);
 
   if (!user) return null;
   if (user.role === "operator") return <Alert tone="info">Evaluation is available to reviewers and administrators.</Alert>;
@@ -194,69 +363,51 @@ export default function EvaluatePage() {
     setExpandedId(id);
   }
 
-  const invalidVideos = form.record_videos > form.num_rollouts;
+  const comparisonRows = latestByCheckpoint(selectedEvaluations).filter((item) => item.status === "succeeded");
+  const summaryEvaluation = [...comparisonRows]
+    .filter((item) => item.success_rate != null)
+    .sort((a, b) => (b.success_rate ?? 0) - (a.success_rate ?? 0))[0] ?? null;
+  const summarySuccesses = summaryEvaluation?.episodes.filter((episode) => episode.success).length ?? 0;
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="font-heading text-[22px] font-bold tracking-tight">Evaluate checkpoints</h1>
-        <p className="mt-0.5 text-sm text-ink-400">Run simulator rollouts and compare checkpoint success rates.</p>
-      </div>
+      {/* Đường về đúng lần train đang đánh giá. Kết quả đánh giá gần như luôn
+          dẫn tới một câu hỏi về chính lần train đó — loss, cấu hình, các
+          checkpoint khác — nên bắt người dùng sang Training rồi tìm lại đúng
+          run vừa xem là bắt đi vòng. */}
+      <PageHeader
+        eyebrow="Policy validation lab"
+        title="Evaluate checkpoints"
+        description="Run simulator rollouts and compare checkpoint success rates."
+        actions={
+          selectedRun ? (
+            <Button
+              variant="subtle"
+              onClick={() => router.push(`/training?run=${encodeURIComponent(selectedRun.id)}`)}
+            >
+              Open training run
+            </Button>
+          ) : undefined
+        }
+      />
 
       {error && <Alert>{error}</Alert>}
 
-      <Card title="New evaluation" subtitle="Selecting a checkpoint only prepares this form; evaluation starts after confirmation.">
-        {eligibleRuns.length === 0 ? <Empty>Complete a training run with at least one checkpoint first.</Empty> : (
-          <>
-            <div className="space-y-5">
-              <FieldGroup title="What to evaluate" columns={3}>
-                <Field label="Training run">
-                  <Select value={form.training_run_id} onChange={(event) => selectRun(event.target.value)}>
-                    {eligibleRuns.map((run) => <option key={run.id} value={run.id}>{run.name}</option>)}
-                  </Select>
-                </Field>
-                <Field label="Checkpoint">
-                  <Select value={form.checkpoint_id} onChange={(event) => setForm({ ...form, checkpoint_id: event.target.value })}>
-                    {checkpoints.map((checkpoint) => (
-                      <option key={checkpoint.id} value={checkpoint.id}>
-                        epoch {checkpoint.epoch}{checkpoint.is_best_validation ? " · best validation" : ""}{checkpoint.is_latest ? " · latest" : ""}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Task" hint="Comes from the dataset the run trained on">
-                  <Input readOnly value={selectedDataset?.tasks.join(", ") || "Unknown task"} />
-                </Field>
-              </FieldGroup>
+      {eligibleRuns.length === 0 && (
+        <Empty>Complete a training run with at least one checkpoint first.</Empty>
+      )}
 
-              <FieldGroup title="Rollouts" columns={4}>
-                <NumberField label="Rollouts" value={form.num_rollouts} min={1} onChange={(num_rollouts) => setForm({ ...form, num_rollouts })} hint="More episodes, steadier success rate" />
-                <NumberField label="Horizon" value={form.horizon ?? 250} min={1} onChange={(horizon) => setForm({ ...form, horizon })} hint="Steps before an episode is cut off" />
-                <NumberField label="Start seed" value={form.seed} min={0} onChange={(seed) => setForm({ ...form, seed })} hint="Same seeds compare checkpoints fairly" />
-                <NumberField label="Videos" value={form.record_videos} min={0} onChange={(record_videos) => setForm({ ...form, record_videos })} hint="Recorded from the first episodes" />
-              </FieldGroup>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button variant="primary" disabled={!EVALUATION_ENABLED || busy || !form.checkpoint_id || invalidVideos} onClick={() => void startEvaluation()}>
-                {busy ? "Starting…" : "Run evaluation"}
-              </Button>
-              <span className="text-xs text-ink-400">Seeds {form.seed}–{form.seed + form.num_rollouts - 1}</span>
-            </div>
-            {!EVALUATION_ENABLED && (
-              <div className="mt-3">
-                <Alert tone="info">
-                  This deployment does not run evaluations. Existing results stay
-                  readable below.
-                </Alert>
-              </div>
-            )}
-            {invalidVideos && <div className="mt-3"><Alert>The video count cannot exceed the rollout count.</Alert></div>}
-          </>
-        )}
-      </Card>
+      {summaryEvaluation && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Success rate" value={percent(summaryEvaluation.success_rate ?? 0, 0)} hint={`${summarySuccesses} / ${summaryEvaluation.episodes.length} rollouts succeeded`} tone="ok" />
+        <Stat label="Mean steps" value={summaryEvaluation.mean_episode_length?.toFixed(1) ?? "—"} hint="Completed rollout average" />
+        <Stat label="Rollouts" value={summaryEvaluation.episodes.length} hint={`${summaryEvaluation.num_episodes} requested`} />
+        <SuccessDonut successes={summarySuccesses} total={summaryEvaluation.episodes.length} />
+      </div>}
 
       <Card title="Checkpoint comparison" subtitle="Latest completed result for each checkpoint in this training run.">
         {selectedEvaluations.length === 0 ? <Empty>No evaluation results for this training run yet.</Empty> : (
+          <div className="grid gap-5 xl:grid-cols-[1.05fr_.95fr]">
+            <CheckpointChart evaluations={latestByCheckpoint(selectedEvaluations)} checkpoints={checkpoints} />
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="text-left text-xs uppercase text-ink-400"><tr><th className="pb-2">Checkpoint</th><th className="pb-2">Status</th><th className="pb-2 text-right">Success rate</th><th className="pb-2 text-right">Rollouts</th><th className="pb-2 text-right">Mean steps</th><th className="pb-2 text-right">Created</th></tr></thead>
@@ -265,7 +416,7 @@ export default function EvaluatePage() {
                 return <tr key={evaluation.id} className="border-t border-ink-700/60"><td className="py-2">{checkpoint ? `Epoch ${checkpoint.epoch}` : evaluation.checkpoint_id}</td><td className="py-2"><Badge tone={TONES[evaluation.status]}>{evaluation.status}</Badge></td><td className="py-2 text-right">{evaluation.success_rate == null ? "—" : percent(evaluation.success_rate, 1)}</td><td className="py-2 text-right">{evaluation.episodes.length}/{evaluation.num_episodes}</td><td className="py-2 text-right">{evaluation.mean_episode_length?.toFixed(1) ?? "—"}</td><td className="py-2 text-right text-xs text-ink-400">{timeAgo(evaluation.created_at)}</td></tr>;
               })}</tbody>
             </table>
-          </div>
+          </div></div>
         )}
       </Card>
 
@@ -321,10 +472,43 @@ function latestByCheckpoint(items: EvaluationRun[]) {
   return Array.from(latest.values());
 }
 
-function NumberField({ label, value, min, onChange, hint }: { label: string; value: number; min: number; onChange: (value: number) => void; hint?: string }) {
-  // max-w-32 như bên training: các ô này chứa số ngắn, để rộng cả cột thì mắt
-  // phải đi hết chiều ngang mới tới ô kế tiếp.
-  return <Field label={label} hint={hint}><Input type="number" className="max-w-32" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+function NumberField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (value: number) => void }) {
+  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} /></Field>;
+}
+
+function SuccessDonut({ successes, total }: { successes: number; total: number }) {
+  const rate = total ? Math.round((successes / total) * 100) : 0;
+  return <div className="flex items-center justify-center gap-5 rounded-lg border border-ink-700/90 bg-ink-900 px-4 py-3 shadow-[0_4px_14px_rgba(15,23,42,0.035)]">
+    <div className="grid h-20 w-20 shrink-0 place-items-center rounded-full p-2" style={{ background: `conic-gradient(#059669 ${rate}%, #ef4444 0)` }}><div className="grid h-full w-full place-items-center rounded-full bg-white font-heading text-lg font-bold text-ok-600">{rate}%</div></div>
+    <div className="min-w-24 space-y-2 text-xs"><div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2"><i className="h-2 w-2 rounded-full bg-ok-600" />Success</span><strong>{successes}</strong></div><div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2"><i className="h-2 w-2 rounded-full bg-bad-600" />Fail</span><strong>{Math.max(0, total - successes)}</strong></div></div>
+  </div>;
+}
+
+function CheckpointChart({ evaluations, checkpoints }: { evaluations: EvaluationRun[]; checkpoints: TrainingCheckpoint[] }) {
+  const rows = evaluations
+    .filter((item) => item.status === "succeeded" && item.success_rate != null)
+    .map((item) => ({
+      epoch: checkpoints.find((checkpoint) => checkpoint.id === item.checkpoint_id)?.epoch ?? 0,
+      success: (item.success_rate ?? 0) * 100,
+      steps: item.mean_episode_length ?? 0,
+    }))
+    .sort((a, b) => a.epoch - b.epoch);
+  if (!rows.length) return <Empty>No completed checkpoint data to chart.</Empty>;
+  const width = 520;
+  const height = 190;
+  const maxSteps = Math.max(1, ...rows.map((item) => item.steps));
+  const slot = width / rows.length;
+  const linePoints = rows.map((item, index) => `${slot * index + slot / 2},${height - 28 - (item.steps / maxSteps) * 120}`).join(" ");
+  return <div className="rounded-lg border border-ink-700/70 bg-ink-850/45 p-3">
+    <div className="mb-2 flex gap-4 text-[10px] text-ink-400"><span><i className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm bg-accent-500/70" />Success rate (%)</span><span><i className="mr-1.5 inline-block h-0.5 w-4 align-middle bg-accent-600" />Mean steps</span></div>
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-48 w-full" role="img" aria-label="Checkpoint success rate and mean steps comparison">
+      {[0, 25, 50, 75, 100].map((tick) => <g key={tick}><line x1="32" x2={width} y1={height - 28 - tick * 1.2} y2={height - 28 - tick * 1.2} stroke="rgb(203 213 225 / .65)" strokeDasharray="3 4"/><text x="26" y={height - 24 - tick * 1.2} textAnchor="end" fontSize="9" fill="#64748b">{tick}</text></g>)}
+      {rows.map((item, index) => { const barHeight = item.success * 1.2; const x = slot * index + slot * .28; return <g key={`${item.epoch}-${index}`}><rect x={x} y={height - 28 - barHeight} width={slot * .44} height={barHeight} rx="4" fill="#60a5fa"/><text x={x + slot * .22} y={height - 34 - barHeight} textAnchor="middle" fontSize="9" fontWeight="600" fill="#334155">{item.success.toFixed(0)}%</text><text x={x + slot * .22} y={height - 10} textAnchor="middle" fontSize="9" fill="#64748b">{item.epoch}</text></g>; })}
+      <polyline points={linePoints} fill="none" stroke="#1e40af" strokeWidth="2"/>
+      {rows.map((item, index) => <circle key={index} cx={slot * index + slot / 2} cy={height - 28 - (item.steps / maxSteps) * 120} r="3.5" fill="#1e40af"/>)}
+    </svg>
+    <div className="text-center text-[10px] text-ink-400">Checkpoint epoch</div>
+  </div>;
 }
 
 function DetailTabs({ value, onChange }: { value: DetailTab; onChange: (value: DetailTab) => void }) {
@@ -354,13 +538,13 @@ function EvaluationSummary({ evaluation }: { evaluation: EvaluationRun }) {
 
 function SeedResults({ evaluation }: { evaluation: EvaluationRun }) {
   if (evaluation.episodes.length === 0) return <Empty>No completed rollouts yet.</Empty>;
-  return <div className="flex max-h-72 flex-wrap gap-1.5 overflow-auto pr-1">{evaluation.episodes.map((episode) => <span key={episode.seed} title={`${episode.steps} steps`} className={`rounded px-2 py-1 text-[11px] ${episode.success ? "bg-ok-600/20 text-ok-400" : "bg-bad-600/20 text-bad-400"}`}>{episode.seed}: {episode.success ? "success" : "fail"}</span>)}</div>;
+  return <div className="flex max-h-72 flex-wrap gap-1.5 overflow-auto pr-1">{evaluation.episodes.map((episode) => <span key={episode.seed} title={`${episode.steps} steps`} className={`rounded px-2 py-1 text-[11px] ${episode.success ? "bg-ok-600/20 text-ok-400" : "bg-bad-600/20 text-bad-400"}`}>{episode.seed}: {episode.success ? "success" : "fail"}{episode.held_steps != null && episode.required_hold_steps != null ? ` · held ${episode.held_steps}/${episode.required_hold_steps}` : " · legacy rule"}</span>)}</div>;
 }
 
 function EvaluationVideos({ evaluation, onOpen }: { evaluation: EvaluationRun; onOpen: (index: number) => void }) {
   const recorded = evaluation.episodes.filter((episode) => episode.video);
   if (recorded.length === 0) return <Empty>No videos were recorded for this evaluation.</Empty>;
-  return <div className="flex gap-3 overflow-x-auto pb-2">{recorded.map((episode, index) => <button type="button" key={episode.seed} onClick={() => onOpen(index)} className="w-56 shrink-0 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 text-left transition hover:border-accent-500/70"><video className="pointer-events-none h-32 w-full bg-black object-cover" muted preload="metadata" src={mediaUrl(`/training/evaluations/${evaluation.id}/videos/${episode.video}`)} /><div className="flex items-center justify-between gap-2 px-2.5 py-2"><span className="text-xs font-medium">Seed {episode.seed}</span><Badge tone={episode.success ? "ok" : "bad"}>{episode.success ? "success" : "fail"}</Badge></div><div className="px-2.5 pb-2 text-[11px] text-ink-400">{episode.steps} steps · click to play</div></button>)}</div>;
+  return <div className="flex gap-3 overflow-x-auto pb-2">{recorded.map((episode, index) => <button type="button" key={episode.seed} onClick={() => onOpen(index)} className="w-56 shrink-0 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 text-left transition hover:border-accent-500/70"><video className="pointer-events-none h-32 w-full bg-black object-cover" muted preload="metadata" src={mediaUrl(`/training/evaluations/${evaluation.id}/videos/${episode.video}`)} /><div className="flex items-center justify-between gap-2 px-2.5 py-2"><span className="text-xs font-medium">Seed {episode.seed}</span><Badge tone={episode.success ? "ok" : "bad"}>{episode.success ? "success" : "fail"}</Badge></div><div className="px-2.5 pb-2 text-[11px] text-ink-400">{episode.steps} steps{episode.held_steps != null && episode.required_hold_steps != null ? ` · held ${episode.held_steps}/${episode.required_hold_steps}` : ""} · click to play</div></button>)}</div>;
 }
 
 function VideoModal({ state, onChange, onClose }: { state: VideoModalState; onChange: (state: VideoModalState) => void; onClose: () => void }) {

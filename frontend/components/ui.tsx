@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -22,12 +22,12 @@ export function Card({
   return (
     <section
       className={cx(
-        "slide-up rounded-2xl border border-ink-700 bg-ink-900 shadow-[0_4px_14px_rgba(15,23,42,0.05),0_1px_3px_rgba(15,23,42,0.06)] transition-shadow duration-200 hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]",
+        "slide-up overflow-hidden rounded-xl border border-ink-700/90 bg-ink-900 shadow-[0_5px_18px_rgba(15,23,42,0.04),0_1px_2px_rgba(15,23,42,0.04)] transition-[box-shadow,border-color] duration-200 hover:border-ink-600 hover:shadow-[0_9px_24px_rgba(15,23,42,0.06)]",
         className,
       )}
     >
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 px-5 py-4">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 px-4 py-3">
           <div>
             {title && (
               <h2 className="font-heading text-[15px] font-bold tracking-tight">{title}</h2>
@@ -37,7 +37,7 @@ export function Card({
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className="p-5">{children}</div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
@@ -64,7 +64,7 @@ export function Button({
     <button
       {...props}
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold",
+        "inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold",
         "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         BUTTON_STYLES[variant],
@@ -105,11 +105,15 @@ export function Stat({
   value,
   hint,
   tone,
+  icon,
+  sparkline = true,
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
   tone?: "ok" | "warn" | "bad";
+  icon?: ReactNode;
+  sparkline?: boolean;
 }) {
   const toneClass =
     tone === "ok"
@@ -120,37 +124,60 @@ export function Stat({
           ? "text-bad-400"
           : "text-ink-100";
   return (
-    <div className="slide-up rounded-xl border border-ink-700 bg-ink-900 px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-transform duration-200 hover:-translate-y-0.5">
+    <div className="slide-up relative overflow-hidden rounded-lg border border-ink-700/90 bg-ink-900 px-3.5 py-3 shadow-[0_4px_14px_rgba(15,23,42,0.035)] transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-accent-500/25 hover:shadow-[0_8px_20px_rgba(15,23,42,0.055)]">
+      <span className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-accent-500/70 via-accent-500/15 to-transparent" />
       <div className="text-[11px] font-bold uppercase tracking-wider text-ink-400">{label}</div>
       <div
         className={cx(
-          "font-heading mt-2 text-[26px] font-bold tracking-tight tabular",
+          "font-heading mt-1.5 text-[23px] font-bold tracking-tight tabular",
           toneClass,
         )}
       >
         {value}
       </div>
       {hint && <div className="mt-1.5 text-xs text-ink-400">{hint}</div>}
+      {icon ? <span className="absolute right-3 top-3 text-accent-500">{icon}</span> : sparkline ? <svg className="absolute right-3 top-3 h-5 w-14 text-accent-500/80" viewBox="0 0 64 24" fill="none" aria-hidden="true"><path d="M1 17 9 15l7 3 8-8 8 5 8-10 8 7 7-4 8 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg> : null}
     </div>
   );
 }
+
+/**
+ * Bề rộng của một trường, đặt theo thứ nó chứa chứ không theo cột của lưới.
+ *
+ * `num` cho số vài chữ số, `text` cho tên và ô chọn thường, `wide` cho ô mà
+ * nội dung dài — tên dataset kèm số tập chẳng hạn. Ô rộng hơn nội dung của nó
+ * là một lời mời gõ dài, và một ô số kéo hết một phần tư màn hình thì trông
+ * như đang chờ thứ gì đó to hơn số 200.
+ *
+ * `auto` là mặc định vì `Field` còn nằm trong lưới và hộp thoại của chín trang
+ * khác, nơi bề rộng do khung ngoài định đoạt. Đặt sẵn một con số ở đây là bóp
+ * nhỏ tất cả những chỗ đó chỉ để sửa hai form.
+ */
+const FIELD_WIDTH = {
+  auto: "",
+  num: "w-32",
+  text: "w-56",
+  wide: "w-72",
+} as const;
 
 export function Field({
   label,
   hint,
   children,
   className,
+  width = "auto",
 }: {
   label: string;
   hint?: string;
   children: ReactNode;
   className?: string;
+  width?: keyof typeof FIELD_WIDTH;
 }) {
   return (
-    <label className={cx("block", className)}>
+    <label className={cx("block max-w-full", FIELD_WIDTH[width], className)}>
       <span className="mb-1 block text-xs font-medium text-ink-300">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-ink-400">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] leading-snug text-ink-400">{hint}</span>}
     </label>
   );
 }
@@ -160,24 +187,26 @@ export function Field({
  *
  * Một lưới phẳng gồm mười mấy ô bắt người dùng đọc hết mới biết ô nào cần đổi;
  * chia nhóm cho thấy ngay đâu là phần thường sửa và đâu là phần để mặc định.
+ *
+ * Bố cục là flex-wrap chứ không phải lưới cột cứng. Lưới 4 cột cho mọi ô một
+ * bề rộng như nhau, nên ô "200" epoch rộng bằng ô chọn dataset, và nhóm nào
+ * không đủ 4 trường thì bỏ lại khoảng trống trơ ra giữa form. Ở đây mỗi trường
+ * tự khai bề rộng vừa với nội dung nó chứa, và hàng tự xuống dòng khi hết chỗ.
  */
 export function FieldGroup({
   title,
   hint,
   children,
-  columns = 4,
 }: {
   title: string;
   hint?: string;
   children: ReactNode;
-  columns?: 2 | 3 | 4;
 }) {
-  const grid = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }[columns];
   return (
     <fieldset className="min-w-0">
       <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-300">{title}</legend>
       {hint && <p className="mb-3 text-[11px] text-ink-400">{hint}</p>}
-      <div className={cx("grid gap-3", grid, !hint && "mt-3")}>{children}</div>
+      <div className={cx("flex flex-wrap items-start gap-x-4 gap-y-3", !hint && "mt-3")}>{children}</div>
     </fieldset>
   );
 }
@@ -186,27 +215,95 @@ export function FieldGroup({
 export function AdvancedGroup({
   title,
   children,
-  columns = 4,
 }: {
   title: string;
   children: ReactNode;
-  columns?: 2 | 3 | 4;
 }) {
-  const grid = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }[columns];
   return (
-    <details className="group min-w-0 rounded-lg border border-ink-700 px-3 py-2">
+    <details className="group min-w-0 rounded-lg border border-ink-700 bg-ink-950/40 px-4 py-3">
       <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-ink-300 outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40">
         <span className="mr-1 inline-block transition-transform group-open:rotate-90">›</span>
         {title}
       </summary>
-      <div className={cx("mt-3 grid gap-3", grid)}>{children}</div>
+      <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">{children}</div>
     </details>
   );
 }
 
 const CONTROL =
   "w-full rounded-lg border border-ink-600 bg-ink-900 px-3 py-1.5 text-sm text-ink-100 " +
-  "outline-none transition-colors hover:border-ink-400/60 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/15";
+  "shadow-[0_1px_2px_rgba(15,23,42,0.025)] outline-none transition-colors hover:border-ink-400/60 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/15";
+
+/**
+ * Hộp thoại giữa màn hình.
+ *
+ * Form dài không hợp với một cột hẹp: ô xếp dọc thành một dải dài phải cuộn,
+ * trong khi chính form đó ở giữa màn hình thì xếp được nhiều cột và đọc hết
+ * trong một tầm mắt. Nên cột trái chỉ giữ nút mở, còn form ra đây.
+ */
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  width = "max-w-3xl",
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
+  width?: string;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    panel.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={cx(
+          "w-full rounded-2xl border border-ink-700 bg-ink-900 shadow-xl focus:outline-none",
+          width,
+        )}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-ink-700 px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="font-heading text-lg font-bold text-ink-100">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-sm text-ink-400">{subtitle}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 rounded-lg p-1.5 text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(CONTROL, props.className)} />;
