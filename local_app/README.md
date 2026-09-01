@@ -48,7 +48,7 @@ The script runs local tests, frontend type checking, a production frontend
 build, PyInstaller, and electron-builder/NSIS. Its output is:
 
 ```text
-local_app\release\TeleCollectLocalSetup-0.1.1.exe
+local_app\release\TeleCollectLocalSetup-0.1.3.exe
 ```
 
 Use `-UnpackedOnly` while debugging packaging. Use `-SkipChecks` only after the

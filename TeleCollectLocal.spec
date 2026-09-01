@@ -48,6 +48,13 @@ a = Analysis(
     excludes=[
         "PySide6", "webview", "pythonnet", "clr_loader",
         "torch", "tensorflow", "pytest", "matplotlib", "dvc",
+        # Loại `torch` một mình là chưa đủ: `torchvision` và `transformers` có
+        # hook riêng của PyInstaller, và hook đó kéo nguyên `torch/lib/` vào —
+        # trong đó `torch_cuda.dll` 1 GB cùng các thư viện CUDA, tổng hơn 2 GB.
+        # App không train và không suy luận: Training với Evaluate chạy trên
+        # máy chủ, còn ở đây chúng bị ẩn hẳn khỏi giao diện.
+        "torchvision", "transformers", "safetensors", "accelerate",
+        "tensorboardX", "wandb",
     ],
     noarchive=False,
     optimize=0,
