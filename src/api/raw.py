@@ -807,6 +807,37 @@ async def archive_raw_episode(
 BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
+def _sanitize_batch_id(value: str) -> str:
+    """Rút một mã đợt thu hợp lệ ra từ chuỗi bất kỳ."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")
+    return cleaned[:64]
+
+
+async def _unique_batch_id(preferred: str, session: AsyncSession) -> str:
+    """`preferred`, hoặc `preferred-1`, `preferred-2`… nếu đã có đợt thu trùng.
+
+    Cách máy tính đặt tên khi trùng: giữ nguyên tên người dùng đưa và thêm số
+    đếm. Không hỏi lại người dùng — họ vừa chọn xong file, và cái tên thì đã
+    nằm sẵn trong `batch.json` bên trong nó.
+    """
+    taken = set(
+        (await session.scalars(select(CollectionBatch.id))).all()
+    )
+    if preferred not in taken:
+        return preferred
+    # Chừa chỗ cho hậu tố trước khi cắt, nếu không hai tên dài khác nhau sẽ cụt
+    # thành cùng một chuỗi rồi đụng nhau mãi.
+    stem = preferred[:58]
+    for index in range(1, 1000):
+        candidate = f"{stem}-{index}"
+        if candidate not in taken:
+            return candidate
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Quá nhiều đợt thu trùng tên; đổi tên thư mục batch rồi thử lại",
+    )
+
+
 def _batch_counts(episodes: list[RawEpisodeResponse]) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     for episode in episodes:
@@ -972,26 +1003,34 @@ async def delete_collection_batch(
 
 
 @router.post(
+    "/batches/import",
+    response_model=CollectionBatchImportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+@router.post(
     "/batches/{batch_id}/import",
     response_model=CollectionBatchImportResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def import_collection_batch(
-    batch_id: str,
+    batch_id: str = "",
     archive: UploadFile = File(...),
     name: str = Form(default=""),
     overwrite: bool = Form(default=False),
     user: User = Depends(operator_required),
     session: AsyncSession = Depends(get_session),
 ) -> CollectionBatchImportResponse:
-    """Nạp một zip thư mục batch của app vào đợt thu `batch_id`.
+    """Nạp một zip thư mục batch của app.
 
-    Đợt thu chưa tồn tại thì tạo luôn tại đây: người dùng đang đứng ở trang
-    Review và vừa chọn đích, bắt họ tạo batch ở một bước riêng chỉ để rồi upload
-    tiếp là thừa.
+    Không đưa `batch_id` thì lấy từ `batch.json` trong chính file zip, trùng
+    thì thêm số đếm — cách máy tính đặt tên khi trùng. Hỏi người dùng mã và
+    tên là hỏi lại thứ đã nằm sẵn trong file họ vừa chọn.
+
+    Đưa `batch_id` thì nạp vào đúng đợt thu đó, tạo mới nếu chưa có: dùng khi
+    gộp thêm dữ liệu vào một đợt thu đã có trên máy chủ.
     """
 
-    if not BATCH_ID_PATTERN.match(batch_id):
+    if batch_id and not BATCH_ID_PATTERN.match(batch_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Mã đợt thu chỉ nhận chữ, số và các ký tự . _ -",
@@ -1030,6 +1069,47 @@ async def import_collection_batch(
                 status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc),
             ) from exc
 
+        # Đọc manifest trước khi import: khi người dùng không đưa `batch_id`,
+        # chính nó quyết định đợt thu mang mã gì, mà `import_batch_archive` thì
+        # cần mã đó ngay từ đầu.
+        manifest = manifest_of(upload_path)
+        if not batch_id:
+            preferred = _sanitize_batch_id(
+                str(manifest.get("id") or "")
+                or str(manifest.get("name") or "")
+                or Path(archive.filename or "batch").stem
+            )
+            if not preferred:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        "Không đọc được tên đợt thu từ file zip: "
+                        "thiếu batch.json và tên file không dùng được"
+                    ),
+                )
+            batch_id = await _unique_batch_id(preferred, session)
+        else:
+            # Nạp vào một đợt thu đã có thì task phải khớp. Một đợt thu là một
+            # task: trang Data diversity lọc theo nó, và một dataset trộn hai
+            # task lại là dataset hỏng. Chặn ở đây, trước khi giải nén, chứ
+            # không để phát hiện sau khi file đã nằm trong workspace.
+            existing = await session.get(CollectionBatch, batch_id)
+            incoming_task = _canonical_task(str(manifest.get("task") or ""))
+            if (
+                existing is not None
+                and existing.task_name
+                and incoming_task
+                and _canonical_task(existing.task_name) != incoming_task
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Đợt thu \"{existing.name}\" thuộc task "
+                        f"{existing.task_name}, không nhận dữ liệu của "
+                        f"{incoming_task}"
+                    ),
+                )
+
         # Giải nén, dựng lại file collection và rescore đều là việc nặng đồng bộ
         # — chạy trong thread để không chặn event loop.
         try:
@@ -1044,8 +1124,6 @@ async def import_collection_batch(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc),
             ) from exc
-        # Đọc trước khi khối `finally` xoá file zip đi.
-        manifest = manifest_of(upload_path)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

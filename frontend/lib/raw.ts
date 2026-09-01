@@ -216,7 +216,9 @@ export const rawApi = {
    * every rendered video, so this one call uses XHR to drive a progress bar.
    */
   importBatch: (
-    batchId: string,
+    // Bo trong thi may chu lay ten tu batch.json trong file zip, trung thi
+    // them so dem. Truyen vao khi muon gop them du lieu vao mot dot thu co san.
+    batchId: string | null,
     params: {
       archive: File;
       name?: string;
@@ -231,7 +233,12 @@ export const rawApi = {
       if (params.overwrite) form.set("overwrite", "true");
 
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", apiUrl(`/raw/batches/${encodeURIComponent(batchId)}/import`));
+      xhr.open(
+        "POST",
+        batchId
+          ? apiUrl(`/raw/batches/${encodeURIComponent(batchId)}/import`)
+          : apiUrl("/raw/batches/import"),
+      );
       const token = getToken();
       if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
@@ -289,4 +296,49 @@ export const rawApi = {
       `/batches/${encodeURIComponent(batchId)}${purgeEpisodes ? "?purge_episodes=true" : ""}`,
       { method: "DELETE" },
     ),
+
+  /**
+   * Phiên đăng nhập máy chủ mà app đang giữ, `null` khi chưa đăng nhập.
+   *
+   * Nút Push chỉ có nghĩa khi đã có phiên: chưa đăng nhập thì cú đẩy nào cũng
+   * hỏng, và một nút luôn hỏng thì tệ hơn là không có nút.
+   */
+  syncSession: async (): Promise<{ server: string; username: string; role: string } | null> => {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(apiUrl("/local/sync"), { headers });
+    if (!response.ok) return null;
+    return (await response.json().catch(() => null)) as
+      | { server: string; username: string; role: string }
+      | null;
+  },
+
+  /**
+   * Đẩy một đợt thu từ máy này lên máy chủ dùng chung. Chỉ app mới gọi được.
+   *
+   * Không đi qua `request`: nó gắn sẵn tiền tố `/raw`, còn đường này nằm ở
+   * `/local` — API mà chỉ backend của app mới gắn vào. Trên web đã dựng, gọi
+   * nó sẽ ra 404, nên nút gọi nó phải ẩn theo cờ chứ không chỉ báo lỗi.
+   *
+   * Máy chủ nào, tài khoản nào là do phiên đăng nhập lưu trong app quyết định,
+   * không phải trang này — nên ở đây không có tham số nào cho chúng.
+   */
+  pushBatch: async (batchId: string): Promise<{ episodes: number; videos: number }> => {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(
+      apiUrl(`/local/batches/${encodeURIComponent(batchId)}/sync`),
+      { method: "POST", headers },
+    );
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new RawApiError(
+        (body as { detail?: string } | null)?.detail ?? `${response.status} ${response.statusText}`,
+        response.status,
+      );
+    }
+    return body as { episodes: number; videos: number };
+  },
 };

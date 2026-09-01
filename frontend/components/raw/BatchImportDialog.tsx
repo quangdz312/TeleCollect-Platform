@@ -11,32 +11,25 @@
  *
  * A batch can be several gigabytes, so this reports upload progress rather than
  * leaving a spinner running.
+ *
+ * The same dialog nạp thêm tập vào một đợt thu đã có: `target` khác `null` thì
+ * mã đợt thu đã biết, nên không hỏi lại, và máy chủ đòi zip phải cùng task.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Field, Input } from "@/components/ui";
 import { rawApi, type CollectionBatch, type CollectionBatchImport } from "@/lib/raw";
 
-/** Matches `BATCH_ID_PATTERN` in `src/api/raw.py`. */
-const BATCH_ID = /^[A-Za-z0-9._-]{1,64}$/;
-
-function suggestId(fileName: string): string {
-  const base = fileName.replace(/\.zip$/i, "");
-  return base.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
-}
-
 export function BatchImportDialog({
-  batches,
+  target,
   onClose,
   onImported,
 }: {
-  batches: CollectionBatch[];
+  target: CollectionBatch | null;
   onClose: () => void;
   onImported: (result: CollectionBatchImport) => void;
 }) {
   const [archive, setArchive] = useState<File | null>(null);
-  const [batchId, setBatchId] = useState("");
-  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -52,9 +45,7 @@ export function BatchImportDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
 
-  const existing = batches.find((batch) => batch.id === batchId.trim());
-  const validId = BATCH_ID.test(batchId.trim());
-  const canSubmit = archive !== null && validId && !busy;
+  const canSubmit = archive !== null && !busy;
 
   async function run() {
     if (!archive) return;
@@ -62,9 +53,8 @@ export function BatchImportDialog({
     setError(null);
     setProgress(0);
     try {
-      const imported = await rawApi.importBatch(batchId.trim(), {
+      const imported = await rawApi.importBatch(target?.id ?? null, {
         archive,
-        name: name.trim() || undefined,
         onProgress: setProgress,
       });
       setResult(imported);
@@ -87,11 +77,17 @@ export function BatchImportDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Import a batch from the desktop app"
+        aria-label={
+          target
+            ? `Add episodes to ${target.name}`
+            : "Import a batch from the desktop app"
+        }
         tabIndex={-1}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-ink-700 bg-ink-900 p-5 shadow-xl focus:outline-none"
       >
-        <h2 className="font-heading text-lg font-bold text-ink-100">Import batch</h2>
+        <h2 className="font-heading text-lg font-bold text-ink-100">
+          {target ? `Add episodes · ${target.name}` : "Import batch"}
+        </h2>
 
         {result ? (
           <div className="mt-4 space-y-4">
@@ -129,54 +125,38 @@ export function BatchImportDialog({
               Zip a batch folder from the app workspace — the one holding{" "}
               <span className="font-mono text-ink-100">batch.json</span> beside{" "}
               <span className="font-mono text-ink-100">episodes/</span> — and upload it here.
+              {target ? (
+                <>
+                  {" "}
+                  It must be the same task
+                  {target.task_name ? (
+                    <>
+                      {" "}
+                      (<span className="font-mono text-ink-100">{target.task_name}</span>)
+                    </>
+                  ) : null}
+                  . Episodes already here are skipped; a name already taken gets a number.
+                </>
+              ) : (
+                " It keeps the name it already has; a name already taken gets a number."
+              )}
             </p>
 
-            <Field label="Batch archive" hint="A .zip of one batch folder">
+            <Field
+              label={target ? "Episode archive" : "Batch archive"}
+              hint={
+                target
+                  ? "A .zip of a batch folder — one episode or many"
+                  : "A .zip of one batch folder"
+              }
+            >
               <Input
                 type="file"
                 accept=".zip,application/zip"
                 disabled={busy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  setArchive(file);
-                  if (file && !batchId) setBatchId(suggestId(file.name));
-                }}
+                onChange={(event) => setArchive(event.target.files?.[0] ?? null)}
               />
             </Field>
-
-            <Field
-              label="Import into batch"
-              hint={
-                existing
-                  ? `Adds to the existing batch "${existing.name}".`
-                  : "A new batch is created with this id."
-              }
-            >
-              <Input
-                value={batchId}
-                placeholder="lift-scripted-v2"
-                disabled={busy}
-                onChange={(event) => setBatchId(event.target.value)}
-              />
-            </Field>
-
-            {batchId.trim() !== "" && !validId ? (
-              <Alert tone="bad">
-                A batch id may only contain letters, digits and . _ - because it becomes
-                part of a dataset filename.
-              </Alert>
-            ) : null}
-
-            {existing ? null : (
-              <Field label="Display name" hint="Optional — taken from batch.json when blank.">
-                <Input
-                  value={name}
-                  placeholder="Lift v2"
-                  disabled={busy}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </Field>
-            )}
 
             {busy ? (
               <div>
@@ -201,7 +181,7 @@ export function BatchImportDialog({
                 Cancel
               </Button>
               <Button variant="primary" disabled={!canSubmit} onClick={() => void run()}>
-                {busy ? "Importing…" : "Import"}
+                {busy ? "Importing…" : target ? "Add" : "Import"}
               </Button>
             </div>
           </div>

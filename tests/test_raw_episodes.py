@@ -619,6 +619,232 @@ async def test_an_operator_can_import_the_batches_they_collected(
     assert response.json()["episodes"] == 2
 
 
+AUTO_IMPORT_API = "/api/v1/raw/batches/import"
+
+
+@pytest.mark.asyncio
+async def test_an_import_without_an_id_takes_its_name_from_the_archive(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """The name is already inside the zip, so asking for it again is asking twice."""
+
+    operator = await _create_user(db_session, "auto_id_operator", UserRole.OPERATOR)
+
+    response = await client.post(
+        AUTO_IMPORT_API,
+        headers=_auth_headers(operator),
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    # batch.json carries id "abc" and name "Lift v9".
+    assert body["batch"]["id"] == "abc"
+    assert body["batch"]["name"] == "Lift v9"
+
+
+@pytest.mark.asyncio
+async def test_a_second_import_of_the_same_name_gets_a_number(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """What a file manager does with a duplicate: keep the name, add a counter."""
+
+    operator = await _create_user(db_session, "dup_name_operator", UserRole.OPERATOR)
+    headers = _auth_headers(operator)
+
+    first = await client.post(
+        AUTO_IMPORT_API,
+        headers=headers,
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["batch"]["id"] == "abc"
+
+    second = await client.post(
+        AUTO_IMPORT_API,
+        headers=headers,
+        files={
+            "archive": (
+                "batch.zip",
+                _app_batch_zip(tmp_path / "again", source="lift_clean_seed78.hdf5"),
+                "application/zip",
+            ),
+        },
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["batch"]["id"] == "abc-1"
+
+
+@pytest.mark.asyncio
+async def test_importing_into_a_batch_of_another_task_is_refused(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """One batch is one task: Data diversity filters on it, and a dataset that
+    mixes two tasks is a broken dataset."""
+
+    operator = await _create_user(db_session, "task_clash_operator", UserRole.OPERATOR)
+    headers = _auth_headers(operator)
+
+    first = await client.post(
+        AUTO_IMPORT_API,
+        headers=headers,
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+    assert first.status_code == 201, first.text
+    batch_id = first.json()["batch"]["id"]
+
+    staging = tmp_path / "other-task"
+    root = staging / "Can v1"
+    root.mkdir(parents=True)
+    (root / "batch.json").write_text(
+        json.dumps({"id": "can-v1", "name": "Can v1", "task": "pick_place_can"}),
+        encoding="utf-8",
+    )
+    from tests.test_batch_import import _episode_dir
+    import zipfile
+
+    _episode_dir(root, "can_201", source="can_clean_seed5.hdf5", demo="demo_0")
+    other = tmp_path / "other-task.zip"
+    with zipfile.ZipFile(other, "w") as archive:
+        for path in sorted(staging.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(staging).as_posix())
+
+    response = await client.post(
+        IMPORT_API.format(batch_id),
+        headers=headers,
+        files={"archive": ("batch.zip", other.read_bytes(), "application/zip")},
+    )
+
+    assert response.status_code == 409, response.text
+    assert "pick_place_can" in response.json()["detail"]
+
+
+def _extra_episodes_zip(tmp_path: Path, *, source: str, ids: tuple[str, ...]) -> bytes:
+    """Another zip for batch `abc`: same batch, same task, different episodes."""
+
+    from tests.test_batch_import import _episode_dir
+    import zipfile
+
+    staging = tmp_path / f"extra-{'-'.join(ids)}"
+    root = staging / "Lift v9"
+    root.mkdir(parents=True)
+    (root / "batch.json").write_text(
+        json.dumps({"id": "abc", "name": "Lift v9", "task": "lift"}), encoding="utf-8",
+    )
+    for index, episode_id in enumerate(ids):
+        _episode_dir(root, episode_id, source=source, demo=f"demo_{index}")
+
+    archive_path = staging.with_suffix(".zip")
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for path in sorted(staging.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(staging).as_posix())
+    return archive_path.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_episodes_can_be_added_to_a_batch_that_already_exists(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """Chọn một đợt thu rồi nạp thêm tập vào đúng nó — không tạo đợt thu thứ hai.
+
+    Thu dữ liệu là việc nhiều buổi. Nếu mỗi lần nạp lại đẻ ra một đợt thu mới
+    thì một task bị xé thành `abc`, `abc-1`, `abc-2`, và Data diversity đếm ba
+    đợt thu rời rạc thay vì một.
+    """
+
+    operator = await _create_user(db_session, "merge_operator", UserRole.OPERATOR)
+    headers = _auth_headers(operator)
+
+    first = await client.post(
+        AUTO_IMPORT_API,
+        headers=headers,
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+    assert first.status_code == 201, first.text
+    batch_id = first.json()["batch"]["id"]
+    assert first.json()["episodes"] == 2
+
+    second = await client.post(
+        IMPORT_API.format(batch_id),
+        headers=headers,
+        files={
+            "archive": (
+                "more.zip",
+                _extra_episodes_zip(
+                    tmp_path, source="lift_clean_seed90.hdf5", ids=("lift_201", "lift_202"),
+                ),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert second.status_code == 201, second.text
+    # Cùng một mã đợt thu, không phải `abc-1`.
+    assert second.json()["batch"]["id"] == batch_id
+
+    assert second.json()["episodes"] == 2
+
+    # Cả bốn tập cùng mang một mã đợt thu, không bị xé làm hai. Mã nằm trong
+    # thuộc tính của file collection — đó mới là thứ quyết định một tập thuộc
+    # đợt thu nào, chứ không phải chỗ file nằm.
+    import h5py
+
+    tagged = 0
+    for name in set(first.json()["sources"]) | set(second.json()["sources"]):
+        with h5py.File(raw_workspace / "datasets" / name, "r") as handle:
+            data = handle["data"]
+            assert data.attrs["telecollect_collection_batch_id"] == batch_id
+            tagged += len(data.keys())
+    assert tagged == 4
+
+
+@pytest.mark.asyncio
+async def test_adding_a_run_whose_name_is_taken_gets_a_number(
+    client, db_session, raw_workspace, tmp_path,
+):
+    """Trùng tên file thu nhưng khác nội dung thì đánh số, không từ chối cả gói.
+
+    Hai buổi thu khác nhau vẫn có thể sinh ra file cùng tên — tên đến từ task và
+    seed, không phải từ thời điểm. Từ chối thì buổi thứ hai mất trắng.
+    """
+
+    operator = await _create_user(db_session, "collide_operator", UserRole.OPERATOR)
+    headers = _auth_headers(operator)
+
+    first = await client.post(
+        AUTO_IMPORT_API,
+        headers=headers,
+        files={"archive": ("batch.zip", _app_batch_zip(tmp_path), "application/zip")},
+    )
+    assert first.status_code == 201, first.text
+    batch_id = first.json()["batch"]["id"]
+    original = first.json()["sources"]
+
+    second = await client.post(
+        IMPORT_API.format(batch_id),
+        headers=headers,
+        files={
+            "archive": (
+                "more.zip",
+                # Cùng tên file nguồn với gói đầu, nhưng là tập khác.
+                _extra_episodes_zip(
+                    tmp_path, source="lift_clean_seed77.hdf5", ids=("lift_301",),
+                ),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert second.status_code == 201, second.text
+    assert second.json()["episodes"] == 1
+    rebuilt = second.json()["sources"]
+    # Tên cũ giữ nguyên, bản mới mang số đếm — cả hai cùng tồn tại.
+    assert rebuilt != original
+    assert any("-1" in name for name in rebuilt), rebuilt
+
+
 @pytest.mark.asyncio
 async def test_batch_import_still_requires_signing_in(client, db_session, raw_workspace, tmp_path):
     response = await client.post(
@@ -680,10 +906,12 @@ async def test_batch_import_refuses_an_unsafe_batch_id(
 
 
 @pytest.mark.asyncio
-async def test_batch_import_rejects_a_collection_run_already_present(
+async def test_a_collection_run_whose_name_is_taken_gets_a_number(
     client, db_session, raw_workspace, tmp_path,
 ):
-    """`lift_clean_seed0.hdf5` is already in the fixture workspace."""
+    """`lift_clean_seed0.hdf5` is already in the fixture workspace, holding
+    different recordings — so this upload is a second take, not a re-send, and
+    it lands beside the existing run rather than being refused."""
 
     reviewer = await _create_user(db_session, "import_clash", UserRole.REVIEWER)
 
@@ -699,8 +927,8 @@ async def test_batch_import_rejects_a_collection_run_already_present(
         },
     )
 
-    assert response.status_code == 422
-    assert "already in the workspace" in response.json()["detail"]
+    assert response.status_code == 201, response.text
+    assert response.json()["sources"] == ["lift_clean_seed0-1.hdf5"]
 
 
 @pytest.mark.asyncio

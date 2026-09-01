@@ -174,6 +174,45 @@ def test_an_existing_collection_run_is_never_overwritten(space, tmp_path):
     } == {"lift-v1"}
 
 
+def test_a_re_collected_run_lands_beside_the_old_one(space, tmp_path):
+    """Same name, different recording: keep both.
+
+    Refusing it would lose a genuine second take, and overwriting would rewrite
+    episodes someone may have reviewed. A counter on the name -- what a file
+    manager does with a duplicate -- keeps the old run untouched and the new one
+    under its own episode ids.
+    """
+
+    import numpy as np
+
+    import_batch_archive(space, _archive(tmp_path), batch_id="lift-v1")
+    before = (space.datasets_dir / "lift_clean_seed0.hdf5").read_bytes()
+
+    # Same file name, different trajectory.
+    staging = tmp_path / "retake"
+    root = staging / "Lift retake"
+    _episode_dir(root, "lift_001", source="lift_clean_seed0.hdf5", demo="demo_0")
+    with h5py.File(root / "episodes" / "lift_001" / "trajectory.hdf5", "r+") as handle:
+        actions = handle["data"]["demo_0"]["actions"]
+        actions[...] = np.ones_like(actions[()])
+    retake = tmp_path / "retake.zip"
+    with zipfile.ZipFile(retake, "w") as archive:
+        for path in sorted(staging.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(staging).as_posix())
+
+    report = import_batch_archive(space, retake, batch_id="lift-v2")
+
+    assert report.sources == ["lift_clean_seed0-1.hdf5"]
+    assert report.skipped == []
+    # The reviewed run is byte-for-byte what it was.
+    assert (space.datasets_dir / "lift_clean_seed0.hdf5").read_bytes() == before
+    assert {
+        str(record.get("provenance", {}).get("collection_batch_id"))
+        for record in space.scores()
+    } == {"lift-v1", "lift-v2"}
+
+
 def test_manual_episodes_are_reported_rather_than_dropped(space, tmp_path):
     staging = tmp_path / "manual"
     root = staging / "Mixed"

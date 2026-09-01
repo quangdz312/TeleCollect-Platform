@@ -24,6 +24,7 @@ may not be available.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -185,6 +186,51 @@ def _collect(root: Path) -> tuple[dict[str, list[dict[str, Any]]], list[tuple[st
     return grouped, skipped
 
 
+def _collection_fingerprint(path: Path) -> str:
+    """Vân tay nội dung của một file collection, không phụ thuộc byte của HDF5.
+
+    Băm chính file thì không dùng được: h5py ghi ra byte khác nhau giữa hai lần
+    dựng cùng một dữ liệu (thứ tự thuộc tính, vùng đệm), nên hai bản y hệt vẫn
+    ra hai vân tay. Băm tên demo cùng mảng số bên trong thì hai lần upload cùng
+    một lần thu luôn khớp.
+    """
+
+    digest = hashlib.sha256()
+    try:
+        with h5py.File(path, "r") as handle:
+            data = handle.get("data")
+            if data is None:
+                return ""
+            for demo in sorted(data):
+                digest.update(demo.encode("utf-8"))
+                group = data[demo]
+                for name in sorted(group):
+                    value = group[name]
+                    if isinstance(value, h5py.Dataset):
+                        digest.update(name.encode("utf-8"))
+                        digest.update(value[()].tobytes())
+    except (OSError, KeyError, ValueError):
+        return ""
+    return digest.hexdigest()
+
+
+def _unused_path(path: Path) -> Path:
+    """``path``, hoặc ``path`` với ``-1``, ``-2``… chèn trước đuôi file.
+
+    Cách một trình quản lý file đặt tên khi trùng: giữ tên cũ, thêm số đếm.
+    Gạch nối chứ không phải ``(1)`` vì tên này đi vào ``episode_id``, mà
+    ``_SAFE_NAME`` không nhận dấu ngoặc.
+    """
+
+    if not path.exists():
+        return path
+    for index in range(1, 1000):
+        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise BatchImportError(f"Quá nhiều bản trùng tên với {path.name}")
+
+
 def _rebuild(entries: list[dict[str, Any]], destination: Path, batch_id: str) -> int:
     """Write one multi-demo collection file from single-demo episode folders.
 
@@ -243,18 +289,35 @@ def import_batch_archive(
         staged: list[tuple[Path, Path, list[dict[str, Any]]]] = []
         for source_name, entries in sorted(grouped.items()):
             destination = space.datasets_dir / source_name
-            if destination.exists() and not overwrite:
-                # Overwriting a collection run already in the corpus would
-                # rewrite episodes other people may have reviewed.
-                for entry in entries:
-                    report.skipped.append(
-                        (str(entry["episode_id"]), f"{source_name} is already in this workspace"),
-                    )
-                continue
             temporary = Path(scratch) / f"staged-{source_name}"
             _rebuild(entries, temporary, batch_id)
             # Fail before touching the corpus if the rebuild is unreadable.
             load_episodes(temporary)
+
+            if destination.exists() and not overwrite:
+                # Tên trùng nói lên hai chuyện khác hẳn nhau, nên phải so nội
+                # dung mới biết là chuyện nào.
+                #
+                # Cùng nội dung: người dùng upload lại đúng thứ đã gửi. Nhận
+                # thêm một bản là nhân đôi episode trong tập train, khiến model
+                # thấy quỹ đạo đó nặng gấp đôi những quỹ đạo khác — làm lệch dữ
+                # liệu mà không ai nhận ra. Bỏ qua và nói rõ.
+                #
+                # Khác nội dung: đây là lần thu mới trùng tên. Đặt cạnh bản cũ
+                # với số đếm; bản cũ có thể đã được review nên không đụng tới.
+                # Episode id sinh ra từ tên file nên cũng đổi theo, hai bản
+                # không giẫm lên nhau trong bảng review.
+                if _collection_fingerprint(temporary) == _collection_fingerprint(destination):
+                    for entry in entries:
+                        report.skipped.append(
+                            (
+                                str(entry["episode_id"]),
+                                f"{source_name} is already in this workspace",
+                            ),
+                        )
+                    continue
+                destination = _unused_path(destination)
+
             staged.append((temporary, destination, entries))
 
         if not staged:
