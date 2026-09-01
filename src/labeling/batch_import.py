@@ -68,6 +68,8 @@ class ImportReport:
     #: ``(episode, reason)`` — one line per recording left out, so a partial
     #: import can be explained instead of quietly losing rows.
     skipped: list[tuple[str, str]] = field(default_factory=list)
+    #: Auto-gate đã quyết gì cho lô vừa nhập — bao nhiêu duyệt, loại, chờ người.
+    auto_gate: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +78,7 @@ class ImportReport:
             "videos": self.videos,
             "sources": sorted(self.sources),
             "skipped": [{"episode": name, "reason": why} for name, why in self.skipped],
+            "auto_gate": self.auto_gate,
         }
 
 
@@ -351,4 +354,18 @@ def import_batch_archive(
         raise BatchImportError(
             f"The batch was imported but the workspace could not be rescored: {exc}",
         ) from exc
+
+    # Chấm điểm xong thì chạy luôn auto-gate cho đúng đợt thu vừa nhập.
+    #
+    # Không có bước này, mọi tập nhập vào đều nằm chờ người duyệt — kể cả tập
+    # mà auto-gate đã duyệt ở nơi gửi đi. Người dùng thấy cùng một tập là
+    # `approved` trên máy mình và `pending` trên máy chủ, rồi phải duyệt lại
+    # bằng tay đúng những gì máy đã quyết.
+    #
+    # `apply` chỉ gán nhãn cho tập chưa có nhãn nên không đè lên quyết định của
+    # người, và giới hạn theo `collection_batch_id` để một lần nhập không đụng
+    # tới phần còn lại của kho.
+    from .auto_gate import apply as apply_auto_gate
+
+    report.auto_gate = apply_auto_gate(space, collection_batch_id=batch_id)
     return report

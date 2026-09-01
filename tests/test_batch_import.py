@@ -258,3 +258,96 @@ def test_a_file_that_is_not_a_zip_is_refused(space, tmp_path):
 def test_manifest_is_read_for_the_batch_name(tmp_path):
     assert manifest_of(_archive(tmp_path))["name"] == "Lift v1"
     assert manifest_of(tmp_path / "missing.zip") == {}
+
+
+def _distinct_archive(tmp_path: Path, *, tag: str) -> Path:
+    """Zip có các tập khác nhau thật, nên auto-gate không coi là trùng lặp.
+
+    `_archive` ghi mọi tập bằng cùng một mảng số, nên gate từ chối chúng như
+    bản sao — đúng với nó, nhưng không kiểm được việc gate có gán nhãn không.
+    """
+
+    staging = tmp_path / f"staging-{tag}"
+    root = staging / "Lift v1"
+    (root / "episodes").mkdir(parents=True)
+    (root / "batch.json").write_text(
+        json.dumps({"format_version": 1, "id": tag, "name": "Lift v1", "task": "lift"}),
+        encoding="utf-8",
+    )
+    for index in range(2):
+        directory = root / "episodes" / f"lift_{index}"
+        directory.mkdir()
+        with h5py.File(directory / "trajectory.hdf5", "w") as handle:
+            data = handle.create_group("data")
+            data.attrs["env_args"] = json.dumps({"env_name": "Lift"})
+            demo = data.create_group("demo_0")
+            _write_demo(demo, quality="clean", success=True)
+            # Quỹ đạo riêng cho từng tập: gate băm hành động cùng trạng thái đầu
+            # để tìm bản sao, nên hai tập toàn số 0 là một bản sao.
+            del demo["actions"], demo["states"]
+            demo.create_dataset("actions", data=np.full((FRAMES, 7), index + 1.0))
+            demo.create_dataset("states", data=np.full((FRAMES, 12), index + 1.0))
+            data.attrs["total"] = FRAMES
+        (directory / "meta.json").write_text(
+            json.dumps({
+                "format_version": 1,
+                "episode_id": f"lift_{index}",
+                "task_name": "lift",
+                "source": "scripted",
+                "num_steps": FRAMES,
+                "requested_quality": "clean",
+                "recorded_success": True,
+                "original_source": f"lift_clean_seed{index}.hdf5",
+                "original_demo": "demo_0",
+            }),
+            encoding="utf-8",
+        )
+    archive_path = tmp_path / f"batch-{tag}.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for path in sorted(staging.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(staging).as_posix())
+    return archive_path
+
+
+def test_import_auto_labels_instead_of_leaving_everything_pending(space, tmp_path):
+    """Tập nhập vào phải mang luôn quyết định của auto-gate, không nằm chờ.
+
+    Không có bước này thì cùng một tập được gate quyết ở nơi gửi đi lại thành
+    `pending` trên máy chủ, và người dùng phải duyệt lại bằng tay đúng những gì
+    máy đã quyết — auto-gate coi như không tồn tại với dữ liệu đi qua đường nhập.
+
+    Gate duyệt hay loại là tuỳ chất lượng quỹ đạo; điều phải đúng ở đây là mọi
+    tập đều được nó xử lý và có nhãn, chứ không phải nhãn nào.
+    """
+
+    report = import_batch_archive(
+        space, _distinct_archive(tmp_path, tag="a"), batch_id="lift-v1",
+    )
+
+    counts = report.auto_gate
+    assert counts["approved"] + counts["rejected"] == report.episodes
+    records = space.labels()
+    assert len(records) == report.episodes
+    for record in records:
+        assert record["decision_source"] == "auto_gate"
+        assert record["reviewer"] == "auto-gate"
+
+
+def test_import_leaves_a_human_verdict_alone(space, tmp_path):
+    """Nhập lại không được ghi đè quyết định của người bằng quyết định của máy."""
+
+    import_batch_archive(space, _distinct_archive(tmp_path, tag="a"), batch_id="lift-v1")
+    episode_id = space.labels()[0]["episode_id"]
+    space.append_label(
+        episode_id, decision="approved", note="người xem thấy được", reviewer="tung",
+    )
+
+    # Cùng zip đó: mọi lần thu đã có trong kho nên máy chủ từ chối trọn gói,
+    # đúng như thiết kế. Điều cần kiểm là nhãn của người vẫn nguyên sau đó.
+    with pytest.raises(BatchImportError):
+        import_batch_archive(space, _distinct_archive(tmp_path, tag="b"), batch_id="lift-v2")
+
+    kept = {record["episode_id"]: record for record in space.labels()}[episode_id]
+    assert kept["human_decision"] == "approved"
+    assert kept["reviewer"] == "tung"
