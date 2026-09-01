@@ -6,9 +6,9 @@ Team NEURA · 25/07 – 01/09/2026 · 177 commit trên nhánh `main`
 
 | Tên | GitHub | Vai trò chính |
 |---|---|---|
-| Bùi Xuân Tùng | @PakerPP | Backend, frontend, triển khai server |
-| Trần Gia Thế | @TranGiaThe2004 | Mô phỏng, triển khai server |
-| Đặng Minh Quang | @quangdz312 | Huấn luyện policy, đánh giá |
+| Bùi Xuân Tùng | @PakerPP | Backend, frontend, mô phỏng, task ToolHang, triển khai server |
+| Trần Gia Thế | @TranGiaThe2004 | Backend, frontend, triển khai server |
+| Đặng Minh Quang | @quangdz312 | Mô phỏng, frontend, điều khiển cử chỉ tay, scripted 3 task, huấn luyện policy, đánh giá |
 | Nguyễn Nhật Minh | @Helooeverybody | Khảo sát công nghệ, khởi tạo dự án, kiểm thử web |
 
 | Tuần | Ngày | Tùng | Thế | Quang | Minh | Tổng |
@@ -40,12 +40,13 @@ lên, xem lại, duyệt), đóng gói dataset. **185 test.** Frontend có bản
 
 ## W33 · 10–16/08 — Mô phỏng, teleoperation và gắn nhãn
 
-Tuần mở rộng phạm vi lớn nhất. Đưa toàn bộ phần mô phỏng vào sản phẩm và nối
-frontend với backend thật.
+Tuần mở rộng phạm vi lớn nhất. Tùng và Quang đưa toàn bộ phần mô phỏng vào sản
+phẩm; frontend nối với backend thật.
 
-- **Điều khiển bằng cử chỉ tay qua webcam** — nền tảng cho luận điểm không cần
-  thiết bị chuyên dụng
-- **Bốn task**, trong đó ToolHang hai giai đoạn là khó nhất
+- **Điều khiển bằng cử chỉ tay qua webcam** (Quang) — nền tảng cho luận điểm
+  không cần thiết bị chuyên dụng
+- **Bốn task scripted**: Quang làm `lift_cube`, `pick_place_can`,
+  `nut_assembly_square`; Tùng làm ToolHang — task hai giai đoạn, khó nhất
 - **Auto-gate** với ba phán quyết `approve` / `reject` / `review` — `review`
   nghĩa là máy không kiểm chứng được, để người xem
 - Đóng gói dataset RoboMimic và huấn luyện BC đầu tiên
@@ -60,8 +61,9 @@ Chuẩn hoá gắn nhãn tự động trên nguyên tắc **kiểm chứng, khô
 thêm kiểm tra nhất quán vật lý, mặt nạ chất lượng, đánh giá tất định. Huấn luyện
 thành cấu hình được và có rollout đánh giá.
 
-Triển khai lên VPS: Docker Compose, Caddy, HTTPS, sao lưu và khôi phục. Frontend
-chuyển sang bản thiết kế mới, hàng đợi duyệt mở đúng thứ người duyệt xử lý được.
+Triển khai lên VPS: Docker Compose, Caddy, HTTPS, sao lưu và khôi phục — Tùng và
+Thế. Frontend chuyển sang bản thiết kế mới, hàng đợi duyệt mở đúng thứ người
+duyệt xử lý được — Tùng, Thế và Quang cùng làm.
 
 ## W35 · 24–30/08 — Từ công cụ thành nền tảng nhiều người dùng
 

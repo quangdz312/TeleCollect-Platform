@@ -3,7 +3,6 @@
 | Tài liệu | Nội dung |
 |---|---|
 | [`mo_ta_chi_tiet_du_an.md`](mo_ta_chi_tiet_du_an.md) | Mô tả chi tiết dự án: bài toán, đối tượng sử dụng, cách giải quyết, hai phương pháp thu dữ liệu, quy trình review và export, kết quả, hạn chế |
-| [`slide-noidung.md`](slide-noidung.md) | Nội dung 12 trang slide trình bày, kèm ý nói cho từng trang |
 
 ---
 
