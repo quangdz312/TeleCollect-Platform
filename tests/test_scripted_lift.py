@@ -158,3 +158,20 @@ def test_lift_realigns_to_unbiased_cube_after_perturbed_approach() -> None:
 
     assert operator.phase == LiftPhase.RECOVER_ALIGN
     assert operator.debug_info["recovery_demonstration"] is True
+
+
+def test_the_lift_context_records_through_the_hold_phase() -> None:
+    """Lift ghi tiếp 30 bước sau khi thành công, và dựng được.
+
+    Không test nào chạm `build_lift_tool_context`, nên một tham số sai ở đây đi
+    lọt qua cả bộ test rồi mới vỡ lúc thu dữ liệu thật — đúng điều đã xảy ra
+    với `finish_tool_after_success`, một tên mà `ToolContext` không có.
+    """
+
+    from src.sim.task_adapters.lift import build_lift_tool_context
+
+    context = build_lift_tool_context(None, horizon=100, seed=1)
+
+    # 30 bước ở 20 Hz là khoảng 1.5 giây giữ vật — pha HOLD mà người thao tác
+    # thực hiện, chứ không cắt ngay lúc chạm ngưỡng.
+    assert context.post_success_steps == 30
