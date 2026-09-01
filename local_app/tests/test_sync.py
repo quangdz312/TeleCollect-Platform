@@ -51,6 +51,16 @@ def test_an_empty_address_is_refused():
         sync._normalise("   ")
 
 
+def test_the_project_server_is_the_default():
+    """Giao diện không còn hỏi địa chỉ, nên hằng số này là thứ duy nhất trỏ đường.
+
+    Gõ sai một lần là đăng nhập hỏng mà không rõ vì sao, và người thu dữ liệu
+    không có lý do gì phải biết địa chỉ máy chủ của dự án.
+    """
+
+    assert sync.DEFAULT_SERVER == "https://telecollect.io.vn"
+
+
 # --- sign in -----------------------------------------------------------------
 
 

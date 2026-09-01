@@ -31,6 +31,58 @@ async def ensure_local_admin(username: str, password: str) -> str:
         return str(existing.id)
 
 
+async def _index_batches(session, workspace: Path, operator_id: str) -> None:
+    """Dựng bản ghi đợt thu từ `batch.json` của từng thư mục.
+
+    Nếu không có bước này thì app hiện mã đợt thu ở chỗ đáng lẽ là tên: trang
+    Review đọc bảng `collection_batches`, không đọc đĩa, và khi không tìm thấy
+    bản ghi nó lấy chính mã làm tên. Người dùng thấy `can-73d85272` trong khi
+    màn hình Collect — đọc thẳng `batch.json` — hiện `can`.
+
+    Mất `task_name` còn nặng hơn mất cái tên. Chính nó là thứ chặn việc nạp dữ
+    liệu của task này vào đợt thu của task khác; bản ghi trống thì hàng rào đó
+    lặng lẽ không hoạt động.
+
+    Ghi đè tên và task mỗi lần chạy: `batch.json` trên đĩa là bản gốc, và người
+    dùng đổi tên đợt thu trong app phải thấy tên mới ở đây.
+    """
+
+    from src.models.db import CollectionBatch
+
+    batches_root = workspace / "batches"
+    if not batches_root.is_dir():
+        return
+    for folder in sorted(batches_root.iterdir()):
+        manifest_path = folder / "batch.json"
+        if not folder.is_dir() or not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        batch_id = str(manifest.get("id") or "").strip()
+        if not batch_id:
+            continue
+        name = (str(manifest.get("name") or "").strip() or batch_id)[:150]
+        task_name = str(manifest.get("task") or "").strip() or None
+        description = str(manifest.get("description") or "")
+
+        record = await session.get(CollectionBatch, batch_id)
+        if record is None:
+            session.add(
+                CollectionBatch(
+                    id=batch_id,
+                    name=name,
+                    task_name=task_name,
+                    description=description,
+                    created_by=operator_id,
+                ),
+            )
+        else:
+            record.name = name
+            record.task_name = task_name
+
+
 async def index_workspace(workspace: Path, operator_id: str) -> int:
     """Index recordings found in a folder without adding files or an app.db there."""
     from src.models.db import Episode, Task, get_engine, session_factory
@@ -44,6 +96,7 @@ async def index_workspace(workspace: Path, operator_id: str) -> int:
     engine = get_engine()
     indexed = 0
     async with session_factory(engine)() as session:
+        await _index_batches(session, workspace, operator_id)
         episode_dirs = [episode for root in roots if root.is_dir() for episode in root.iterdir()]
         seen: set[str] = set()
         for episode_dir in sorted(episode_dirs):

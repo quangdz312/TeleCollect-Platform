@@ -23,6 +23,7 @@ the same endpoint the web accepts a hand-zipped batch through.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -34,6 +35,13 @@ from typing import Any
 
 from local_app import batch_storage
 from local_app.config import _load_settings, _save_settings
+
+#: Máy chủ của dự án. App đóng gói cho một dự án nên địa chỉ này là hằng số,
+#: không phải câu hỏi dành cho người dùng: bắt gõ tay thì mỗi lần đăng nhập là
+#: một cơ hội gõ sai, và người thu dữ liệu không có lý do gì để biết nó.
+#: Đặt `TELECOLLECT_SERVER` khi cần trỏ sang máy chủ khác (staging, bản dựng
+#: riêng) mà không phải sửa mã.
+DEFAULT_SERVER = os.environ.get("TELECOLLECT_SERVER") or "https://telecollect.io.vn"
 
 #: Long enough for a multi-gigabyte batch over a slow connection.
 UPLOAD_TIMEOUT_S = 3600

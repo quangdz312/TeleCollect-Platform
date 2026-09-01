@@ -47,7 +47,8 @@ class BulkReviewRequest(BaseModel):
 
 
 class SyncSignIn(BaseModel):
-    server: str = Field(min_length=1, max_length=300)
+    # Bỏ trống thì dùng máy chủ của dự án; giao diện không hỏi địa chỉ nữa.
+    server: str = Field(default="", max_length=300)
     username: str = Field(min_length=1, max_length=150)
     password: str = Field(min_length=1, max_length=200)
 
@@ -292,7 +293,10 @@ def install(app: FastAPI, workspace: Path) -> None:
     async def sync_login(body: SyncSignIn):
         try:
             session = await asyncio.to_thread(
-                sync.sign_in, body.server, body.username, body.password,
+                sync.sign_in,
+                body.server or sync.DEFAULT_SERVER,
+                body.username,
+                body.password,
             )
         except sync.SyncError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
