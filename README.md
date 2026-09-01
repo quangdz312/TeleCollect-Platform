@@ -70,7 +70,7 @@ Windows/Optimus**, trên Linux/macOS không cần và không có tác dụng.
 ### Cài đặt
 
 ```bash
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 source .venv/Scripts/activate     # Windows Git Bash
 # source .venv/bin/activate       # macOS / Linux
 python -m pip install -r requirements.txt
@@ -145,14 +145,8 @@ Artifacts. Có thể tắt toàn bộ bằng `--no-wandb-enabled` (mặc định
 | `SHIM_MCCOMPAT` | — | Chỉ Windows/Optimus, xem mục Chọn GPU |
 | `AI_LOG_SERVER` / `AI_LOG_API_KEY` / `AI_LOG_DIR` | BTC cung cấp | Nộp AI log |
 
-> **Bỏ qua `OPENAI_API_KEY`, `LANGCHAIN_*` và `CHROMA_PERSIST_DIR`.** Chúng đi
-> theo template dự án của môn học và **không được đọc ở bất cứ đâu trong
-> `src/`** — dự án này không gọi LLM lúc chạy. Đừng mất công điền.
->
-> Hai lệch nhỏ giữa `.env.example` và `src/config.py`, mặc định trong code mới
-> là cái đang chạy: `CONTROL_HZ` (60, không phải 30), và nhóm camera
-> (`.env.example` còn ghi `agentview`/`frontview` từ trước khi có `review_front`).
-> Nhóm `RULE_*` cùng `PREVIEW_CAMERA_TERTIARY` chưa có trong `.env.example`.
+> Nhóm biến `RULE_*` chưa có trong `.env.example` — xem `src/config.py` nếu cần
+> chỉnh ngưỡng auto-label.
 
 ### Sample queries
 
@@ -303,8 +297,9 @@ Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh,
 - Luôn dùng `python -m uvicorn`, `python -m pytest`, `python -m scripts.xxx` — nếu máy có
   nhiều bản Python thì gõ lệnh trần rất dễ chạy nhầm môi trường.
 - `data/` chứa video, DB và file zip — không commit lên git.
-- Hook `.git/hooks/pre-push` (nộp AI log) hiện không chạy được trên Windows, phải push kèm
-  `--no-verify`. **Đang chờ xử lý** — xem mục Việc còn tồn đọng.
+- Hook `.git/hooks/pre-push` nộp AI log không đọc `.env`, nên trên Windows nó bỏ
+  qua bước gửi. Nộp tay bằng `python scripts/submit_log.py` — mỗi lần gửi tối đa
+  500 mục, chạy lặp tới khi hết hàng chờ.
 
 ### Phạm vi hiện tại
 
@@ -313,13 +308,15 @@ Muốn duyệt bằng cùng một tài khoản đã upload (ví dụ demo nhanh,
 - **Teleoperation thật** — điều khiển realtime qua WebSocket trên robosuite/MuJoCo,
   ghi episode vào DB. Xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - **Thu scripted tự động** cho 4 task: `lift`, `can`, `square`, `tool_hang`.
-- **Chấm nhãn tự động (MVP)** — xem [`docs/DATA_QUALITY.md`](docs/DATA_QUALITY.md).
+- **Chấm nhãn tự động** — xem [`docs/DATA_QUALITY.md`](docs/DATA_QUALITY.md).
+- **Huấn luyện và đánh giá** — BC / BC-RNN qua giao diện web, chạy được trên GPU
+  thuê ([`docs/runpod-integration.md`](docs/runpod-integration.md)); đánh giá bằng
+  rollout trong sim kèm video.
+- **Xuất dataset** RoboMimic HDF5 và LeRobot v3.
+- **App desktop** thu dữ liệu offline rồi đẩy lên máy chủ.
 
-Chưa làm: Training/Eval (PyTorch) và export LeRobot/RLDS/DVC.
-
-> Tài liệu kế hoạch giai đoạn đầu đã được gỡ khỏi repo — chúng mô tả kiến trúc dự
-> kiến (ROS2, DVC làm trục chính) chứ không phải thứ đã xây, nên để lại chỉ gây
-> hiểu nhầm. Lịch sử vẫn nằm trong git. Trạng thái thật: mục này và `docs/`.
+Chưa làm: phân quyền theo nhóm, chọn tập con dữ liệu để huấn luyện, quét siêu
+tham số.
 
 ### Task ToolHang
 
@@ -350,5 +347,7 @@ Ba camera, dùng **cùng một khung hình** ở cả Teleop lẫn lúc review:
 | `robot0_eye_in_hand` | Camera cổ tay, có sẵn |
 
 File mp4 được ghi **ngay lúc thu**, nên mở trang review không phải chờ render.
+Riêng `tool_hang` thu với bộ render tắt (episode dài, render lúc thu quá tốn) —
+video dựng sau bằng cách phát lại trạng thái đã lưu.
 
 ---
