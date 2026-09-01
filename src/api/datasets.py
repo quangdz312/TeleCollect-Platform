@@ -76,6 +76,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
+SCRIPTED_TASK_ALIASES = {
+    "lift_cube": "lift",
+    "pick_place_can": "can",
+    "nut_assembly_square": "square",
+}
+
+
+def _scripted_task(value: object) -> str:
+    """Return the task spelling stored by the scripted labeling workspace."""
+    normalized = str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    return SCRIPTED_TASK_ALIASES.get(normalized, normalized)
+
 
 def _legacy_hdf5_metadata(dataset: Dataset) -> tuple[str, list[dict], dict]:
     """Recover provenance stored inside HDF5 exports created before DB snapshots existed."""
@@ -132,7 +144,7 @@ async def _backfill_legacy_datasets(session: AsyncSession, datasets: list[Datase
 
 
 def _matches_scripted_export(score: dict, body: DatasetCreateRequest) -> bool:
-    if score.get("task") != body.task_names[0]:
+    if _scripted_task(score.get("task")) != _scripted_task(body.task_names[0]):
         return False
     if body.collection_batch_id:
         recorded_batch = score.get("provenance", {}).get("collection_batch_id")
@@ -163,6 +175,15 @@ async def create_dataset(
     """Chọn episode TRƯỚC khi đụng tới dataset trùng tên — nếu không có demo
     nào khớp thì trả 422 mà KHÔNG xoá mất dataset cũ (trường hợp overwrite).
     """
+    # The unified Raw UI displays robosuite-style names such as ``lift_cube``.
+    # Scripted score records use the simulator spelling (``lift``). Normalize
+    # scripted-only exports here so selection, provenance, training, and later
+    # evaluation all retain the canonical scripted task name.
+    if body.data_source == "scripted":
+        body = body.model_copy(
+            update={"task_names": [_scripted_task(task) for task in body.task_names]},
+        )
+
     query = select(Episode).where(Episode.status == DemoStatus.APPROVED)
     if body.episode_ids:
         query = query.where(Episode.id.in_(body.episode_ids))

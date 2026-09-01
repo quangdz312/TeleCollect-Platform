@@ -34,4 +34,9 @@ def build_lift_tool_context(
         adapt_observation=lift_observation,
         verbose=verbose,
         logger=logger,
+        # Keep recording through the operator's complete 30-step HOLD phase.
+        # At Lift's 20 Hz control rate this preserves roughly 1.5 seconds of a
+        # stable grasp, matching the collection used to export lift-v6.
+        post_success_steps=30,
+        finish_tool_after_success=True,
     )

@@ -34,6 +34,19 @@ def test_scripted_export_selects_only_requested_batch() -> None:
     )
 
 
+def test_scripted_export_accepts_raw_ui_task_alias() -> None:
+    request = _request("lift-scripted-v1.4-hold30").model_copy(
+        update={"task_names": ["lift_cube"]},
+    )
+    score = {
+        "task": "lift",
+        "recorded_success": True,
+        "provenance": {"collection_batch_id": "lift-scripted-v1.4-hold30"},
+    }
+
+    assert _matches_scripted_export(score, request)
+
+
 def test_batch_id_round_trips_from_dataset_metadata(tmp_path) -> None:
     path = tmp_path / "batch.hdf5"
     with h5py.File(path, "w") as handle:
