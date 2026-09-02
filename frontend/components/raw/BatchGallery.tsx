@@ -340,37 +340,27 @@ function DeleteDialog({
           as an unnamed batch.
         </p>
 
-        {/* Only teleop captures can be purged — scripted episodes live in the
-            labelling workspace as files, with no safe delete path from here. A
-            batch with no teleop therefore has nothing to offer, so it says so
-            instead of showing a checkbox that would delete nothing. */}
-        {batch.teleop > 0 ? (
-          <label className="mt-4 flex cursor-pointer gap-3 rounded-lg border border-ink-700 p-3 hover:border-bad-600/50">
-            <input
-              type="checkbox"
-              checked={purge}
-              onChange={(event) => setPurge(event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-bad-600"
-            />
-            <span className="text-sm">
-              <span className="font-semibold text-bad-600">
-                Also delete {batch.teleop.toLocaleString()} teleop{" "}
-                {batch.teleop === 1 ? "episode" : "episodes"} and their files
-              </span>
-              <span className="mt-1 block text-xs text-ink-400">
-                Cannot be undone.
-                {batch.scripted > 0
-                  ? ` The ${batch.scripted.toLocaleString()} scripted episodes are kept either way.`
-                  : ""}
-              </span>
+        {/* Both kinds of capture can be purged now: teleop episodes with their
+            directories, scripted ones out of the labelling workspace. Leaving
+            either behind means the batch comes back as an unnamed one, which
+            reads as the delete having failed. */}
+        <label className="mt-4 flex cursor-pointer gap-3 rounded-lg border border-ink-700 p-3 hover:border-bad-600/50">
+          <input
+            type="checkbox"
+            checked={purge}
+            onChange={(event) => setPurge(event.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-bad-600"
+          />
+          <span className="text-sm">
+            <span className="font-semibold text-bad-600">
+              Also delete {batch.episodes.toLocaleString()}{" "}
+              {batch.episodes === 1 ? "episode" : "episodes"} and their files
             </span>
-          </label>
-        ) : (
-          <p className="mt-4 rounded-lg border border-ink-700 bg-ink-850 p-3 text-xs text-ink-400">
-            All {batch.scripted.toLocaleString()} episodes here are scripted, so they
-            stay in the labelling workspace — only the batch record is deleted.
-          </p>
-        )}
+            <span className="mt-1 block text-xs text-ink-400">
+              Cannot be undone. Without this the batch returns without its name.
+            </span>
+          </span>
+        </label>
 
         {error ? (
           <div className="mt-3">

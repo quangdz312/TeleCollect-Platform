@@ -961,9 +961,11 @@ async def delete_collection_batch(
     nguyên và quay về trạng thái chưa đặt tên, đúng như `CollectionBatch` mô tả:
     bảng này không có khoá ngoại sang episode.
 
-    `purge_episodes=true` xoá thêm episode teleop của đợt thu này cùng file trên
-    đĩa. CHỈ teleop: episode scripted nằm trong workspace dạng file, không có
-    đường xoá an toàn từ đây, nên chúng luôn được giữ lại.
+    `purge_episodes=true` xoá thêm dữ liệu thật của đợt thu: episode teleop
+    cùng thư mục của chúng, và episode scripted trong workspace (demo trong
+    HDF5, video, điểm và nhãn). Không có phần thứ hai thì đợt thu chỉ mất tên
+    rồi hiện lại dưới dạng mã, vì trang Review dựng danh sách từ chính những
+    episode còn sót đó.
 
     Thứ tự giống `delete_demo`: commit DB trước rồi mới xoá thư mục. Thư mục xoá
     lỗi thì để lại file mồ côi (vô hại) còn hơn để row DB trỏ vào file đã mất.
@@ -983,6 +985,9 @@ async def delete_collection_batch(
         for episode in episodes:
             await session.delete(episode)
         purged = len(episode_ids)
+        # Việc nặng đồng bộ: mở từng file HDF5, xoá demo rồi chấm điểm lại cả
+        # kho. Chạy trong thread để không chặn event loop.
+        purged += await asyncio.to_thread(workspace().delete_batch, batch_id)
 
     if batch is not None:
         await session.delete(batch)

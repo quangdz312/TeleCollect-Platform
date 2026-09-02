@@ -308,6 +308,72 @@ class Workspace:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
         return record
 
+    # --- xoá ------------------------------------------------------------------
+
+    def delete_batch(self, collection_batch_id: str) -> int:
+        """Xoá hẳn một đợt thu khỏi workspace. Trả về số tập đã xoá.
+
+        Bảng `collection_batches` chỉ giữ tên và mô tả, không có khoá ngoại
+        sang dữ liệu, nên xoá dòng ở đó chỉ làm đợt thu mất tên chứ không mất
+        đi: `scores.jsonl` vẫn còn tập của nó và trang Review dựng lại đợt thu
+        từ chính chúng, lần này hiện mã thay cho tên. Muốn đợt thu biến mất
+        thật thì phải xoá ở đây, nơi dữ liệu thật sự nằm.
+
+        Một file HDF5 chứa nhiều demo và không phải demo nào cũng cùng một đợt
+        thu, nên xoá theo từng demo chứ không theo file. File nào hết demo thì
+        bỏ luôn — giữ lại một cái vỏ rỗng chỉ làm `rescore` phải mở ra rồi bỏ
+        qua mỗi lần chạy.
+        """
+        import h5py
+
+        doomed: dict[Path, list[str]] = {}
+        for record in self.scores():
+            if self._collection_batch(record) != collection_batch_id:
+                continue
+            episode_id = str(record["episode_id"])
+            source, _, demo = episode_id.partition("::")
+            try:
+                path = self.resolve_source(source)
+            except FileNotFoundError:
+                continue
+            doomed.setdefault(path, []).append(demo)
+
+        removed = 0
+        for path, demos in doomed.items():
+            with h5py.File(path, "a") as handle:
+                data = handle["data"]
+                for demo in demos:
+                    if demo in data:
+                        del data[demo]
+                        removed += 1
+                empty = not any(key.startswith("demo_") for key in data)
+            # Đóng file trước khi xoá: Windows khoá file đang mở.
+            if empty:
+                path.unlink()
+
+        for record in self.scores():
+            if self._collection_batch(record) != collection_batch_id:
+                continue
+            video = self.video_path(str(record["episode_id"]))
+            video.unlink(missing_ok=True)
+
+        if removed:
+            # `rescore` đọc lại từ các file còn trên đĩa, nên nó tự dọn
+            # `scores.jsonl`. Nhãn thì không, phải gỡ tay theo tập đã mất.
+            gone = {
+                str(record["episode_id"]) for record in self.scores()
+                if self._collection_batch(record) == collection_batch_id
+            }
+            self.rescore()
+            alive = {str(record["episode_id"]) for record in self.scores()}
+            labels = [
+                row for row in self.labels(latest_only=False)
+                if str(row.get("episode_id")) in alive
+            ]
+            _write_jsonl(self.labels_path, labels)
+            del gone
+        return removed
+
     # --- overview -----------------------------------------------------------
 
     @staticmethod

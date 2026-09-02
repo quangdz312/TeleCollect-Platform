@@ -993,10 +993,9 @@ async def test_delete_batch_with_purge_removes_teleop_episodes(
     db_session.expunge_all()
     assert await db_session.get(Episode, episode.id) is None
     assert not directory.exists()
-    # Episode scripted của batch-1 nằm trong workspace, không bị đụng tới.
-    still_there = (await client.get(BATCHES, headers=headers)).json()
-    assert [item["id"] for item in still_there] == ["batch-1"]
-    assert still_there[0]["scripted"] == 1
+    # Episode scripted của batch-1 cũng phải đi: để lại thì trang Review dựng
+    # lại đợt thu từ chúng, và người dùng bấm xoá mãi không hết.
+    assert (await client.get(BATCHES, headers=headers)).json() == []
 
 
 @pytest.mark.asyncio
