@@ -255,15 +255,24 @@ export function Modal({
   width?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  // Callers pass an inline arrow for onClose, so its identity changes on every
+  // render. Reading it through a ref keeps the Escape listener current without
+  // making it an effect dependency -- as a dependency it re-ran the effect on
+  // every keystroke, and the focus() below then stole focus from whatever
+  // input the user was typing into.
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") close.current();
     };
     window.addEventListener("keydown", onKey);
+    // Focus the panel once when it opens, so the dialog is reachable by
+    // keyboard; it must not run again while the user is typing.
     panel.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <div
