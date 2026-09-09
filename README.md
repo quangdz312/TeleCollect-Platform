@@ -26,6 +26,21 @@ The public landing page introduces the complete imitation-learning workflow. Its
 
 ![TeleCollect overview dashboard](docs/images/telecollect-overview.png)
 
+### Collect locally by hand or scripted policy
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/telecollect-manual-collection.png" alt="Manual teleoperation console with synchronized robot cameras"></td>
+    <td width="50%"><img src="docs/images/telecollect-scripted-collection.png" alt="Scripted episode collection configuration"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Manual and hand-camera teleoperation</strong></td>
+    <td align="center"><strong>Scripted batch collection</strong></td>
+  </tr>
+</table>
+
+Manual collection combines the main scene, overhead view, wrist camera, live robot state, and optional webcam hand tracking in one console. Scripted collection generates repeatable batches with configurable task, quality profile, episode count, and seed.
+
 ### Review, package, train, and evaluate
 
 <table>
